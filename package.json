@@ -1,0 +1,31 @@
+{
+	"name": "abilities",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Skills and tools for AI agents",
+	"workspaces": [
+		"packages/*"
+	],
+	"scripts": {
+		"build": "nix build --no-link .#skills .#opencode-agents .#limitless .#linear-mcp .#agent-browser .#effect-solutions",
+		"ci": "bun run lint && bun run typecheck && bun run test && nix flake check && bun run build",
+		"format": "bun run format:biome && bun run format:nix && bun run format:md",
+		"format:biome": "biome check --write .",
+		"format:md": "markdownlint-cli2 --fix 'README.md' 'opencode/**/*.md' 'skills/**/*.md' 'nix/skills/**/*.md'",
+		"format:nix": "git ls-files '*.nix' -z | xargs -0 nixfmt",
+		"lint": "bun run lint:biome && bun run lint:nix && bun run lint:md && bun run lint:actions",
+		"lint:actions": "actionlint",
+		"lint:biome": "biome check .",
+		"lint:md": "markdownlint-cli2 'README.md' 'opencode/**/*.md' 'skills/**/*.md' 'nix/skills/**/*.md'",
+		"lint:nix": "git ls-files '*.nix' -z | xargs -0 nixfmt --check && statix check . && deadnix --fail .",
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.4",
+		"@types/node": "^25.3.3",
+		"typescript": "^5.4.0",
+		"vitest": "^3.0.0"
+	},
+	"dependencies": {}
+}

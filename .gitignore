@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# TypeScript, bundler, and test outputs
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vite/
+.vitest/
+
+# Nix and direnv local state
+.direnv/
+.envrc
+result
+result-*
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+.dev.vars
+*.local
+
+# Repo-local scratch data
+data/
+worktrees/
+.sisyphus/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

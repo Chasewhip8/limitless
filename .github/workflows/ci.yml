@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-build:
+    name: Lint, test, and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Install JS dependencies
+        run: nix develop --command bun install --frozen-lockfile
+
+      - name: Lint and format-check
+        run: nix develop --command bun run lint
+
+      - name: Typecheck
+        run: nix develop --command bun run typecheck
+
+      - name: Test
+        run: nix develop --command bun run test
+
+      - name: Check flake
+        run: nix flake check
+
+      - name: Build packages
+        run: nix develop --command bun run build

@@ -1,0 +1,23 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "preserve",
+		"moduleResolution": "bundler",
+		"moduleDetection": "force",
+		"verbatimModuleSyntax": true,
+		"rewriteRelativeImportExtensions": true,
+		"lib": ["ES2022"],
+		"types": ["node"],
+		"strict": true,
+		"exactOptionalPropertyTypes": true,
+		"noUncheckedIndexedAccess": true,
+		"incremental": true,
+		"sourceMap": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true
+	},
+	"include": ["src/**/*", "packages/*/src/**/*", "packages/*/index.ts", "test/**/*"],
+	"exclude": ["node_modules"]
+}
