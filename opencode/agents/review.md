@@ -1,8 +1,8 @@
 ---
 description: Read-only final review agent for correctness, constraints, security, maintainability, and pass/fail judgment; no edits.
 mode: subagent
-model: anthropic/claude-opus-4-7
-reasoningEffort: max
+model: openai/gpt-5.5
+reasoningEffort: xhigh
 permission:
     edit: deny
     bash: deny
