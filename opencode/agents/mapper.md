@@ -54,14 +54,29 @@ For each user-facing question, include:
 - Your recommended answer.
 - What changes if the user chooses differently.
 
-Example shape:
+Example opencode questions tool call:
 
-<question>
-  <decision>What deployment target should this optimize for?</decision>
-  <why_it_matters>This affects architecture, validation, and rollout sequencing.</why_it_matters>
-  <recommended_answer>Optimize for the existing production path unless there is a known migration goal.</recommended_answer>
-  <if_different>Choosing a new target would add migration and compatibility work.</if_different>
-</question>
+```json
+{
+  "questions": [
+    {
+      "header": "Deployment target",
+      "question": "What deployment target should this optimize for? This affects architecture, validation, and rollout sequencing. I recommend optimizing for the existing production path unless there is a known migration goal; choosing a new target would add migration and compatibility work.",
+      "multiple": false,
+      "options": [
+        {
+          "label": "Existing production (Recommended)",
+          "description": "Optimize for the current production path and avoid unnecessary migration work."
+        },
+        {
+          "label": "New target",
+          "description": "Plan for migration and compatibility work for the new deployment target."
+        }
+      ]
+    }
+  ]
+}
+```
 
 Always use the question tool for user-facing questions.
 
