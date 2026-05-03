@@ -8,10 +8,7 @@
       url = "github:get-convex/convex-agent-plugins";
       flake = false;
     };
-    opencode = {
-      url = "github:anomalyco/opencode/v1.14.33";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    opencode.url = "github:anomalyco/opencode/v1.14.33";
   };
 
   outputs =
