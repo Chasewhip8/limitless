@@ -107,7 +107,7 @@ in
     opencode = {
       package = lib.mkOption {
         type = lib.types.package;
-        default = opencode.packages.${system}.default;
+        inherit (opencode.packages.${system}) default;
         description = "OpenCode package to install. Defaults to the packaged OpenCode GitHub flake.";
       };
 
