@@ -1,20 +1,8 @@
 # Abilities
 
-Nix/Home Manager flake for a batteries-included OpenCode agent environment.
+> A Home Manager module for a ready-to-use OpenCode agent workspace.
 
-`programs.limitless.enable = true` installs OpenCode, agent prompts, reusable skills, local code-intelligence tools, browser automation support, default MCP configuration, and language servers for common project types.
-
-## Contents
-
-| Area | What is included |
-| --- | --- |
-| Home Manager module | `programs.limitless` with OpenCode, agents, skills, plugins, MCPs, and LSP defaults |
-| OpenCode agents | `limitless`, `engineer`, `frontend`, `explore`, `strategy`, `review`, `mapper`, `librarian`, `critique` |
-| Skills | architecture docs, Effect patterns, design grilling, service design, TypeScript patterns, browser automation |
-| Plugins | Limitless local tooling plugin; optional Linear MCP plugin |
-| Nix packages | `abilities-skills`, `abilities-opencode-agents`, `opencode-limitless`, `linear-mcp`, `agent-browser`, `effect-solutions` |
-
-## Quick start
+## Use it
 
 ```nix
 {
@@ -24,121 +12,74 @@ Nix/Home Manager flake for a batteries-included OpenCode agent environment.
     homeConfigurations.me = home-manager.lib.homeManagerConfiguration {
       modules = [
         abilities.homeModules.default
-        {
-          programs.limitless.enable = true;
-        }
+        { programs.limitless.enable = true; }
       ];
     };
   };
 }
 ```
 
-## Defaults
+## Features
 
-Enabling `programs.limitless` configures:
+- **One module to enable**: `programs.limitless.enable = true` wires OpenCode, agents, skills, plugins, MCPs, and language servers together.
+- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent and installs the packaged specialist subagents for implementation, research, planning, critique, and review.
+- **Reusable skills**: local skills and CLI-backed skills are installed into the agent skills directory for architecture docs, TypeScript/service patterns, Effect guidance, and browser automation.
+- **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
+- **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
+- **MCP defaults**: Context7 is enabled out of the box; Linear MCP remains opt-in and reads `LINEAR_API_KEY` from the OpenCode process environment.
+- **Safer agent permissions**: common work is allowed, while credential access, destructive git operations, broad deletion, publishing, privilege escalation, and infrastructure mutations ask first.
+- **Optional service mode**: OpenCode can run as a user service with a shell alias that attaches from the current directory.
 
-- the packaged OpenCode GitHub flake as the OpenCode package.
-- `~/.config/opencode/opencode.json` with `limitless` as the default agent.
-- packaged OpenCode agents in `~/.config/opencode/agents`.
-- packaged skills in `~/.agents/skills`, including CLI-backed skills from their owning packages.
-- the Limitless plugin in `~/.config/opencode/plugins`.
-- Context7 MCP as a remote MCP server.
-- language servers for TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML.
-- `agent-browser` and `effect-solutions` helper CLIs.
-
-The default OpenCode permissions are intentionally agent-friendly: broad read/edit/bash access with prompts for known destructive, credential-sensitive, publishing, and infrastructure commands. Override `programs.limitless.opencode.permission` for stricter environments.
-
-## Common configuration
-
-### Pin or override OpenCode
+## Default configuration
 
 ```nix
 programs.limitless = {
   enable = true;
-  opencode.package = pkgs.opencode;
-};
-```
 
-### Extend generated OpenCode settings
-
-`opencode.settings` is deep-merged over module defaults.
-
-```nix
-programs.limitless.opencode.settings = {
-  permission.bash."git push --force*" = "deny";
-};
-```
-
-### Enable Linear MCP
-
-```nix
-programs.limitless.mcp.linear.enable = true;
-```
-
-The Linear plugin reads `LINEAR_API_KEY` from the OpenCode process environment.
-
-### Run OpenCode as a service
-
-```nix
-programs.limitless = {
-  enable = true;
-  opencode.service.enable = true;
-};
-```
-
-This creates a `opencode.service` systemd user service running `opencode serve` on `127.0.0.1:4096` and a shell alias named `oc`. Running `oc` attaches to that server with `--dir "$PWD"`, so each shell starts the agent in its current directory.
-
-Customize the listen address or alias with `opencode.service.hostname`, `opencode.service.port`, and `opencode.service.alias`.
-
-### Customize LSPs
-
-```nix
-programs.limitless.lsp = {
-  enable = true;
-  servers.yaml.enable = false;
-  extraServers.rust = {
-    command = "${pkgs.rust-analyzer}/bin/rust-analyzer";
-    args = [];
+  opencode = {
+    configDir = ".config/opencode";
+    extraAgentsFile = null;
+    settings = {};
+    service = {
+      enable = false;
+      hostname = "127.0.0.1";
+      port = 4096;
+      alias = "oc";
+    };
   };
-  extraPackages = [ pkgs.rust-analyzer ];
+
+  skills = {
+    enable = true;
+    directory = ".agents/skills";
+  };
+
+  agents.enable = true;
+  plugins.limitless.enable = true;
+
+  lsp = {
+    enable = true;
+    extraServers = {};
+    extraPackages = [];
+    servers = {
+      biome.enable = true;
+      json.enable = true;
+      marksman.enable = true;
+      nixd.enable = true;
+      taplo.enable = true;
+      typescript.enable = true;
+      yaml.enable = true;
+    };
+  };
+
+  mcp = {
+    context7.enable = true;
+    linear.enable = false;
+  };
 };
 ```
 
-Every built-in LSP exposes `enable`, `package`, `command`, `args`, `extensions`, and `env`.
+## Maintainers
 
-## Flake exports
+Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate.
 
-- `homeModules.default` — Home Manager module for `programs.limitless`.
-- `overlays.default` — overlay exposing packaged agents, skills, plugins, and tools.
-- `packages.${system}.skills`
-- `packages.${system}.opencode-agents`
-- `packages.${system}.limitless`
-- `packages.${system}.linear-mcp`
-- `packages.${system}.agent-browser`
-- `packages.${system}.effect-solutions`
-
-## Development
-
-```sh
-nix develop
-bun install
-bun run lint
-bun run format
-bun run typecheck
-bun run test
-bun run build
-```
-
-Use the Nix dev shell for Bun, Node, lint/format tools, packaging dependencies, `agent-browser`, and `effect-solutions`.
-
-Quality gates:
-
-- `bun run lint` checks Biome-supported files, Nix formatting/lints/dead code, and Markdown structure.
-- `bun run format` applies Biome and `nixfmt` formatting.
-- `bun run ci` runs lint, typecheck, tests, `nix flake check`, and package builds.
-
-Run the full local CI equivalent with:
-
-```sh
-bun run ci
-```
+For structure and implementation details, see `ARCHITECTURE.md` and the module options in `nix/modules/home.nix`.
