@@ -25,6 +25,10 @@ let
   enabledLsp = cfg.enable && cfg.lsp.enable;
   enabledContext7 = cfg.enable && cfg.mcp.context7.enable;
   enabledLinear = cfg.enable && cfg.mcp.linear.enable;
+  enabledOpencodeService = cfg.enable && cfg.opencode.service.enable;
+
+  opencodeServiceUrl = "http://${cfg.opencode.service.hostname}:${toString cfg.opencode.service.port}";
+  opencodeAttachCommand = "${cfg.opencode.package}/bin/opencode attach ${opencodeServiceUrl} --dir \"$PWD\"";
 
   agentBrowserPackage = self.packages.${system}."agent-browser";
   effectSolutionsPackage = self.packages.${system}."effect-solutions";
@@ -189,6 +193,28 @@ in
         default = null;
         example = lib.literalExpression "./AGENTS.local.md";
         description = "Optional additional AGENTS.md content appended after the packaged instructions.";
+      };
+
+      service = {
+        enable = lib.mkEnableOption "a persistent OpenCode server with an attaching shell alias";
+
+        hostname = lib.mkOption {
+          type = lib.types.str;
+          default = "127.0.0.1";
+          description = "Hostname for the OpenCode server to bind.";
+        };
+
+        port = lib.mkOption {
+          type = lib.types.port;
+          default = 4096;
+          description = "Port for the OpenCode server to listen on.";
+        };
+
+        alias = lib.mkOption {
+          type = lib.types.str;
+          default = "oc";
+          description = "Shell alias that attaches to the OpenCode server using the current directory.";
+        };
       };
     };
 
@@ -539,6 +565,13 @@ in
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
       {
+        assertions = [
+          {
+            assertion = !enabledOpencodeService || pkgs.stdenv.isLinux;
+            message = "programs.limitless.opencode.service.enable currently requires Linux systemd user services.";
+          }
+        ];
+
         home = {
           packages = [ cfg.opencode.package ];
           file = {
@@ -579,6 +612,22 @@ in
       })
       (lib.mkIf enabledLsp {
         home.packages = lspPackages;
+      })
+      (lib.mkIf enabledOpencodeService {
+        home.shellAliases.${cfg.opencode.service.alias} = lib.mkDefault opencodeAttachCommand;
+      })
+      (lib.mkIf (enabledOpencodeService && pkgs.stdenv.isLinux) {
+        systemd.user.services.opencode = {
+          Unit.Description = "OpenCode server";
+
+          Service = {
+            ExecStart = "${cfg.opencode.package}/bin/opencode serve --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
+            Restart = "on-failure";
+            RestartSec = "5s";
+          };
+
+          Install.WantedBy = [ "default.target" ];
+        };
       })
       (lib.mkIf enabledLinear {
         home.file."${opencodePluginDir}/package.json".text = ''{"type":"module"}'';

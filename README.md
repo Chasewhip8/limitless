@@ -77,6 +77,19 @@ programs.limitless.mcp.linear.enable = true;
 
 The Linear plugin reads `LINEAR_API_KEY` from the OpenCode process environment.
 
+### Run OpenCode as a service
+
+```nix
+programs.limitless = {
+  enable = true;
+  opencode.service.enable = true;
+};
+```
+
+This creates a `opencode.service` systemd user service running `opencode serve` on `127.0.0.1:4096` and a shell alias named `oc`. Running `oc` attaches to that server with `--dir "$PWD"`, so each shell starts the agent in its current directory.
+
+Customize the listen address or alias with `opencode.service.hostname`, `opencode.service.port`, and `opencode.service.alias`.
+
 ### Customize LSPs
 
 ```nix
