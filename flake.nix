@@ -8,6 +8,10 @@
       url = "github:get-convex/convex-agent-plugins";
       flake = false;
     };
+    opencode = {
+      url = "github:anomalyco/opencode/v1.14.33";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -16,6 +20,7 @@
       nixpkgs,
       flake-utils,
       convex-agent-plugins,
+      opencode,
     }:
     let
       eachSystem = flake-utils.lib.eachDefaultSystem (
@@ -80,7 +85,7 @@
     in
     eachSystem
     // {
-      homeModules.default = import ./nix/modules/home.nix { inherit self; };
+      homeModules.default = import ./nix/modules/home.nix { inherit self opencode; };
       overlays.default = final: _prev: {
         abilities-skills = self.packages.${final.stdenv.hostPlatform.system}.skills;
         abilities-opencode-agents = self.packages.${final.stdenv.hostPlatform.system}."opencode-agents";

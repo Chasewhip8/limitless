@@ -1,4 +1,4 @@
-{ self }:
+{ self, opencode }:
 {
   config,
   lib,
@@ -107,8 +107,8 @@ in
     opencode = {
       package = lib.mkOption {
         type = lib.types.package;
-        default = pkgs.opencode;
-        description = "OpenCode package to install.";
+        default = opencode.packages.${system}.default;
+        description = "OpenCode package to install. Defaults to the packaged OpenCode GitHub flake.";
       };
 
       configDir = lib.mkOption {

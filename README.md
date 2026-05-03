@@ -37,7 +37,7 @@ Nix/Home Manager flake for a batteries-included OpenCode agent environment.
 
 Enabling `programs.limitless` configures:
 
-- `pkgs.opencode` as the OpenCode package.
+- the packaged OpenCode GitHub flake as the OpenCode package.
 - `~/.config/opencode/opencode.json` with `limitless` as the default agent.
 - packaged OpenCode agents in `~/.config/opencode/agents`.
 - packaged skills in `~/.agents/skills`, including CLI-backed skills from their owning packages.
