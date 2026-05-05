@@ -1,4 +1,4 @@
-# Abilities
+# Limitless
 
 > A Home Manager module for a ready-to-use OpenCode agent workspace.
 

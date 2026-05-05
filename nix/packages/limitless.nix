@@ -11,7 +11,7 @@ let
 
     buildPhase = ''
       export HOME=$TMPDIR
-      bun install --cwd packages/limitless --no-progress --frozen-lockfile --ignore-scripts
+      bun install --cwd packages/limitless --no-progress --frozen-lockfile --ignore-scripts --production --omit optional
     '';
 
     installPhase = ''
@@ -20,7 +20,7 @@ let
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
     '';
 
-    outputHash = "sha256-iwTdz9ZWm0QLNBaRAe5sCEGF6xaE0u5Wm/xn/zlhi2o=";
+    outputHash = "sha256-l8cvLStiMGS8f3LZR/yqe23bf9qJEgLf/OYumcMFW+w=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
