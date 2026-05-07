@@ -27,6 +27,8 @@ Before editing, identify only the relevant:
 
 Reuse existing components and utilities before creating new ones. Preserve the product's design language unless the caller explicitly asks for a new visual system.
 
+Do not avoid a necessary component, state, routing, or styling refactor because it touches multiple files. Use coherent phases, tolerate temporary UI breakage during implementation, and finish with an accessible, responsive, visually consistent result.
+
 ## Implementation Standards
 
 - Use semantic HTML, keyboard support, visible focus states, correct labels, and ARIA only where needed.

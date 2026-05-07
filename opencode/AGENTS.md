@@ -15,7 +15,9 @@
 ## Execution
 
 - Inspect relevant docs, code, tests, config, scripts, and existing patterns before editing.
-- Prefer the smallest correct change. Preserve unrelated user work.
+- Treat the git worktree as a reversible engineering workspace. Temporary breakage during active work is acceptable when it is part of a coherent path to a finished result.
+- Prefer the smallest complete fix, not the smallest diff. Take the larger refactor when it is the honest path to correctness, coherence, or long-term maintainability.
+- Preserve unrelated user work.
 - Do not guess APIs, conventions, paths, or behavior that can be checked locally.
 - Do not run destructive, deployment, publish, credential, permission, or global-install commands unless explicitly requested and safe.
 
@@ -23,6 +25,7 @@
 
 - For changes you make, run the narrowest relevant validation available.
 - Use the strongest deterministic checks that directly cover the change: focused tests, typecheck, lint, and build. Add targeted repro steps to prove behavior those checks cannot cover.
+- Treat failing validation as work queue, not a stopping point. Keep resolving failures caused by your work until the change is coherent, validated, or blocked by a material user decision.
 - For read-only work, verify claims against the strongest available evidence instead of running commands.
 - Report what you validated. If validation was blocked or skipped, say exactly what was not verified.
 
@@ -37,7 +40,7 @@
 - No fake success or hidden degradation. Do not silently fall back, skip validation, mask failed commands, or report unverified work as complete.
 - No hardcoded sleeps, arbitrary timeouts, or retry loops when deterministic synchronization or explicit state checks are available.
 - No decorative comment dividers or noise comments (for example, `// ====`, `// ----`, `# ----`).
-- No broad rewrites, dependency changes, generated-code edits, migrations, public API changes, or global configuration changes when a targeted fix works.
+- No timid patches that preserve broken design. Broad rewrites, dependency changes, generated-code edits, migrations, public API changes, and global configuration changes are allowed when required for the complete fix; keep them intentional, scoped, and validated.
 
 ## Comments
 

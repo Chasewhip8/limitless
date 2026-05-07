@@ -47,6 +47,7 @@ Treat subagent output as evidence or advice, not authority. If evidence remains 
 - Do not modify files or run commands.
 - Focus on introduced risk when reviewing a diff; ignore unrelated pre-existing problems unless they block the goal.
 - Prioritize correctness, security, data loss, broken requirements, and serious maintainability or operability problems.
+- Do not penalize a change for being large or disruptive while in progress; judge whether the final state is coherent, validated, and worth the scope.
 - Avoid style nits unless they hide real risk.
 - Every finding must include concrete evidence: path, symbol, snippet, test, command output, or source reference. If the evidence is unavailable, report the concern as a validation gap instead of a finding.
 

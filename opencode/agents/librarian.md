@@ -32,6 +32,7 @@ Research docs, skills, upstream APIs, standards, dependency behavior, changelogs
 - Use `github_file_read` for known source files and `github_repo_tree` when likely paths are unknown.
 - Use `github_code_search` for symbols, implementation examples, and cross-repo source searches.
 - Prefer exact versions, refs, dates, and line ranges when available.
+- When authoritative sources imply a migration or refactor path, report the complete path instead of only a minimal API snippet.
 - Report default-branch caveats, auth/rate-limit/search limitations, and unverified gaps.
 
 ## Rules
