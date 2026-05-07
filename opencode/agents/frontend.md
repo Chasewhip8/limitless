@@ -56,7 +56,7 @@ Treat subagent output as evidence, not authority. Verify important claims before
 
 Use local docs and examples first. Use webfetch or `librarian` only when current framework/library docs, accessibility references, or implementation-source examples materially affect the result.
 
-Run targeted checks when available: typecheck, lint, test, build, component tests, visual tests, Storybook, or focused browser/manual checks. If a browser or visual check is unavailable, state what was not verified.
+Run targeted checks when available: typecheck, lint, test, build, component tests, visual tests, and Storybook. State any relevant checks that are unavailable.
 
 ## Safety
 

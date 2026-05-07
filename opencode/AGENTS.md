@@ -1,6 +1,4 @@
-<universal_rules>
-
-## Universal Rules
+# Universal Rules
 
 ## Response Style
 
@@ -9,25 +7,23 @@
 - Be direct and candid. Challenge ideas honestly.
 - State uncertainty plainly. Do not bluff.
 
-## Questions
+## Evidence
 
-- Use the `question` tool for clarifying questions.
-- Ask only when missing information would materially change the result, implementation, or risk.
-- Batch related questions into one tool interaction when possible.
-- Do not ask for information already present in the prompt, repo, or local reference files.
-- If a reasonable default is low-risk and reversible, state the assumption briefly and proceed.
-- If a better approach appears mid-task, switch without asking unless the choice depends on user preference or materially changes scope, risk, or cost.
+- Build from local evidence first. Treat repo docs, code, tests, config, scripts, source references, and loaded skills as stronger than assumptions.
+- Separate confirmed facts from inference, cite exact paths, symbols, and source references when useful, and state gaps instead of overstating certainty.
 
 ## Execution
 
-- Keep scope tight. Prefer the smallest effective change.
-- Inspect existing code, scripts, and patterns before inventing new ones.
-- Do not guess library APIs or project conventions when they can be checked locally.
+- Inspect relevant docs, code, tests, config, scripts, and existing patterns before editing.
+- Prefer the smallest correct change. Preserve unrelated user work.
+- Do not guess APIs, conventions, paths, or behavior that can be checked locally.
+- Do not run destructive, deployment, publish, credential, permission, or global-install commands unless explicitly requested and safe.
 
 ## Validation
 
-- Before finishing, run the narrowest relevant validation available.
-- Prefer deterministic checks: focused tests, typecheck, lint, build, or targeted repro steps.
+- For changes you make, run the narrowest relevant validation available.
+- Use the strongest deterministic checks that directly cover the change: focused tests, typecheck, lint, and build. Add targeted repro steps to prove behavior those checks cannot cover.
+- For read-only work, verify claims against the strongest available evidence instead of running commands.
 - Report what you validated. If validation was blocked or skipped, say exactly what was not verified.
 
 ## Skills
@@ -36,13 +32,12 @@
 
 ## Forbidden Patterns
 
-- No language, type, lint, or safety escape hatches that bypass correctness. Avoid unchecked casts, blanket type erasure, force unwraps, suppressed diagnostics, disabled checks, ignored linter rules, broad warning suppressions, and equivalent shortcuts. Fix the underlying issue, or isolate and justify the exception.
-- No swallowed errors: empty `catch`/`except`/`rescue` blocks, bare `except`, ignored promises or tasks, ignored command failures, or catch-all handlers that hide defects. Handle, narrow, propagate, or document the intentional exception.
+- No language, type, lint, or safety escape hatches that bypass correctness. Avoid unchecked casts, blanket type erasure, force unwraps, suppressed diagnostics, disabled checks, ignored linter rules, broad warning suppressions, and equivalent shortcuts. Fix the underlying issue. If an exception is truly required, isolate the minimum scope and justify why correctness is preserved.
+- No swallowed errors: empty `catch`/`except`/`rescue` blocks, bare `except`, ignored promises or tasks, ignored command failures, or catch-all handlers that hide defects. Handle, narrow, and propagate errors so failures remain visible. Document only intentional, harmless exceptions at the point they are proven safe.
 - No fake success or hidden degradation. Do not silently fall back, skip validation, mask failed commands, or report unverified work as complete.
 - No hardcoded sleeps, arbitrary timeouts, or retry loops when deterministic synchronization or explicit state checks are available.
 - No decorative comment dividers or noise comments (for example, `// ====`, `// ----`, `# ----`).
-- No broad rewrites, dependency changes, generated-code edits, or global configuration changes when a targeted fix works.
-- No speculative APIs, conventions, paths, or behavior when they can be checked locally.
+- No broad rewrites, dependency changes, generated-code edits, migrations, public API changes, or global configuration changes when a targeted fix works.
 
 ## Comments
 
@@ -53,5 +48,3 @@
 ## Bugfixing
 
 Prefer deleting code over adding code. Assume the bug is in existing code.
-
-</universal_rules>

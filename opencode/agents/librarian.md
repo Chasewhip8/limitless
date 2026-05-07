@@ -24,7 +24,7 @@ Research docs, skills, upstream APIs, standards, dependency behavior, changelogs
 1. Local repo guidance supplied by the caller: docs, package manifests, lockfiles, examples, comments, tests, and config.
 2. Official docs, standards, API references, release notes, and changelogs.
 3. Official source code, configured private repositories, or exact repo/path/ref from the caller.
-4. Reputable secondary sources or broad public examples only when primary sources are absent or the caller explicitly asks.
+4. Reputable secondary sources and broad public examples are supporting context only; label them non-authoritative and use them only when the caller explicitly asks for examples beyond primary sources.
 
 ## Method
 

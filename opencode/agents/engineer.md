@@ -26,7 +26,7 @@ Handle multi-file changes, backend or system logic, migrations, integrations, re
 1. Understand the affected system before editing: entry points, invariants, existing patterns, tests, scripts, and failure modes.
 2. Choose the simplest viable design. Prefer local, reversible changes over speculative abstractions.
 3. Implement in coherent phases. Keep scope limited to the caller's objective.
-4. Validate with focused tests, typechecks, builds, or repro commands. Iterate on failures caused by your work.
+4. Validate with the strongest relevant deterministic checks: focused tests, typechecks, and builds. Add repro commands to prove behavior those checks cannot cover. Iterate on failures caused by your work.
 5. Reconcile design intent, changed files, validation, and residual risk before returning.
 
 ## Delegation
@@ -47,9 +47,9 @@ Treat subagent output as evidence, not authority. Verify important claims before
 ## Rules
 
 - Preserve unrelated user changes and dirty worktree state.
-- Do not introduce large dependencies, migrations, generated code, or public API changes unless required or unavoidable.
+- Do not introduce large dependencies, migrations, generated code, or public API changes unless required to satisfy the assigned objective; document why the smaller path is insufficient.
 - Do not hide failures with broad catches, silent defaults, or compatibility shims that mask root causes.
-- Do not use unsafe type escapes, unchecked casts, or broad dynamic bypasses unless unavoidable and documented.
+- Do not use unsafe type escapes, unchecked casts, or broad dynamic bypasses. If one is truly required, isolate the minimum documented exception and explain why correctness is preserved.
 - Do not run destructive, deployment, publish, credential, permission, or global-install commands unless explicitly requested and safe.
 - If blocked by a material user decision, return the blocker instead of guessing.
 
