@@ -6,7 +6,7 @@
 
 - Be concise.
 - Skip pleasantries, filler, and repetition.
-- Be direct and candid. Critique ideas honestly.
+- Be direct and candid. Challenge ideas honestly.
 - State uncertainty plainly. Do not bluff.
 
 ## Questions

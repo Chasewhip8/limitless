@@ -18,6 +18,12 @@
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true
 	},
-	"include": ["src/**/*", "packages/*/src/**/*", "packages/*/index.ts", "test/**/*"],
+	"include": [
+		"src/**/*",
+		"packages/*/src/**/*",
+		"packages/*/index.ts",
+		"packages/*/test/**/*",
+		"test/**/*"
+	],
 	"exclude": ["node_modules"]
 }

@@ -87,6 +87,17 @@ let
 
   opencodeConfig = lib.recursiveUpdate defaultOpencodeConfig cfg.opencode.settings;
 
+  limitlessPluginOptions = {
+    github = {
+      inherit (cfg.github)
+        enable
+        tokenEnv
+        allowedRepos
+        allowUnrestrictedRepos
+        ;
+    };
+  };
+
   lspPackages =
     lib.optional cfg.lsp.servers.biome.enable cfg.lsp.servers.biome.package
     ++ lib.optional cfg.lsp.servers.json.enable cfg.lsp.servers.json.package
@@ -263,6 +274,36 @@ in
         type = lib.types.package;
         default = self.packages.${system}.limitless;
         description = "Package containing the Limitless OpenCode plugin.";
+      };
+    };
+
+    github = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Enable GitHub remote code research tools.";
+      };
+
+      tokenEnv = lib.mkOption {
+        type = lib.types.str;
+        default = "GITHUB_TOKEN";
+        description = "Environment variable read by OpenCode for GitHub API authentication.";
+      };
+
+      allowedRepos = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [
+          "owner/repo"
+          "org/service"
+        ];
+        description = "Optional repository allowlist for remote code tools.";
+      };
+
+      allowUnrestrictedRepos = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Allow GitHub tools to access any repository visible to the configured token when allowedRepos is empty.";
       };
     };
 
@@ -570,6 +611,11 @@ in
             assertion = !enabledOpencodeService || pkgs.stdenv.isLinux;
             message = "programs.limitless.opencode.service.enable currently requires Linux systemd user services.";
           }
+          {
+            assertion =
+              !cfg.github.enable || cfg.github.allowedRepos != [ ] || cfg.github.allowUnrestrictedRepos;
+            message = "programs.limitless.github.allowedRepos must be non-empty unless programs.limitless.github.allowUnrestrictedRepos is true.";
+          }
         ];
 
         home = {
@@ -606,7 +652,24 @@ in
               dependencies."@opencode-ai/plugin" = "1.14.25";
             };
             "${opencodePluginDir}/package.json".text = ''{"type":"module"}'';
-            "${opencodePluginDir}/limitless.js".source = "${cfg.plugins.limitless.package}/limitless.js";
+            "${opencodePluginDir}/limitless.js".text = ''
+              import plugin from "${cfg.plugins.limitless.package}/limitless.js";
+
+              const generatedOptions = ${builtins.toJSON limitlessPluginOptions};
+              const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+
+              export default (input, options = {}) => {
+                const base = object(options);
+                const github = object(base.github);
+                return plugin(input, {
+                  ...base,
+                  github: {
+                    ...generatedOptions.github,
+                    ...github,
+                  },
+                });
+              };
+            '';
           };
         };
       })

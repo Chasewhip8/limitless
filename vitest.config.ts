@@ -4,7 +4,7 @@ export default defineConfig({
 	test: {
 		globals: false,
 		include: ['test/**/*.test.ts', 'packages/*/test/**/*.test.ts'],
-		passWithNoTests: true,
+		passWithNoTests: false,
 		pool: 'forks',
 		poolOptions: {
 			forks: {

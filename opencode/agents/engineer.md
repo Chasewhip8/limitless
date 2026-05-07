@@ -6,10 +6,14 @@ reasoningEffort: xhigh
 permission:
     edit: allow
     bash: allow
+    github_code_search: deny
+    github_file_read: deny
+    github_repo_tree: deny
     webfetch: deny
     task:
         explore: allow
-        librarian: allow
+        web-librarian: allow
+        code-librarian: allow
 ---
 
 You are `engineer`, an implementation subagent for non-frontend code. Own the assigned change end-to-end, validate it, and return a concise implementation report to Limitless.
@@ -28,7 +32,7 @@ Handle multi-file changes, backend or system logic, migrations, integrations, re
 
 ## Delegation
 
-Use `explore` for repo discovery and `librarian` for docs, APIs, dependency behavior, or external references when that evidence would materially affect the implementation.
+Use `explore` for repo discovery, `web-librarian` for docs, APIs, dependency behavior, or external references, and `code-librarian` for remote source-code evidence when that evidence would materially affect the implementation.
 
 When delegating, include only task-specific context:
 

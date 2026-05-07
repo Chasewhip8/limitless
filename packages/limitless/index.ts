@@ -1,6 +1,15 @@
 import path from 'node:path'
-import { type Plugin, tool } from '@opencode-ai/plugin'
+import { type Plugin, type PluginOptions, type ToolContext, tool } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
+import {
+	GitHubCodeSearchInput,
+	GitHubFileReadInput,
+	GitHubRepoTreeInput,
+	githubCodeSearch,
+	githubFileRead,
+	githubRepoTree,
+	normalizeGitHubPluginConfig,
+} from './github'
 import {
 	LspReferencesInput,
 	LspRenameInput,
@@ -12,10 +21,13 @@ import {
 import {
 	type CommandResult,
 	DEFAULT_TIMEOUT_MS,
+	describeUnknown,
 	executeTool,
 	findExecutable,
 	findUp,
 	runCommand,
+	ToolInputError,
+	workspacePath,
 	workspaceRoot,
 } from './shared'
 
@@ -54,20 +66,40 @@ const DiagnosticsInput = Schema.Struct({
 
 type DiagnosticsInput = typeof DiagnosticsInput.Type
 
-type SkippedCheck = {
+export type SkippedCheck = {
 	readonly name: string
 	readonly ok: false
 	readonly skipped: true
 	readonly reason: string
 }
 
-type ExecutedCheck = CommandResult & {
+export type ExecutedCheck = CommandResult & {
 	readonly name: string
 	readonly command: string
 	readonly config: string
 }
 
-type DiagnosticCheck = SkippedCheck | ExecutedCheck
+export type DiagnosticCheck = SkippedCheck | ExecutedCheck
+
+export type DiagnosticsStatus = 'passed' | 'failed' | 'partial' | 'skipped'
+
+export type DiagnosticsResult = {
+	readonly ok: boolean
+	readonly status: DiagnosticsStatus
+	readonly checks: ReadonlyArray<DiagnosticCheck>
+}
+
+function isSkippedCheck(check: DiagnosticCheck): check is SkippedCheck {
+	return 'skipped' in check && check.skipped
+}
+
+export function summarizeDiagnostics(checks: ReadonlyArray<DiagnosticCheck>): DiagnosticsResult {
+	const executedChecks = checks.filter((check) => !isSkippedCheck(check))
+	if (executedChecks.some((check) => !check.ok)) return { ok: false, status: 'failed', checks }
+	if (executedChecks.length === 0) return { ok: false, status: 'skipped', checks }
+	if (checks.some(isSkippedCheck)) return { ok: false, status: 'partial', checks }
+	return { ok: true, status: 'passed', checks }
+}
 
 function relativeTargets(input: { readonly paths?: ReadonlyArray<string> | undefined }) {
 	const paths = input.paths ?? ['.']
@@ -85,10 +117,10 @@ function astGrepJson(input: { readonly json?: boolean | undefined }): boolean {
 	return input.json ?? true
 }
 
-function astGrepSearch(input: AstGrepSearchInput) {
+function astGrepSearch(input: AstGrepSearchInput, context: ToolContext) {
 	if (input.pattern.length === 0) return Effect.succeed({ ok: false, error: 'pattern is required' })
 
-	const cwd = workspaceRoot(input)
+	const cwd = workspaceRoot(input, context)
 	const args = ['run', '--pattern', input.pattern, '--lang', astGrepLanguage(input)]
 	if (astGrepJson(input)) args.push('--json=pretty')
 	args.push(...relativeTargets(input))
@@ -99,12 +131,12 @@ function astGrepSearch(input: AstGrepSearchInput) {
 	})
 }
 
-function astGrepReplace(input: AstGrepReplaceInput) {
+function astGrepReplace(input: AstGrepReplaceInput, context: ToolContext) {
 	if (input.pattern.length === 0) return Effect.succeed({ ok: false, error: 'pattern is required' })
 	if (input.rewrite.length === 0) return Effect.succeed({ ok: false, error: 'rewrite is required' })
 
 	const dryRun = input.dryRun ?? true
-	const cwd = workspaceRoot(input)
+	const cwd = workspaceRoot(input, context)
 	const args = [
 		'run',
 		'--pattern',
@@ -133,11 +165,11 @@ function skippedCheck(name: string, reason: string): SkippedCheck {
 	}
 }
 
-function lspDiagnostics(input: DiagnosticsInput) {
+function lspDiagnostics(input: DiagnosticsInput, context: ToolContext) {
 	return Effect.gen(function* () {
-		const cwd = workspaceRoot(input)
+		const cwd = workspaceRoot(input, context)
 		const filePath = input.filePath ?? input.path ?? '.'
-		const target = path.resolve(cwd, filePath)
+		const target = workspacePath(cwd, filePath)
 		const checks: Array<DiagnosticCheck> = []
 
 		const tsconfig = yield* findUp(['tsconfig.json', 'jsconfig.json'], target)
@@ -154,17 +186,17 @@ function lspDiagnostics(input: DiagnosticsInput) {
 
 		const biomeConfig = yield* findUp(['biome.json', 'biome.jsonc'], target)
 		if (biomeConfig) {
-			const biome = yield* findExecutable('biome', path.dirname(biomeConfig))
-			const result = yield* runCommand(biome, ['check', filePath], { cwd })
+			const configDirectory = path.dirname(biomeConfig)
+			const biome = yield* findExecutable('biome', configDirectory)
+			const result = yield* runCommand(biome, ['check', `--config-path=${biomeConfig}`, target], {
+				cwd: configDirectory,
+			})
 			checks.push({ name: 'biome', command: biome, config: biomeConfig, ...result })
 		} else {
 			checks.push(skippedCheck('biome', 'No biome.json or biome.jsonc found.'))
 		}
 
-		return {
-			ok: checks.every((check) => check.ok || ('skipped' in check && check.skipped)),
-			checks,
-		}
+		return summarizeDiagnostics(checks)
 	})
 }
 
@@ -183,8 +215,73 @@ const positionArgs = {
 	character: tool.schema.number().optional(),
 }
 
+function githubToolEffect<T>(toolName: string, body: () => Promise<T>) {
+	return Effect.tryPromise({
+		try: body,
+		catch: (error) =>
+			new ToolInputError({
+				tool: toolName,
+				message: describeUnknown(error),
+			}),
+	})
+}
+
+function githubTools(options: PluginOptions | undefined) {
+	const github = normalizeGitHubPluginConfig(options)
+	if (!github.enabled) return {}
+
+	return {
+		github_code_search: tool({
+			description: 'Search remote GitHub source code.',
+			args: {
+				query: tool.schema.string(),
+				repos: tool.schema.array(tool.schema.string()).optional(),
+				owner: tool.schema.string().optional(),
+				language: tool.schema.string().optional(),
+				filename: tool.schema.string().optional(),
+				extension: tool.schema.string().optional(),
+				maxResults: tool.schema.number().optional(),
+			},
+			execute(args, context) {
+				return executeTool('github_code_search', GitHubCodeSearchInput, args, context, (input) =>
+					githubToolEffect('github_code_search', () => githubCodeSearch(github.config, input)),
+				)
+			},
+		}),
+		github_file_read: tool({
+			description: 'Read a specific file from a GitHub repo.',
+			args: {
+				repo: tool.schema.string(),
+				path: tool.schema.string(),
+				ref: tool.schema.string().optional(),
+				maxBytes: tool.schema.number().optional(),
+			},
+			execute(args, context) {
+				return executeTool('github_file_read', GitHubFileReadInput, args, context, (input) =>
+					githubToolEffect('github_file_read', () => githubFileRead(github.config, input)),
+				)
+			},
+		}),
+		github_repo_tree: tool({
+			description: 'Inspect repository structure when GitHub code search is insufficient.',
+			args: {
+				repo: tool.schema.string(),
+				ref: tool.schema.string().optional(),
+				pathPrefix: tool.schema.string().optional(),
+				recursive: tool.schema.boolean().optional(),
+				maxEntries: tool.schema.number().optional(),
+			},
+			execute(args, context) {
+				return executeTool('github_repo_tree', GitHubRepoTreeInput, args, context, (input) =>
+					githubToolEffect('github_repo_tree', () => githubRepoTree(github.config, input)),
+				)
+			},
+		}),
+	}
+}
+
 export function createLimitless(): Plugin {
-	return async (pluginInput) => ({
+	return async (pluginInput, options) => ({
 		tool: {
 			ast_grep_search: tool({
 				description: 'Search code with ast-grep using the packaged binary.',
@@ -199,7 +296,7 @@ export function createLimitless(): Plugin {
 				},
 				execute(args, context) {
 					return executeTool('ast_grep_search', AstGrepSearchInput, args, context, (input) =>
-						astGrepSearch(input),
+						astGrepSearch(input, context),
 					)
 				},
 			}),
@@ -217,7 +314,7 @@ export function createLimitless(): Plugin {
 				},
 				execute(args, context) {
 					return executeTool('ast_grep_replace', AstGrepReplaceInput, args, context, (input) =>
-						astGrepReplace(input),
+						astGrepReplace(input, context),
 					)
 				},
 			}),
@@ -226,7 +323,7 @@ export function createLimitless(): Plugin {
 				args: pathArgs,
 				execute(args, context) {
 					return executeTool('lsp_diagnostics', DiagnosticsInput, args, context, (input) =>
-						lspDiagnostics(input),
+						lspDiagnostics(input, context),
 					)
 				},
 			}),
@@ -272,6 +369,7 @@ export function createLimitless(): Plugin {
 					)
 				},
 			}),
+			...githubTools(options),
 		},
 	})
 }

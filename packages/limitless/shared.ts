@@ -230,13 +230,16 @@ export function findExecutable(
 
 export function workspaceRoot(
 	input: { readonly workspace?: string | undefined },
-	context?: Pick<ToolContext, 'worktree' | 'directory'>,
+	context: ToolContext,
 ): string {
-	return path.resolve(input.workspace ?? context?.worktree ?? context?.directory ?? process.cwd())
+	if (input.workspace === undefined) return path.resolve(context.worktree)
+	return path.isAbsolute(input.workspace)
+		? path.resolve(input.workspace)
+		: path.resolve(context.worktree, input.workspace)
 }
 
 export function workspacePath(workspace: string, filePath: string): string {
-	return path.resolve(workspace, filePath)
+	return path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(workspace, filePath)
 }
 
 export function workspaceRelative(workspace: string, filePath: string): string {
