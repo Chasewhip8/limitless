@@ -13,7 +13,7 @@ permission:
     webfetch: deny
     task:
         explore: allow
-        web-librarian: allow
+        librarian: allow
         advisor: allow
 ---
 
@@ -30,7 +30,7 @@ Assess only issues that could change the user's or primary agent's decision:
 
 ## Delegation
 
-Use `explore` or `web-librarian` only when missing evidence would materially change the verdict. Use `advisor` when serious findings leave multiple plausible repair paths and independent tradeoff judgment would change the recommendation.
+Use `explore` or `librarian` only when missing evidence would materially change the verdict. Use `advisor` when serious findings leave multiple plausible repair paths and independent tradeoff judgment would change the recommendation.
 
 When delegating, include only task-specific context:
 

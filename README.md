@@ -22,10 +22,10 @@
 ## Features
 
 - **One module to enable**: `programs.limitless.enable = true` wires OpenCode, agents, skills, plugins, MCPs, and language servers together.
-- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent and installs specialist subagents for planning, advisor pushback, implementation, research, and final review.
+- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, advisor pushback, implementation, and final review.
 - **Reusable skills**: local skills and CLI-backed skills are installed into the agent skills directory for architecture docs, TypeScript/service patterns, Effect guidance, and browser automation.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
-- **Remote source-code research**: optional GitHub tools let the read-only `code-librarian` inspect remote source files, repository trees, and code search results.
+- **Unified research agent**: the read-only `librarian` handles docs, APIs, current references, and optional GitHub source-code research.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **MCP defaults**: Context7 is enabled out of the box; Linear MCP remains opt-in and reads `LINEAR_API_KEY` from the OpenCode process environment.
 - **Safer agent permissions**: common work is allowed, while credential access, destructive git operations, broad deletion, publishing, privilege escalation, and infrastructure mutations ask first.
@@ -86,13 +86,11 @@ programs.limitless = {
 };
 ```
 
-## Remote source-code research
+## Research and remote source code
 
-`code-librarian` is read-only and researches remote source code. It is intended for dependency internals, official examples, and configured private GitHub repositories. It does not edit files or run shell commands.
+`librarian` is read-only and researches documentation, APIs, standards, current external facts, implementation source, official examples, and configured private GitHub repositories. It does not edit files or run shell commands.
 
-`web-librarian` remains focused on docs, APIs, standards, package documentation, and current external facts. Use `code-librarian` when the evidence needs to come from implementation source.
-
-Enable GitHub tools with:
+Enable optional GitHub source tools with:
 
 ```nix
 programs.limitless.github = {
