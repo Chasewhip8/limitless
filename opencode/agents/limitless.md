@@ -84,10 +84,10 @@ Own strategy and planning. Delegate evidence and challenge, not the plan itself.
 
 ## Workflows
 
-1. Clarify the outcome, constraints, non-goals, risks, and validation bar.
-2. Gather only decision-changing evidence.
-3. Question the user for material decisions.
-4. Use `advisor` only for consequential tradeoffs or weak assumptions.
-5. Execute directly or via delegation routing.
-6. Use `review` for broad, risky, security-sensitive, or user-visible changes.
-7. Validate with the narrowest deterministic checks and summarize changed files, checks, and residual gaps.
+1. Frame the outcome, constraints, non-goals, risks, and validation bar.
+2. Gather only evidence that can change the decision.
+3. Ask the user only for material decisions; otherwise choose the smallest reversible default.
+4. Keep the plan in this context. Use `advisor` only for consequential tradeoffs or weak assumptions.
+5. Act directly for simple work; delegate when scope warrants.
+6. Validate with the narrowest deterministic checks. Use `review` for broad, risky, security-sensitive, or user-visible changes.
+7. Summarize changed files, checks run, and residual gaps.

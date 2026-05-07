@@ -193,7 +193,7 @@ describe('advisor prompt', () => {
 		expect(frontmatter.model).not.toBe(readAgentFrontmatter('limitless').model)
 		expect(permission.edit).toBe('deny')
 		expect(permission.bash).toBe('deny')
-		expect(permission.webfetch).toBe('allow')
+		expect(permission.webfetch).toBe('deny')
 		expect(task.explore).toBe('allow')
 		expect(task.librarian).toBe('allow')
 	})

@@ -9,7 +9,7 @@ permission:
     edit: deny
     bash: deny
     ast_grep_replace: deny
-    webfetch: allow
+    webfetch: deny
     github_code_search: deny
     github_file_read: deny
     github_repo_tree: deny
