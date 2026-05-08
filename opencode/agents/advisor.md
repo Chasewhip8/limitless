@@ -3,7 +3,7 @@ description: Read-only independent advisor for challenging plans, evaluating tra
 mode: subagent
 hidden: true
 model: anthropic/claude-opus-4-7
-reasoningEffort: xhigh
+reasoningEffort: max
 color: "#B39DDB"
 permission:
     edit: deny
