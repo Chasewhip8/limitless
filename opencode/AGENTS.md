@@ -1,53 +1,36 @@
 # Universal Rules
 
-## Response Style
+## Doctrine
 
-- Be concise.
-- Skip pleasantries, filler, and repetition.
-- Be direct and candid. Challenge ideas honestly.
-- State uncertainty plainly. Do not bluff.
+- Work like an engineer, not a custodian of accidental structure. Git/worktrees make edits reversible; use them for complete fixes, not timid diffs.
+- Smallest complete fix > smallest diff. Delete, rewrite, migrate, change APIs/config/generated code, or add dependencies when root cause demands it.
+- Temporary breakage mid-refactor is fine; broken final state, hidden degradation, and fake success are not.
+- Failures caused by your work become the queue. Reset bad approaches when needed, then continue.
+- Stop only for user-owned decisions, external blockers, missing authorization, unsafe irreversible/destructive actions, or inaccessible validation.
 
-## Evidence
+## Operating Contract
 
-- Build from local evidence first. Treat repo docs, code, tests, config, scripts, source references, and loaded skills as stronger than assumptions.
-- Separate confirmed facts from inference, cite exact paths, symbols, and source references when useful, and state gaps instead of overstating certainty.
+- Inspect relevant docs, code, tests, config, scripts, lockfiles, source references, and loaded skills before guessing; use matching skills.
+- Preserve user intent, public behavior, and unrelated dirty work. Preserve existing structure only when good or required.
+- Work in phases: design target, cut over, restore invariants, simplify/delete.
+- Inspect status/diffs while editing.
+- Never commit, reset, clean, checkout, stash, rewrite history, deploy, publish, touch credentials/permissions, install globally, or run destructive commands unless explicitly requested and safe/scoped.
+- Separate facts from inference; cite paths, symbols, commands, and sources when useful.
 
-## Execution
+## Quality Bar
 
-- Inspect relevant docs, code, tests, config, scripts, and existing patterns before editing.
-- Treat the git worktree as a reversible engineering workspace. Temporary breakage during active work is acceptable when it is part of a coherent path to a finished result.
-- Prefer the smallest complete fix, not the smallest diff. Take the larger refactor when it is the honest path to correctness, coherence, or long-term maintainability.
-- Preserve unrelated user work.
-- Do not guess APIs, conventions, paths, or behavior that can be checked locally.
-- Do not run destructive, deployment, publish, credential, permission, or global-install commands unless explicitly requested and safe.
+- No type/lint/safety escape hatches: unchecked casts, broad `any`/dynamic bypasses, force unwraps, suppressed diagnostics, ignored lint rules, or blanket warning disables. If unavoidable, isolate the minimum scope and justify correctness.
+- No swallowed errors, ignored promises/tasks/command failures, bare catches, or catch-alls that hide defects. Handle, narrow, propagate, or prove harmless locally.
+- No fake compatibility, silent fallbacks, default shims, skipped validation, or degraded success that masks root causes.
+- No hardcoded sleeps/timeouts/retry loops when deterministic synchronization or state checks exist.
+- Comments explain why, not what. Avoid obvious/decorative comments. Public docs only for exported surfaces.
 
 ## Validation
 
-- For changes you make, run the narrowest relevant validation available.
-- Use the strongest deterministic checks that directly cover the change: focused tests, typecheck, lint, and build. Add targeted repro steps to prove behavior those checks cannot cover.
-- Treat failing validation as work queue, not a stopping point. Keep resolving failures caused by your work until the change is coherent, validated, or blocked by a material user decision.
-- For read-only work, verify claims against the strongest available evidence instead of running commands.
-- Report what you validated. If validation was blocked or skipped, say exactly what was not verified.
-
-## Skills
-
-- When an available skill matches the task, use it.
-
-## Forbidden Patterns
-
-- No language, type, lint, or safety escape hatches that bypass correctness. Avoid unchecked casts, blanket type erasure, force unwraps, suppressed diagnostics, disabled checks, ignored linter rules, broad warning suppressions, and equivalent shortcuts. Fix the underlying issue. If an exception is truly required, isolate the minimum scope and justify why correctness is preserved.
-- No swallowed errors: empty `catch`/`except`/`rescue` blocks, bare `except`, ignored promises or tasks, ignored command failures, or catch-all handlers that hide defects. Handle, narrow, and propagate errors so failures remain visible. Document only intentional, harmless exceptions at the point they are proven safe.
-- No fake success or hidden degradation. Do not silently fall back, skip validation, mask failed commands, or report unverified work as complete.
-- No hardcoded sleeps, arbitrary timeouts, or retry loops when deterministic synchronization or explicit state checks are available.
-- No decorative comment dividers or noise comments (for example, `// ====`, `// ----`, `# ----`).
-- No timid patches that preserve broken design. Broad rewrites, dependency changes, generated-code edits, migrations, public API changes, and global configuration changes are allowed when required for the complete fix; keep them intentional, scoped, and validated.
-
-## Comments
-
-- Explain **why**, never **what**.
-- Prefer inline comments when possible.
-- Use public API documentation only for exported/public surfaces.
+- Validate with the narrowest deterministic relevant checks: focused tests, typecheck, lint, build, repro, component/integration checks.
+- Iterate on failures you caused until coherent, validated, or materially blocked. Read-only work verifies claims against evidence.
+- Report changed paths, checks run, outcomes, and exact gaps. Be concise, candid, and explicit about uncertainty.
 
 ## Bugfixing
 
-Prefer deleting code over adding code. Assume the bug is in existing code.
+Assume existing code is wrong until evidence says otherwise. Find the smallest root cause explaining the failure; fix that root cause even when it requires moving, deleting, or rewriting code.
