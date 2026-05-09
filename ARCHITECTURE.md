@@ -11,7 +11,7 @@ No previous architecture document or `manual-start` / `manual-end` sections were
 This repository is a Nix/Home Manager flake plus a Bun/TypeScript workspace for a packaged
 OpenCode agent environment. The main user-facing product is the `programs.limitless` Home
 Manager module in `nix/modules/home.nix`. Enabling that module installs OpenCode, agent prompts,
-reusable skills, local code-intelligence tools, browser automation support, default MCP
+reusable skills, local code-intelligence and scratchpad tools, browser automation support, default MCP
 configuration, language server configuration, optional GitHub remote-code research tools, and optional
 OpenCode service/Linear MCP integration.
 
@@ -34,7 +34,7 @@ artifacts and compiled plugin files, while OpenCode loads those artifacts at run
 | Flake exports | `flake.nix` | Defines Nix inputs, per-system package outputs, the Home Manager module export, overlay exports, and the dev shell. | `nix/packages/*.nix`, `nix/modules/home.nix`, `skills/`, `opencode/agents/`, external flake inputs |
 | Home Manager module | `nix/modules/home.nix` | Owns the `programs.limitless` option tree, default OpenCode config, permissions, skill/agent/plugin installation, GitHub tool config, LSP server defaults, Context7 MCP config, optional systemd user service, and optional Linear plugin installation. | Flake packages, `opencode/AGENTS.md`, OpenCode package input, Nixpkgs packages |
 | Nix package definitions | `nix/packages/limitless.nix`, `nix/packages/linear-mcp.nix`, `nix/packages/agent-browser.nix`, `nix/packages/effect-solutions.nix` | Build or package plugin artifacts and helper CLIs for installation by the module and overlay. | `packages/limitless`, `packages/linear-mcp`, `nix/skills/*`, Nixpkgs tooling |
-| Limitless OpenCode plugin | `packages/limitless/index.ts`, `packages/limitless/shared.ts`, `packages/limitless/lsp.ts`, `packages/limitless/github.ts` | Registers OpenCode tools for ast-grep search/replace, TypeScript/Biome diagnostics, LSP references, symbols, rename previews, and optional GitHub remote-code research. | `@opencode-ai/plugin`, `effect`, ast-grep, local `tsc`/`biome`, OpenCode LSP config, GitHub REST API |
+| Limitless OpenCode plugin | `packages/limitless/index.ts`, `packages/limitless/shared.ts`, `packages/limitless/lsp.ts`, `packages/limitless/github.ts`, `packages/limitless/scratchpad.ts` | Registers OpenCode tools for session scratchpads, ast-grep search/replace, TypeScript/Biome diagnostics, LSP references, symbols, rename previews, and optional GitHub remote-code research. | `@opencode-ai/plugin`, `effect`, ast-grep, local `tsc`/`biome`, OpenCode LSP config, GitHub REST API |
 | Linear MCP plugin | `packages/linear-mcp/index.mjs` | Mutates OpenCode config to add the remote Linear MCP server using `LINEAR_API_KEY`; does nothing when the variable is absent. | OpenCode plugin config hook, Linear remote MCP endpoint |
 | Agent prompts | `opencode/AGENTS.md`, `opencode/agents/*.md` | Provide universal instructions and agent/subagent definitions for Limitless, engineer, frontend, explore, advisor, review, and librarian. | Home Manager file installation, OpenCode agent loading |
 | Skill package assembly | `skills/document-architecture/SKILL.md`, `skills/service-patterns/SKILL.md`, `skills/typescript-patterns/SKILL.md`, `flake.nix` | Packages reusable local workflows and merges in skills from the `convex-agent-plugins` flake input. | Skills package output from `flake.nix`, external `convex-agent-plugins` input |
@@ -77,6 +77,8 @@ artifacts and compiled plugin files, while OpenCode loads those artifacts at run
 2. OpenCode loads `plugins/limitless.js`, a generated wrapper around the packaged plugin built from
    `packages/limitless/index.ts`.
 3. `createLimitless()` registers local tools:
+    - `scratchpad_create`
+    - `scratchpad_list`
     - `ast_grep_search`
     - `ast_grep_replace`
     - `lsp_diagnostics`
@@ -88,21 +90,24 @@ artifacts and compiled plugin files, while OpenCode loads those artifacts at run
     - `github_file_read`
     - `github_repo_tree`
 5. Tool inputs are decoded through Effect Schema in `packages/limitless/index.ts`,
-   `packages/limitless/lsp.ts`, and `packages/limitless/github.ts`, then wrapped by `executeTool()`
-   in `packages/limitless/shared.ts`.
-6. ast-grep tools run the Nix-substituted ast-grep binary in the selected workspace.
-7. diagnostics searches upward for `tsconfig.json`/`jsconfig.json` and `biome.json`/`biome.jsonc`,
+   `packages/limitless/lsp.ts`, `packages/limitless/github.ts`, and
+   `packages/limitless/scratchpad.ts`, then wrapped by `executeTool()` in
+   `packages/limitless/shared.ts`.
+6. Scratchpad tools create/list files under `<worktree>/.limitless/<sessionID>/` and return
+   workspace-relative paths such as `.limitless/<sessionID>/<name>` for standard OpenCode file tools.
+7. ast-grep tools run the Nix-substituted ast-grep binary in the selected workspace.
+8. diagnostics searches upward for `tsconfig.json`/`jsconfig.json` and `biome.json`/`biome.jsonc`,
    then runs local `tsc --noEmit` and/or `biome check` when configs are found.
-8. LSP tools request OpenCode config through the plugin client, normalize configured LSP servers,
+9. LSP tools request OpenCode config through the plugin client, normalize configured LSP servers,
    spawn a matching server process, open the target document, issue the requested LSP call, normalize
    the response, close the document, and shut the process down.
-9. GitHub tools read `process.env[tokenEnv]` at request time. Code search requires a token; file and
-   tree reads may use public unauthenticated requests. Configured `allowedRepos` restrict remote-code
-   tool targets, and empty allowlists require explicit `allowUnrestrictedRepos = true`.
-10. GitHub file and tree requests without an explicit `ref` use the repository default branch and
-   report that caveat. Repo-tree inspection is non-recursive by default; auth failures, search
-   limits, response-size limits, and rate limits are returned as structured gaps.
-11. If installed, `plugins/linear-mcp.js` adds the Linear MCP config only when `LINEAR_API_KEY` exists
+10. GitHub tools read `process.env[tokenEnv]` at request time. Code search requires a token; file and
+    tree reads may use public unauthenticated requests. Configured `allowedRepos` restrict remote-code
+    tool targets, and empty allowlists require explicit `allowUnrestrictedRepos = true`.
+11. GitHub file and tree requests without an explicit `ref` use the repository default branch and
+    report that caveat. Repo-tree inspection is non-recursive by default; auth failures, search
+    limits, response-size limits, and rate limits are returned as structured gaps.
+12. If installed, `plugins/linear-mcp.js` adds the Linear MCP config only when `LINEAR_API_KEY` exists
     in the OpenCode process environment.
 
 ### Agent routing flow
@@ -145,6 +150,8 @@ only evidence-gathering or independent challenge, and returns the final plan its
 - GitHub helper layer: `packages/limitless/github.ts` owns repository normalization, allowlist
   enforcement, rate-limit parsing, read-only REST requests, and structured gaps for auth/search/rate
   limitations.
+- Scratchpad helper layer: `packages/limitless/scratchpad.ts` owns flat name validation, session path
+  resolution, and create/list behavior.
 - Effect Schema input boundaries: runtime validation for plugin tool arguments before command or LSP
   work begins.
 - `executeTool()`: shared conversion from decoded inputs and Effect results/errors into OpenCode
@@ -180,6 +187,7 @@ only evidence-gathering or independent challenge, and returns the final plan its
 │   │   ├── index.ts                # Tool registration and ast-grep/diagnostics tools
 │   │   ├── lsp.ts                  # LSP-backed tools and JSON-RPC lifecycle
 │   │   ├── package.json            # Plugin manifest and runtime dependencies
+│   │   ├── scratchpad.ts           # Session-scoped scratchpad tools
 │   │   ├── shared.ts               # Shared command, path, validation, and error helpers
 │   │   └── test/*.test.ts          # Agent prompt and GitHub helper tests
 │   ├── linear-mcp/                 # Optional Linear MCP OpenCode plugin
@@ -230,7 +238,7 @@ it is an expected location rather than a current implementation directory.
 - Formatting and linting: Biome covers supported source files; markdownlint covers configured
   Markdown paths; Nix code is checked with `nixfmt`, `statix`, and `deadnix` through scripts.
 - Testing reality: `vitest.config.ts` requires matching tests and Vitest coverage exists under
-  `test/` and `packages/limitless/test/` for path resolution, diagnostics summary semantics, agent
-  prompt permissions, and mocked GitHub tool behavior.
+  `test/` and `packages/limitless/test/` for path resolution, scratchpad mapping, diagnostics
+  summary semantics, agent prompt permissions, and mocked GitHub tool behavior.
 - Platform constraints: the OpenCode systemd user service is asserted Linux-only; `agent-browser` and
   `effect-solutions` package definitions enumerate Linux and Darwin systems.

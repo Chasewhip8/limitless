@@ -19,6 +19,12 @@ import {
 	lspSymbols,
 } from './lsp'
 import {
+	ScratchpadCreateInput,
+	ScratchpadListInput,
+	scratchpadCreate,
+	scratchpadList,
+} from './scratchpad'
+import {
 	type CommandResult,
 	DEFAULT_TIMEOUT_MS,
 	describeUnknown,
@@ -283,6 +289,27 @@ function githubTools(options: PluginOptions | undefined) {
 export function createLimitless(): Plugin {
 	return async (pluginInput, options) => ({
 		tool: {
+			scratchpad_create: tool({
+				description:
+					'Create an empty session-scoped scratchpad file and return its workspace-relative path.',
+				args: {
+					name: tool.schema.string(),
+				},
+				execute(args, context) {
+					return executeTool('scratchpad_create', ScratchpadCreateInput, args, context, (input) =>
+						scratchpadCreate(input, context),
+					)
+				},
+			}),
+			scratchpad_list: tool({
+				description: 'List session-scoped scratchpad files and their workspace-relative paths.',
+				args: {},
+				execute(args, context) {
+					return executeTool('scratchpad_list', ScratchpadListInput, args, context, (input) =>
+						scratchpadList(input, context),
+					)
+				},
+			}),
 			ast_grep_search: tool({
 				description: 'Search code with ast-grep using the packaged binary.',
 				args: {
