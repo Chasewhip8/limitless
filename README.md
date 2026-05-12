@@ -80,7 +80,6 @@ programs.limitless = {
   };
 
   mcp = {
-    context7.enable = true;
     linear.enable = false;
   };
 };

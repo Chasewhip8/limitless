@@ -23,7 +23,6 @@ let
   enabledAgents = cfg.enable && cfg.agents.enable;
   enabledLimitless = cfg.enable && cfg.plugins.limitless.enable;
   enabledLsp = cfg.enable && cfg.lsp.enable;
-  enabledContext7 = cfg.enable && cfg.mcp.context7.enable;
   enabledLinear = cfg.enable && cfg.mcp.linear.enable;
   enabledOpencodeService = cfg.enable && cfg.opencode.service.enable;
 
@@ -76,13 +75,6 @@ let
   }
   // lib.optionalAttrs enabledLsp {
     lsp = lspServers;
-  }
-  // lib.optionalAttrs enabledContext7 {
-    mcp.context7 = {
-      type = "remote";
-      url = "https://mcp.context7.com/mcp";
-      enabled = true;
-    };
   };
 
   opencodeConfig = lib.recursiveUpdate defaultOpencodeConfig cfg.opencode.settings;
@@ -592,15 +584,7 @@ in
       };
     };
 
-    mcp = {
-      context7.enable = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Whether to configure the Context7 MCP server.";
-      };
-
-      linear.enable = lib.mkEnableOption "Linear MCP server configuration for OpenCode";
-    };
+    mcp.linear.enable = lib.mkEnableOption "Linear MCP server configuration for OpenCode";
   };
 
   config = lib.mkIf cfg.enable (
