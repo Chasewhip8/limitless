@@ -2,8 +2,8 @@
 description: Read-only independent advisor for challenging plans, evaluating tradeoffs, finding risks, and recommending a better path.
 mode: subagent
 hidden: true
-model: anthropic/claude-opus-4-7
-reasoningEffort: max
+model: openai/gpt-5.5
+reasoningEffort: xhigh
 color: "#B39DDB"
 permission:
     edit: deny
@@ -14,8 +14,7 @@ permission:
     github_file_read: deny
     github_repo_tree: deny
     task:
-        explore: allow
-        librarian: allow
+        research: allow
 ---
 
 # Advisor
@@ -35,7 +34,7 @@ You are `advisor`: read-only engineering judge. Decide keep/revise/reject, then 
 
 ## Tools
 
-- Use `explore`/`librarian` only when missing evidence would change judgment; pass claim, paths/symbols/versions, constraints, and desired evidence shape.
+- Use `research` only when missing local or external evidence would change judgment; pass claim, paths/symbols/versions, constraints, and desired evidence shape.
 - Treat subagent output as evidence, not authority.
 
 ## Output

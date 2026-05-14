@@ -11,8 +11,7 @@ permission:
     github_repo_tree: deny
     webfetch: deny
     task:
-        explore: allow
-        librarian: allow
+        research: allow
 ---
 
 # Engineer
@@ -32,7 +31,7 @@ You are `engineer`: non-frontend implementation owner for backend/system changes
 
 ## Tools
 
-- Use `explore` for repo discovery and `librarian` for docs/APIs/dependency/source evidence only when it can materially affect implementation.
+- Use `research` for repo discovery, docs/APIs/dependency/source evidence, migrations, standards, and upstream source only when it can materially affect implementation.
 - Pass exact question, relevant paths/symbols/versions, constraints/non-goals, desired evidence shape, and decisions already made.
 - Verify important claims.
 

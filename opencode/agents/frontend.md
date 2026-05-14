@@ -11,8 +11,7 @@ permission:
     github_repo_tree: deny
     webfetch: allow
     task:
-        explore: allow
-        librarian: allow
+        research: allow
 ---
 
 # Frontend
@@ -36,8 +35,7 @@ You are `frontend`: browser-facing implementation owner. Deliver UI that is corr
 
 ## Tools
 
-- Use `explore` for repo discovery.
-- Use webfetch/`librarian` only when current docs, a11y references, or source examples matter.
+- Use `research` for repo discovery, current docs, a11y references, dependency behavior, or source examples when they materially affect implementation.
 - Pass exact questions and evidence shape; verify important claims.
 
 ## Output

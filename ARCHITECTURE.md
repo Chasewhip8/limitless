@@ -36,7 +36,7 @@ artifacts and compiled plugin files, while OpenCode loads those artifacts at run
 | Nix package definitions | `nix/packages/limitless.nix`, `nix/packages/linear-mcp.nix`, `nix/packages/agent-browser.nix`, `nix/packages/effect-solutions.nix` | Build or package plugin artifacts and helper CLIs for installation by the module and overlay. | `packages/limitless`, `packages/linear-mcp`, `nix/skills/*`, Nixpkgs tooling |
 | Limitless OpenCode plugin | `packages/limitless/index.ts`, `packages/limitless/shared.ts`, `packages/limitless/lsp.ts`, `packages/limitless/github.ts`, `packages/limitless/scratchpad.ts` | Registers OpenCode tools for session scratchpads, ast-grep search/replace, TypeScript/Biome diagnostics, LSP references, symbols, rename previews, and optional GitHub remote-code research. | `@opencode-ai/plugin`, `effect`, ast-grep, local `tsc`/`biome`, OpenCode LSP config, GitHub REST API |
 | Linear MCP plugin | `packages/linear-mcp/index.mjs` | Mutates OpenCode config to add the remote Linear MCP server using `LINEAR_API_KEY`; does nothing when the variable is absent. | OpenCode plugin config hook, Linear remote MCP endpoint |
-| Agent prompts | `opencode/AGENTS.md`, `opencode/agents/*.md` | Provide universal instructions and agent/subagent definitions for Limitless, engineer, frontend, explore, advisor, review, and librarian. | Home Manager file installation, OpenCode agent loading |
+| Agent prompts | `opencode/AGENTS.md`, `opencode/agents/*.md` | Provide universal instructions and agent/subagent definitions for Limitless, engineer, frontend, research, advisor, and review. | Home Manager file installation, OpenCode agent loading |
 | Skill package assembly | `skills/document-architecture/SKILL.md`, `skills/service-patterns/SKILL.md`, `skills/typescript-patterns/SKILL.md`, `flake.nix` | Packages reusable local workflows and merges in skills from the `convex-agent-plugins` flake input. | Skills package output from `flake.nix`, external `convex-agent-plugins` input |
 | CLI-backed skills | `nix/skills/agent-browser/SKILL.md`, `nix/skills/effect-patterns/SKILL.md` | Skills installed with packaged helper CLIs instead of the plain `skills` package. | `nix/packages/agent-browser.nix`, `nix/packages/effect-solutions.nix` |
 | Quality gates | `package.json`, `tsconfig.json`, `vitest.config.ts`, `biome.json`, `.markdownlint.json`, `.github/workflows/ci.yml` | Define local scripts, strict TypeScript settings, test discovery, formatting/linting rules, and CI steps. | Bun, TypeScript, Vitest, Biome, markdownlint, Nix tooling |
@@ -114,19 +114,18 @@ artifacts and compiled plugin files, while OpenCode loads those artifacts at run
 
 ```text
 limitless
-├── explore          # local repo discovery
-├── librarian        # docs/API/source research
+├── research         # local repo + docs/API/source research
 ├── advisor          # independent challenge + recommendation
 ├── engineer         # backend/system implementation
 ├── frontend         # UI implementation
 └── review           # final artifact/diff inspection
 ```
 
-`librarian` is for documentation, APIs, standards, package docs, external facts, remote source code,
-dependency internals, configured private GitHub repositories, and cross-repo examples. `librarian` is
-non-mutating: it has no edit or shell permission and the GitHub plugin tools only issue GET requests.
-Other packaged agents explicitly deny the GitHub tools and must route remote-source research through
-`librarian`.
+`research` is for local repository discovery, behavior tracing, documentation, APIs, standards,
+package docs, external facts, remote source code, dependency internals, configured private GitHub
+repositories, and cross-repo examples. `research` is non-mutating: it has no edit or shell permission
+and the GitHub plugin tools only issue GET requests. Other packaged agents explicitly deny the GitHub
+tools and must route remote-source research through `research`.
 
 Planning is intentionally not a subagent. `limitless` keeps strategy in the main context, delegates
 only evidence-gathering or independent challenge, and returns the final plan itself.

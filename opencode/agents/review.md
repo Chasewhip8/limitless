@@ -12,8 +12,7 @@ permission:
     github_repo_tree: deny
     webfetch: deny
     task:
-        explore: allow
-        librarian: allow
+        research: allow
         advisor: allow
 ---
 
@@ -33,7 +32,7 @@ You are `review`: rigorous final inspection of a plan, diff, or completed work a
 ## Tools
 
 - Do not edit or run commands.
-- Use `explore`/`librarian` only when missing evidence changes verdict.
+- Use `research` only when missing local or external evidence changes verdict.
 - Use `advisor` only when serious findings leave multiple plausible repair paths.
 
 ## Output

@@ -80,6 +80,13 @@ function readAgentFrontmatter(agentName: string): FrontmatterObject {
 	return parseFrontmatter(readAgentContent(agentName))
 }
 
+function enabledAgentNames(): Array<string> {
+	return agentFiles
+		.map((fileName) => path.basename(fileName, '.md'))
+		.filter((agentName) => readAgentFrontmatter(agentName).disable !== true)
+		.sort((left, right) => left.localeCompare(right))
+}
+
 function requireObject(value: FrontmatterValue | undefined, label: string): FrontmatterObject {
 	if (typeof value === 'object' && value !== null && !Array.isArray(value)) return value
 	throw new Error(`${label} must be an object.`)
@@ -117,6 +124,7 @@ describe('agent prompt frontmatter', () => {
 			const frontmatter = parseFrontmatter(content)
 			expect(frontmatter.description, fileName).toEqual(expect.any(String))
 			expect(frontmatter.mode, fileName).toEqual(expect.any(String))
+			if (frontmatter.disable === true) continue
 			expect(frontmatter.model, fileName).toEqual(expect.any(String))
 			expect(frontmatter.permission, fileName).toEqual(expect.any(Object))
 		}
@@ -124,10 +132,7 @@ describe('agent prompt frontmatter', () => {
 
 	test('primary has expected subagent task permissions', () => {
 		const task = requireObject(permissionFor('limitless').task, 'limitless task permission')
-		const expectedSubagents = agentFiles
-			.map((fileName) => path.basename(fileName, '.md'))
-			.filter((agentName) => agentName !== 'limitless')
-			.sort((left, right) => left.localeCompare(right))
+		const expectedSubagents = enabledAgentNames().filter((agentName) => agentName !== 'limitless')
 
 		expect(Object.keys(task).sort((left, right) => left.localeCompare(right))).toEqual(
 			expectedSubagents,
@@ -138,7 +143,7 @@ describe('agent prompt frontmatter', () => {
 	})
 
 	test('read-only agents deny edit/bash', () => {
-		const readOnlyAgents = ['advisor', 'explore', 'librarian', 'review']
+		const readOnlyAgents = ['advisor', 'research', 'review']
 		for (const agentName of readOnlyAgents) {
 			const permission = permissionFor(agentName)
 			expect(permission.edit, agentName).toBe('deny')
@@ -147,7 +152,7 @@ describe('agent prompt frontmatter', () => {
 	})
 
 	test('mutating custom tools are not allowed for read-only agents', () => {
-		const readOnlyAgents = ['advisor', 'explore', 'librarian', 'review']
+		const readOnlyAgents = ['advisor', 'research', 'review']
 		const mutatingCustomTools = ['ast_grep_replace']
 
 		for (const agentName of readOnlyAgents) {
@@ -158,10 +163,8 @@ describe('agent prompt frontmatter', () => {
 		}
 	})
 
-	test('GitHub tools are isolated to librarian', () => {
-		const nonGitHubAgents = agentFiles
-			.map((fileName) => path.basename(fileName, '.md'))
-			.filter((agentName) => agentName !== 'librarian')
+	test('GitHub tools are isolated to research', () => {
+		const nonGitHubAgents = enabledAgentNames().filter((agentName) => agentName !== 'research')
 
 		for (const agentName of nonGitHubAgents) {
 			const permission = permissionFor(agentName)
@@ -170,9 +173,9 @@ describe('agent prompt frontmatter', () => {
 			}
 		}
 
-		const librarianPermission = permissionFor('librarian')
+		const researchPermission = permissionFor('research')
 		for (const toolName of githubToolNames) {
-			expect(librarianPermission[toolName], `librarian ${toolName}`).toBe('allow')
+			expect(researchPermission[toolName], `research ${toolName}`).toBe('allow')
 		}
 	})
 })
@@ -194,13 +197,12 @@ describe('advisor prompt', () => {
 		expect(permission.edit).toBe('deny')
 		expect(permission.bash).toBe('deny')
 		expect(permission.webfetch).toBe('deny')
-		expect(task.explore).toBe('allow')
-		expect(task.librarian).toBe('allow')
+		expect(task.research).toBe('allow')
 	})
 
-	test('implementation agents can task librarian', () => {
+	test('implementation agents can task research', () => {
 		for (const agentName of ['engineer', 'frontend']) {
-			expectCanTask(agentName, 'librarian')
+			expectCanTask(agentName, 'research')
 		}
 	})
 
@@ -239,16 +241,22 @@ describe('advisor prompt', () => {
 	})
 })
 
-describe('librarian prompt', () => {
-	test('librarian.md exists and replaces split librarian variants', () => {
-		expect(agentFiles).toContain('librarian.md')
+describe('research prompt', () => {
+	test('research.md replaces split local and external research agents', () => {
+		expect(agentFiles).toContain('research.md')
+		expect(agentFiles).not.toContain('librarian.md')
 		expect(agentFiles).not.toContain('web-librarian.md')
 		expect(agentFiles).not.toContain('code-librarian.md')
 	})
 
-	test('librarian frontmatter matches role and permissions', () => {
-		const frontmatter = readAgentFrontmatter('librarian')
-		const permission = permissionFor('librarian')
+	test('explore.md disables the built-in split local research agent', () => {
+		expect(agentFiles).toContain('explore.md')
+		expect(readAgentFrontmatter('explore').disable).toBe(true)
+	})
+
+	test('research frontmatter matches role and permissions', () => {
+		const frontmatter = readAgentFrontmatter('research')
+		const permission = permissionFor('research')
 
 		expect(frontmatter.mode).toBe('subagent')
 		expect(permission.edit).toBe('deny')
@@ -259,10 +267,11 @@ describe('librarian prompt', () => {
 		expect(permission.github_repo_tree).toBe('allow')
 	})
 
-	test('librarian task routing includes implementation agents', () => {
-		expectCanTask('limitless', 'librarian')
-		expectCanTask('advisor', 'librarian')
-		expectCanTask('engineer', 'librarian')
-		expectCanTask('frontend', 'librarian')
+	test('research task routing includes callers that need evidence', () => {
+		expectCanTask('limitless', 'research')
+		expectCanTask('advisor', 'research')
+		expectCanTask('engineer', 'research')
+		expectCanTask('frontend', 'research')
+		expectCanTask('review', 'research')
 	})
 })
