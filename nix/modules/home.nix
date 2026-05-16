@@ -84,6 +84,7 @@ let
       inherit (cfg.github)
         enable
         tokenEnv
+        tokenFile
         allowedRepos
         allowUnrestrictedRepos
         ;
@@ -279,7 +280,14 @@ in
       tokenEnv = lib.mkOption {
         type = lib.types.str;
         default = "GITHUB_TOKEN";
-        description = "Environment variable read by OpenCode for GitHub API authentication.";
+        description = "Environment variable read by OpenCode for GitHub API authentication when tokenFile is unset.";
+      };
+
+      tokenFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/run/agenix/github-token";
+        description = "Optional runtime file containing a GitHub API token. The token value is never written to generated configuration.";
       };
 
       allowedRepos = lib.mkOption {

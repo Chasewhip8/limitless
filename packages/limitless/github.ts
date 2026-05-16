@@ -1,9 +1,11 @@
 import { Buffer } from 'node:buffer'
+import { readFile } from 'node:fs/promises'
 import { Schema } from 'effect'
 import { describeUnknown } from './shared'
 
 export type GitHubConfig = {
 	readonly tokenEnv: string
+	readonly tokenFile?: string
 	readonly allowedRepos: ReadonlyArray<string>
 	readonly allowUnrestrictedRepos: boolean
 }
@@ -159,6 +161,7 @@ export function normalizeGitHubPluginConfig(options: unknown): GitHubPluginConfi
 	const github = objectProperty(options, 'github')
 	const enabled = objectProperty(github, 'enable') === true
 	const tokenEnv = trimmed(stringValue(objectProperty(github, 'tokenEnv'))) ?? DEFAULT_TOKEN_ENV
+	const tokenFile = trimmed(stringValue(objectProperty(github, 'tokenFile')))
 	const allowedRepos = stringArray(objectProperty(github, 'allowedRepos'))
 	const allowUnrestrictedRepos = objectProperty(github, 'allowUnrestrictedRepos') === true
 
@@ -166,6 +169,7 @@ export function normalizeGitHubPluginConfig(options: unknown): GitHubPluginConfi
 		enabled,
 		config: {
 			tokenEnv,
+			...optionalProperty('tokenFile', tokenFile),
 			allowedRepos,
 			allowUnrestrictedRepos,
 		},
@@ -263,23 +267,45 @@ function repoApiPath(repo: string): string {
 	return `${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
 }
 
-function requestHeaders(config: GitHubConfig, accept: string): Headers {
+async function configuredToken(config: GitHubConfig): Promise<string | undefined> {
+	if (config.tokenFile !== undefined) {
+		try {
+			return trimmed(await readFile(config.tokenFile, 'utf8'))
+		} catch (error) {
+			throw new Error(
+				`Failed to read GitHub token file ${config.tokenFile}: ${describeUnknown(error)}`,
+			)
+		}
+	}
+
+	return trimmed(process.env[config.tokenEnv])
+}
+
+function authSource(config: GitHubConfig): string {
+	return config.tokenFile === undefined ? config.tokenEnv : `token file ${config.tokenFile}`
+}
+
+async function requestHeaders(config: GitHubConfig, accept: string): Promise<Headers> {
 	const headers = new Headers({
 		accept,
 		'user-agent': 'limitless-opencode',
 		'x-github-api-version': '2022-11-28',
 	})
-	const token = process.env[config.tokenEnv]
-	if (token !== undefined && token.trim().length > 0) {
+	const token = await configuredToken(config)
+	if (token !== undefined) {
 		headers.set('authorization', `Bearer ${token}`)
 	}
 	return headers
 }
 
-function githubGet(config: GitHubConfig, path: string, accept = 'application/vnd.github+json') {
+async function githubGet(
+	config: GitHubConfig,
+	path: string,
+	accept = 'application/vnd.github+json',
+) {
 	return githubFetch(path, {
 		method: 'GET',
-		headers: requestHeaders(config, accept),
+		headers: await requestHeaders(config, accept),
 	})
 }
 
@@ -466,11 +492,11 @@ export async function githubCodeSearch(
 		const gaps: Array<string> = []
 		const accessGap = repoAccessGap(config)
 		if (accessGap !== undefined) return { ok: false, results: [], gaps: [accessGap] }
-		if (trimmed(process.env[config.tokenEnv]) === undefined) {
+		if ((await configuredToken(config)) === undefined) {
 			return {
 				ok: false,
 				results: [],
-				gaps: [`GitHub code search requires authentication via ${config.tokenEnv}.`],
+				gaps: [`GitHub code search requires authentication via ${authSource(config)}.`],
 			}
 		}
 		if (trimmed(input.query) === undefined && trimmed(input.filename) === undefined) {

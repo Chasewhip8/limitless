@@ -1,15 +1,28 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
 	assertAllowedRepo,
 	githubCodeSearch,
 	githubFileRead,
 	githubRepoTree,
+	normalizeGitHubPluginConfig,
 	normalizeRepo,
 	parseRateLimitHeaders,
 } from '../github'
 
 const tokenEnv = 'LIMITLESS_TEST_GITHUB_TOKEN'
 const config = { tokenEnv, allowedRepos: [], allowUnrestrictedRepos: true }
+const tempDirs: Array<string> = []
+
+async function tokenFile(content: string): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), 'limitless-github-'))
+	tempDirs.push(dir)
+	const path = join(dir, 'token')
+	await writeFile(path, content, { mode: 0o600 })
+	return path
+}
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
 	return new Response(JSON.stringify(body), {
@@ -50,8 +63,9 @@ function fetchUrl(fetchMock: ReturnType<typeof vi.fn>): URL {
 	return new URL(url)
 }
 
-afterEach(() => {
+afterEach(async () => {
 	delete process.env[tokenEnv]
+	await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 	vi.unstubAllGlobals()
 })
 
@@ -73,6 +87,46 @@ describe('GitHub helpers', () => {
 		process.env[tokenEnv] = 'secret-token'
 		await githubFileRead(config, { repo: 'owner/repo', path: 'src/a.ts' })
 		expect(fetchHeaders(fetchMock).get('authorization')).toBe('Bearer secret-token')
+	})
+
+	test('Authorization header can be sourced from a token file', async () => {
+		const fetchMock = mockFetch(
+			jsonResponse({
+				path: 'src/a.ts',
+				sha: 'abc',
+				encoding: 'base64',
+				content: Buffer.from('hello').toString('base64'),
+				size: 5,
+			}),
+		)
+
+		await githubFileRead(
+			{ ...config, tokenFile: await tokenFile('file-token\n') },
+			{ repo: 'owner/repo', path: 'src/a.ts' },
+		)
+
+		expect(fetchHeaders(fetchMock).get('authorization')).toBe('Bearer file-token')
+	})
+
+	test('plugin config accepts an optional token file', () => {
+		expect(
+			normalizeGitHubPluginConfig({
+				github: {
+					enable: true,
+					tokenEnv: 'CUSTOM_TOKEN',
+					tokenFile: ' /run/agenix/github-token ',
+					allowUnrestrictedRepos: true,
+				},
+			}),
+		).toEqual({
+			enabled: true,
+			config: {
+				tokenEnv: 'CUSTOM_TOKEN',
+				tokenFile: '/run/agenix/github-token',
+				allowedRepos: [],
+				allowUnrestrictedRepos: true,
+			},
+		})
 	})
 
 	test('invalid repo names are rejected', () => {
@@ -131,6 +185,18 @@ describe('GitHub code search', () => {
 		expect(result.ok).toBe(false)
 		expect(result.gaps?.join('\n')).toContain('requires authentication')
 		expect(fetchMock).not.toHaveBeenCalled()
+	})
+
+	test('code search accepts authentication from a token file', async () => {
+		delete process.env[tokenEnv]
+		const fetchMock = mockFetch(jsonResponse({ items: [] }))
+
+		await githubCodeSearch(
+			{ ...config, tokenFile: await tokenFile('file-token') },
+			{ query: 'createLimitless' },
+		)
+
+		expect(fetchHeaders(fetchMock).get('authorization')).toBe('Bearer file-token')
 	})
 
 	test('403/429 return structured gaps', async () => {

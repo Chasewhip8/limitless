@@ -101,9 +101,10 @@ artifacts and compiled plugin files, while OpenCode loads those artifacts at run
 9. LSP tools request OpenCode config through the plugin client, normalize configured LSP servers,
    spawn a matching server process, open the target document, issue the requested LSP call, normalize
    the response, close the document, and shut the process down.
-10. GitHub tools read `process.env[tokenEnv]` at request time. Code search requires a token; file and
-    tree reads may use public unauthenticated requests. Configured `allowedRepos` restrict remote-code
-    tool targets, and empty allowlists require explicit `allowUnrestrictedRepos = true`.
+10. GitHub tools read the configured `tokenFile` at request time when set, otherwise they read
+    `process.env[tokenEnv]`. Code search requires a token; file and tree reads may use public
+    unauthenticated requests. Configured `allowedRepos` restrict remote-code tool targets, and empty
+    allowlists require explicit `allowUnrestrictedRepos = true`.
 11. GitHub file and tree requests without an explicit `ref` use the repository default branch and
     report that caveat. Repo-tree inspection is non-recursive by default; auth failures, search
     limits, response-size limits, and rate limits are returned as structured gaps.
@@ -134,9 +135,10 @@ only evidence-gathering or independent challenge, and returns the final plan its
 
 - `programs.limitless`: the Home Manager option namespace in `nix/modules/home.nix`. It is the main
   public configuration boundary for users.
-- `programs.limitless.github`: optional GitHub remote-code research configuration. `tokenEnv` names
-  the environment variable read by OpenCode, `allowedRepos` limits GitHub tool targets, and
-  `allowUnrestrictedRepos` is the explicit escape hatch for no allowlist.
+- `programs.limitless.github`: optional GitHub remote-code research configuration. `tokenFile` points
+  to an optional runtime token file, `tokenEnv` names the fallback environment variable read by
+  OpenCode, `allowedRepos` limits GitHub tool targets, and `allowUnrestrictedRepos` is the explicit
+  escape hatch for no allowlist.
 - Feature gates in `nix/modules/home.nix`: `enabledSkills`, `enabledAgents`, `enabledLimitless`,
   `enabledLsp`, `enabledContext7`, `enabledLinear`, and `enabledOpencodeService` drive conditional
   file/package/service installation.
@@ -226,8 +228,8 @@ it is an expected location rather than a current implementation directory.
   credential stores, destructive git operations, broad deletion, privilege escalation, pipe-to-shell
   installers, publishing, and infrastructure mutation commands.
 - Secret handling: the Linear plugin reads `LINEAR_API_KEY` from the OpenCode process environment;
-  GitHub tools read `process.env[tokenEnv]` such as `GITHUB_TOKEN`. Secret values are not written by
-  Nix module code.
+  GitHub tools read either `tokenFile` or `process.env[tokenEnv]` such as `GITHUB_TOKEN`. Secret
+  values are not written by Nix module code.
 - Runtime validation: plugin tool inputs are decoded with Effect Schema and failures are returned as
   structured tool payloads instead of uncaught exceptions.
 - Process ownership: command tools use `execFile`; LSP tools spawn a short-lived server process per

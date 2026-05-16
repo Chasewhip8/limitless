@@ -60,6 +60,7 @@ programs.limitless = {
   github = {
     enable = false;
     tokenEnv = "GITHUB_TOKEN";
+    tokenFile = null;
     allowedRepos = [];
     allowUnrestrictedRepos = false;
   };
@@ -95,12 +96,13 @@ Enable optional GitHub source tools with:
 programs.limitless.github = {
   enable = true;
   tokenEnv = "GITHUB_TOKEN";
+  tokenFile = null;
   allowedRepos = [ "owner/repo" ];
   allowUnrestrictedRepos = false;
 };
 ```
 
-Provide the token through the named environment variable, for example `GITHUB_TOKEN`, for private repositories, higher rate limits, and GitHub code search. Limitless writes only the environment variable name and repository allowlist into generated configuration, never the token value.
+Provide the token through either the named environment variable, for example `GITHUB_TOKEN`, or a runtime token file such as `/run/agenix/github-token`, for private repositories, higher rate limits, and GitHub code search. When `tokenFile` is set, Limitless reads that file instead of `tokenEnv`. Limitless writes only the environment variable name, optional token file path, and repository allowlist into generated configuration, never the token value.
 
 `allowedRepos` must be non-empty when GitHub tools are enabled unless you explicitly set `allowUnrestrictedRepos = true`. Use fine-grained read-only tokens. File reads and repo-tree requests without an explicit `ref` use GitHub's default branch, so results report that caveat. GitHub auth failures and rate limits are returned as explicit gaps.
 
