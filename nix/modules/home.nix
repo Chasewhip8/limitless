@@ -89,6 +89,17 @@ let
         allowUnrestrictedRepos
         ;
     };
+    notifications = {
+      inherit (cfg.notifications)
+        enable
+        command
+        includeChildSessions
+        timeoutMs
+        ;
+      events = {
+        inherit (cfg.notifications.events) complete question;
+      };
+    };
   };
 
   lspPackages =
@@ -304,6 +315,50 @@ in
         type = lib.types.bool;
         default = false;
         description = "Allow GitHub tools to access any repository visible to the configured token when allowedRepos is empty.";
+      };
+    };
+
+    notifications = {
+      enable = lib.mkEnableOption "running a system command on OpenCode completion and question events";
+
+      command = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [
+          "notify-send"
+          "OpenCode needs attention"
+        ];
+        description = ''
+          Command argv executed by the Limitless OpenCode plugin for enabled notification events.
+          The first element is executed directly without a shell and the remaining elements are
+          passed as arguments.
+        '';
+      };
+
+      timeoutMs = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 5000;
+        description = "Maximum time in milliseconds to wait for the notification command.";
+      };
+
+      includeChildSessions = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Whether completion notifications should also fire for child/subagent sessions.";
+      };
+
+      events = {
+        complete = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Run the notification command when a top-level OpenCode session becomes idle.";
+        };
+
+        question = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Run the notification command before the OpenCode question tool prompts the user.";
+        };
       };
     };
 
@@ -608,6 +663,10 @@ in
               !cfg.github.enable || cfg.github.allowedRepos != [ ] || cfg.github.allowUnrestrictedRepos;
             message = "programs.limitless.github.allowedRepos must be non-empty unless programs.limitless.github.allowUnrestrictedRepos is true.";
           }
+          {
+            assertion = !cfg.notifications.enable || cfg.notifications.command != [ ];
+            message = "programs.limitless.notifications.command must be non-empty when notifications are enabled.";
+          }
         ];
 
         home = {
@@ -653,11 +712,21 @@ in
               export default (input, options = {}) => {
                 const base = object(options);
                 const github = object(base.github);
+                const notifications = object(base.notifications);
+                const notificationEvents = object(notifications.events);
                 return plugin(input, {
                   ...base,
                   github: {
                     ...generatedOptions.github,
                     ...github,
+                  },
+                  notifications: {
+                    ...generatedOptions.notifications,
+                    ...notifications,
+                    events: {
+                      ...generatedOptions.notifications.events,
+                      ...notificationEvents,
+                    },
                   },
                 });
               };

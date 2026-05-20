@@ -28,6 +28,7 @@
 - **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional GitHub source-code research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **MCP defaults**: Context7 is enabled out of the box; Linear MCP remains opt-in and reads `LINEAR_API_KEY` from the OpenCode process environment.
+- **Native attention hooks**: optionally run a system command when a session completes or the question tool prompts the user.
 - **Safer agent permissions**: common work is allowed, while credential access, destructive git operations, broad deletion, publishing, privilege escalation, and infrastructure mutations ask first.
 - **Optional service mode**: OpenCode can run as a user service with a shell alias that attaches from the current directory.
 
@@ -63,6 +64,17 @@ programs.limitless = {
     tokenFile = null;
     allowedRepos = [];
     allowUnrestrictedRepos = false;
+  };
+
+  notifications = {
+    enable = false;
+    command = [];
+    timeoutMs = 5000;
+    includeChildSessions = false;
+    events = {
+      complete = true;
+      question = true;
+    };
   };
 
   lsp = {
@@ -105,6 +117,21 @@ programs.limitless.github = {
 Provide the token through either the named environment variable, for example `GITHUB_TOKEN`, or a runtime token file such as `/run/agenix/github-token`, for private repositories, higher rate limits, and GitHub code search. When `tokenFile` is set, Limitless reads that file instead of `tokenEnv`. Limitless writes only the environment variable name, optional token file path, and repository allowlist into generated configuration, never the token value.
 
 `allowedRepos` must be non-empty when GitHub tools are enabled unless you explicitly set `allowUnrestrictedRepos = true`. Use fine-grained read-only tokens. File reads and repo-tree requests without an explicit `ref` use GitHub's default branch, so results report that caveat. GitHub auth failures and rate limits are returned as explicit gaps.
+
+## Attention notifications
+
+Enable a native Limitless command hook without adding a separate OpenCode notifier plugin:
+
+```nix
+programs.limitless.notifications = {
+  enable = true;
+  command = [ "notify-send" "OpenCode needs attention" ];
+  events.complete = true;
+  events.question = true;
+};
+```
+
+The command is executed directly, without a shell. Completion notifications fire when a top-level OpenCode session becomes idle; question notifications fire before the OpenCode `question` tool prompts the user. Child/subagent completion notifications are skipped by default.
 
 ## Maintainers
 

@@ -18,6 +18,7 @@ import {
 	lspRename,
 	lspSymbols,
 } from './lsp'
+import { createNotificationRunner, normalizeNotificationConfig } from './notifications'
 import {
 	ScratchpadCreateInput,
 	ScratchpadListInput,
@@ -287,118 +288,128 @@ function githubTools(options: PluginOptions | undefined) {
 }
 
 export function createLimitless(): Plugin {
-	return async (pluginInput, options) => ({
-		tool: {
-			scratchpad_create: tool({
-				description:
-					'Create an empty session-scoped scratchpad file and return its workspace-relative path.',
-				args: {
-					name: tool.schema.string(),
-				},
-				execute(args, context) {
-					return executeTool('scratchpad_create', ScratchpadCreateInput, args, context, (input) =>
-						scratchpadCreate(input, context),
-					)
-				},
-			}),
-			scratchpad_list: tool({
-				description: 'List session-scoped scratchpad files and their workspace-relative paths.',
-				args: {},
-				execute(args, context) {
-					return executeTool('scratchpad_list', ScratchpadListInput, args, context, (input) =>
-						scratchpadList(input, context),
-					)
-				},
-			}),
-			ast_grep_search: tool({
-				description: 'Search code with ast-grep using the packaged binary.',
-				args: {
-					pattern: tool.schema.string(),
-					lang: tool.schema.string().optional(),
-					language: tool.schema.string().optional(),
-					paths: tool.schema.array(tool.schema.string()).optional(),
-					workspace: tool.schema.string().optional(),
-					json: tool.schema.boolean().optional(),
-					timeoutMs: tool.schema.number().optional(),
-				},
-				execute(args, context) {
-					return executeTool('ast_grep_search', AstGrepSearchInput, args, context, (input) =>
-						astGrepSearch(input, context),
-					)
-				},
-			}),
-			ast_grep_replace: tool({
-				description: 'Rewrite code with ast-grep. Dry-run is enabled by default.',
-				args: {
-					pattern: tool.schema.string(),
-					rewrite: tool.schema.string(),
-					lang: tool.schema.string().optional(),
-					language: tool.schema.string().optional(),
-					paths: tool.schema.array(tool.schema.string()).optional(),
-					workspace: tool.schema.string().optional(),
-					dryRun: tool.schema.boolean().optional(),
-					timeoutMs: tool.schema.number().optional(),
-				},
-				execute(args, context) {
-					return executeTool('ast_grep_replace', AstGrepReplaceInput, args, context, (input) =>
-						astGrepReplace(input, context),
-					)
-				},
-			}),
-			lsp_diagnostics: tool({
-				description: 'Run safe local diagnostics for TS/JS projects.',
-				args: pathArgs,
-				execute(args, context) {
-					return executeTool('lsp_diagnostics', DiagnosticsInput, args, context, (input) =>
-						lspDiagnostics(input, context),
-					)
-				},
-			}),
-			lsp_references: tool({
-				description:
-					'Find references through the configured language server for a zero-based file position.',
-				args: {
-					...positionArgs,
-					includeDeclaration: tool.schema.boolean().optional(),
-					maxResults: tool.schema.number().optional(),
-				},
-				execute(args, context) {
-					return executeTool('lsp_references', LspReferencesInput, args, context, (input) =>
-						lspReferences(pluginInput, input, context),
-					)
-				},
-			}),
-			lsp_symbols: tool({
-				description: 'Find document or workspace symbols through configured language servers.',
-				args: {
-					...pathArgs,
-					server: tool.schema.string().optional(),
-					timeoutMs: tool.schema.number().optional(),
-					query: tool.schema.string().optional(),
-					maxResults: tool.schema.number().optional(),
-				},
-				execute(args, context) {
-					return executeTool('lsp_symbols', LspSymbolsInput, args, context, (input) =>
-						lspSymbols(pluginInput, input, context),
-					)
-				},
-			}),
-			lsp_rename: tool({
-				description:
-					'Preview rename edits from the configured language server without writing files.',
-				args: {
-					...positionArgs,
-					newName: tool.schema.string(),
-				},
-				execute(args, context) {
-					return executeTool('lsp_rename', LspRenameInput, args, context, (input) =>
-						lspRename(pluginInput, input, context),
-					)
-				},
-			}),
-			...githubTools(options),
-		},
-	})
+	return async (pluginInput, options) => {
+		const notifications = createNotificationRunner(normalizeNotificationConfig(options))
+
+		return {
+			event: async ({ event }) => {
+				await notifications.handleEvent(event)
+			},
+			'tool.execute.before': async (input) => {
+				if (input.tool === 'question') await notifications.notify('question')
+			},
+			tool: {
+				scratchpad_create: tool({
+					description:
+						'Create an empty session-scoped scratchpad file and return its workspace-relative path.',
+					args: {
+						name: tool.schema.string(),
+					},
+					execute(args, context) {
+						return executeTool('scratchpad_create', ScratchpadCreateInput, args, context, (input) =>
+							scratchpadCreate(input, context),
+						)
+					},
+				}),
+				scratchpad_list: tool({
+					description: 'List session-scoped scratchpad files and their workspace-relative paths.',
+					args: {},
+					execute(args, context) {
+						return executeTool('scratchpad_list', ScratchpadListInput, args, context, (input) =>
+							scratchpadList(input, context),
+						)
+					},
+				}),
+				ast_grep_search: tool({
+					description: 'Search code with ast-grep using the packaged binary.',
+					args: {
+						pattern: tool.schema.string(),
+						lang: tool.schema.string().optional(),
+						language: tool.schema.string().optional(),
+						paths: tool.schema.array(tool.schema.string()).optional(),
+						workspace: tool.schema.string().optional(),
+						json: tool.schema.boolean().optional(),
+						timeoutMs: tool.schema.number().optional(),
+					},
+					execute(args, context) {
+						return executeTool('ast_grep_search', AstGrepSearchInput, args, context, (input) =>
+							astGrepSearch(input, context),
+						)
+					},
+				}),
+				ast_grep_replace: tool({
+					description: 'Rewrite code with ast-grep. Dry-run is enabled by default.',
+					args: {
+						pattern: tool.schema.string(),
+						rewrite: tool.schema.string(),
+						lang: tool.schema.string().optional(),
+						language: tool.schema.string().optional(),
+						paths: tool.schema.array(tool.schema.string()).optional(),
+						workspace: tool.schema.string().optional(),
+						dryRun: tool.schema.boolean().optional(),
+						timeoutMs: tool.schema.number().optional(),
+					},
+					execute(args, context) {
+						return executeTool('ast_grep_replace', AstGrepReplaceInput, args, context, (input) =>
+							astGrepReplace(input, context),
+						)
+					},
+				}),
+				lsp_diagnostics: tool({
+					description: 'Run safe local diagnostics for TS/JS projects.',
+					args: pathArgs,
+					execute(args, context) {
+						return executeTool('lsp_diagnostics', DiagnosticsInput, args, context, (input) =>
+							lspDiagnostics(input, context),
+						)
+					},
+				}),
+				lsp_references: tool({
+					description:
+						'Find references through the configured language server for a zero-based file position.',
+					args: {
+						...positionArgs,
+						includeDeclaration: tool.schema.boolean().optional(),
+						maxResults: tool.schema.number().optional(),
+					},
+					execute(args, context) {
+						return executeTool('lsp_references', LspReferencesInput, args, context, (input) =>
+							lspReferences(pluginInput, input, context),
+						)
+					},
+				}),
+				lsp_symbols: tool({
+					description: 'Find document or workspace symbols through configured language servers.',
+					args: {
+						...pathArgs,
+						server: tool.schema.string().optional(),
+						timeoutMs: tool.schema.number().optional(),
+						query: tool.schema.string().optional(),
+						maxResults: tool.schema.number().optional(),
+					},
+					execute(args, context) {
+						return executeTool('lsp_symbols', LspSymbolsInput, args, context, (input) =>
+							lspSymbols(pluginInput, input, context),
+						)
+					},
+				}),
+				lsp_rename: tool({
+					description:
+						'Preview rename edits from the configured language server without writing files.',
+					args: {
+						...positionArgs,
+						newName: tool.schema.string(),
+					},
+					execute(args, context) {
+						return executeTool('lsp_rename', LspRenameInput, args, context, (input) =>
+							lspRename(pluginInput, input, context),
+						)
+					},
+				}),
+				...githubTools(options),
+			},
+		}
+	}
 }
 
 export default createLimitless()
