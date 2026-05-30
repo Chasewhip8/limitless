@@ -745,6 +745,7 @@ in
           Unit.Description = "OpenCode server";
 
           Service = {
+            Environment = "OPENCODE_EXPERIMENTAL_WEBSOCKETS=true";
             ExecStart = "${cfg.opencode.package}/bin/opencode serve --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
             Restart = "on-failure";
             RestartSec = "5s";
