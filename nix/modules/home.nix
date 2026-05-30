@@ -1,4 +1,4 @@
-{ self, opencode }:
+{ self, llm-agents }:
 {
   config,
   lib,
@@ -122,8 +122,8 @@ in
     opencode = {
       package = lib.mkOption {
         type = lib.types.package;
-        inherit (opencode.packages.${system}) default;
-        description = "OpenCode package to install. Defaults to the packaged OpenCode GitHub flake.";
+        default = llm-agents.packages.${system}.opencode;
+        description = "OpenCode package to install. Defaults to the Numtide llm-agents.nix OpenCode package.";
       };
 
       configDir = lib.mkOption {

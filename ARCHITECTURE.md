@@ -209,7 +209,7 @@ it is an expected location rather than a current implementation directory.
 
 | Dependency area | Observed dependencies | Used by |
 | --- | --- | --- |
-| Flake inputs | `nixpkgs`, `flake-utils`, `convex-agent-plugins`, `opencode` | `flake.nix` package/module exports |
+| Flake inputs | `nixpkgs`, `flake-utils`, `convex-agent-plugins`, `llm-agents` | `flake.nix` package/module exports |
 | Runtime JS packages | `@opencode-ai/plugin`, `effect` | `packages/limitless` |
 | Build/dev tooling | Bun, Node.js, TypeScript, Vitest, Biome, markdownlint-cli2, actionlint, nixfmt, statix, deadnix | root scripts, dev shell, CI |
 | Packaged CLIs | ast-grep, agent-browser, effect-solutions | Limitless plugin tools and CLI-backed skills |

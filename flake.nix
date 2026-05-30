@@ -1,6 +1,11 @@
 {
   description = "abilities - skills and tools for AI agents";
 
+  nixConfig = {
+    extra-substituters = [ "https://cache.numtide.com" ];
+    extra-trusted-public-keys = [ "niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=" ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
@@ -8,7 +13,7 @@
       url = "github:get-convex/convex-agent-plugins";
       flake = false;
     };
-    opencode.url = "github:anomalyco/opencode/v1.15.12";
+    llm-agents.url = "github:numtide/llm-agents.nix";
   };
 
   outputs =
@@ -17,7 +22,7 @@
       nixpkgs,
       flake-utils,
       convex-agent-plugins,
-      opencode,
+      llm-agents,
     }:
     let
       eachSystem = flake-utils.lib.eachDefaultSystem (
@@ -82,7 +87,7 @@
     in
     eachSystem
     // {
-      homeModules.default = import ./nix/modules/home.nix { inherit self opencode; };
+      homeModules.default = import ./nix/modules/home.nix { inherit self llm-agents; };
       overlays.default = final: _prev: {
         abilities-skills = self.packages.${final.stdenv.hostPlatform.system}.skills;
         abilities-opencode-agents = self.packages.${final.stdenv.hostPlatform.system}."opencode-agents";
