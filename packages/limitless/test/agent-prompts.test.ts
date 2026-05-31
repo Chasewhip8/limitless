@@ -87,6 +87,18 @@ function enabledAgentNames(): Array<string> {
 		.sort((left, right) => left.localeCompare(right))
 }
 
+function enabledAgentNamesWithMode(mode: string): Array<string> {
+	return enabledAgentNames().filter((agentName) => readAgentFrontmatter(agentName).mode === mode)
+}
+
+function enabledPrimaryAgentNames(): Array<string> {
+	return enabledAgentNamesWithMode('primary')
+}
+
+function enabledSubagentNames(): Array<string> {
+	return enabledAgentNamesWithMode('subagent')
+}
+
 function requireObject(value: FrontmatterValue | undefined, label: string): FrontmatterObject {
 	if (typeof value === 'object' && value !== null && !Array.isArray(value)) return value
 	throw new Error(`${label} must be an object.`)
@@ -130,15 +142,18 @@ describe('agent prompt frontmatter', () => {
 		}
 	})
 
-	test('primary has expected subagent task permissions', () => {
-		const task = requireObject(permissionFor('limitless').task, 'limitless task permission')
-		const expectedSubagents = enabledAgentNames().filter((agentName) => agentName !== 'limitless')
+	test('primary agents have expected subagent task permissions', () => {
+		const expectedSubagents = enabledSubagentNames()
 
-		expect(Object.keys(task).sort((left, right) => left.localeCompare(right))).toEqual(
-			expectedSubagents,
-		)
-		for (const subagent of expectedSubagents) {
-			expect(task[subagent]).toBe('allow')
+		for (const agentName of enabledPrimaryAgentNames()) {
+			const task = requireObject(permissionFor(agentName).task, `${agentName} task permission`)
+
+			expect(Object.keys(task).sort((left, right) => left.localeCompare(right))).toEqual(
+				expectedSubagents,
+			)
+			for (const subagent of expectedSubagents) {
+				expect(task[subagent]).toBe('allow')
+			}
 		}
 	})
 
@@ -207,7 +222,9 @@ describe('advisor prompt', () => {
 	})
 
 	test('advisor task routing is limited to primary and review roles', () => {
-		expectCanTask('limitless', 'advisor')
+		for (const agentName of enabledPrimaryAgentNames()) {
+			expectCanTask(agentName, 'advisor')
+		}
 		expectCanTask('review', 'advisor')
 		expectCannotTask('engineer', 'advisor')
 		expectCannotTask('frontend', 'advisor')
@@ -215,7 +232,9 @@ describe('advisor prompt', () => {
 
 	test('strategy subagent is removed so planning stays in primary context', () => {
 		expect(agentFiles).not.toContain('strategy.md')
-		expect(taskPermissionFor('limitless')?.strategy).not.toBe('allow')
+		for (const agentName of enabledPrimaryAgentNames()) {
+			expect(taskPermissionFor(agentName)?.strategy, agentName).not.toBe('allow')
+		}
 	})
 
 	test('critique.md does not exist, or is explicitly marked deprecated', () => {
@@ -268,7 +287,9 @@ describe('research prompt', () => {
 	})
 
 	test('research task routing includes callers that need evidence', () => {
-		expectCanTask('limitless', 'research')
+		for (const agentName of enabledPrimaryAgentNames()) {
+			expectCanTask(agentName, 'research')
+		}
 		expectCanTask('advisor', 'research')
 		expectCanTask('engineer', 'research')
 		expectCanTask('frontend', 'research')
