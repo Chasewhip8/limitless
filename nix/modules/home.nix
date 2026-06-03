@@ -33,16 +33,17 @@ let
   effectSolutionsPackage = self.packages.${system}."effect-solutions";
 
   enabledSkillsPackage = pkgs.runCommand "limitless-enabled-skills" { } ''
+    copySkills() {
+      if [ -d "$1" ]; then
+        cp -r "$1"/. $out/
+        chmod -R u+w $out
+      fi
+    }
+
     mkdir -p $out
-    cp -r ${cfg.skills.package}/. $out/
-
-    if [ -d ${agentBrowserPackage}/share/skills ]; then
-      cp -r ${agentBrowserPackage}/share/skills/. $out/
-    fi
-
-    if [ -d ${effectSolutionsPackage}/share/skills ]; then
-      cp -r ${effectSolutionsPackage}/share/skills/. $out/
-    fi
+    copySkills ${cfg.skills.package}
+    copySkills ${agentBrowserPackage}/share/skills
+    copySkills ${effectSolutionsPackage}/share/skills
   '';
 
   mkLspServer =

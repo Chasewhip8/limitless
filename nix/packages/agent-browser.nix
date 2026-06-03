@@ -40,9 +40,13 @@ pkgs.stdenvNoCC.mkDerivation {
   dontBuild = true;
 
   installPhase = ''
-    mkdir -p $out/bin $out/share/skills
+    mkdir -p $out/bin
     install -m755 $src $out/bin/agent-browser
-    cp -r ${self}/skills/agent-browser $out/share/skills/agent-browser
+
+    if [ -d ${self}/skills/agent-browser ]; then
+      mkdir -p $out/share/skills
+      cp -r ${self}/skills/agent-browser $out/share/skills/agent-browser
+    fi
   '';
 
   # On Linux, point agent-browser at nix-provided chromium so users don't need
