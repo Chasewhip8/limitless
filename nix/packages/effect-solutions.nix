@@ -30,7 +30,7 @@ pkgs.stdenvNoCC.mkDerivation {
     mkdir -p "$out/bin" "$out/share/skills"
     ${pkgs.gnutar}/bin/tar -xzf "$src" -C "$tmpdir"
     install -m755 "$tmpdir/package/dist/${binaryName}" "$out/bin/effect-solutions"
-    cp -r ${self}/skills/typescript-effect "$out/share/skills/typescript-effect"
+    cp -r ${self}/nix/skills/typescript-effect "$out/share/skills/typescript-effect"
   '';
 
   meta = with pkgs.lib; {

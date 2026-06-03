@@ -29,8 +29,13 @@ let
   opencodeServiceUrl = "http://${cfg.opencode.service.hostname}:${toString cfg.opencode.service.port}";
   opencodeAttachCommand = "${cfg.opencode.package}/bin/opencode attach ${opencodeServiceUrl} --dir \"$PWD\"";
 
-  agentBrowserPackage = self.packages.${system}."agent-browser";
-  effectSolutionsPackage = self.packages.${system}."effect-solutions";
+  defaultAgentBrowserPackage = self.packages.${system}."agent-browser";
+  defaultEffectSolutionsPackage = self.packages.${system}."effect-solutions";
+
+  enabledAgentBrowser = cfg.enable && cfg.tools.agentBrowser.enable;
+  enabledEffectSolutions = cfg.enable && cfg.tools.effectSolutions.enable;
+  enabledAgentBrowserSkill = enabledSkills && enabledAgentBrowser;
+  enabledEffectSolutionsSkill = enabledSkills && enabledEffectSolutions;
 
   enabledSkillsPackage = pkgs.runCommand "limitless-enabled-skills" { } ''
     copySkills() {
@@ -42,8 +47,8 @@ let
 
     mkdir -p $out
     copySkills ${cfg.skills.package}
-    copySkills ${agentBrowserPackage}/share/skills
-    copySkills ${effectSolutionsPackage}/share/skills
+    ${lib.optionalString enabledAgentBrowserSkill "copySkills ${cfg.tools.agentBrowser.package}/share/skills"}
+    ${lib.optionalString enabledEffectSolutionsSkill "copySkills ${cfg.tools.effectSolutions.package}/share/skills"}
   '';
 
   mkLspServer =
@@ -251,6 +256,38 @@ in
         type = lib.types.str;
         default = ".agents/skills";
         description = "Directory relative to $HOME for skill installation.";
+      };
+    };
+
+    tools = {
+      agentBrowser = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = cfg.skills.enable;
+          defaultText = lib.literalExpression "config.programs.limitless.skills.enable";
+          description = "Whether to install agent-browser and its companion skill when skill installation is enabled.";
+        };
+
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = defaultAgentBrowserPackage;
+          description = "agent-browser package to install.";
+        };
+      };
+
+      effectSolutions = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = cfg.skills.enable;
+          defaultText = lib.literalExpression "config.programs.limitless.skills.enable";
+          description = "Whether to install effect-solutions and its TypeScript Effect companion skill when skill installation is enabled.";
+        };
+
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = defaultEffectSolutionsPackage;
+          description = "effect-solutions package to install.";
+        };
       };
     };
 
@@ -683,11 +720,12 @@ in
           source = enabledSkillsPackage;
           recursive = true;
         };
-
-        home.packages = [
-          agentBrowserPackage
-          effectSolutionsPackage
-        ];
+      })
+      (lib.mkIf enabledAgentBrowser {
+        home.packages = [ cfg.tools.agentBrowser.package ];
+      })
+      (lib.mkIf enabledEffectSolutions {
+        home.packages = [ cfg.tools.effectSolutions.package ];
       })
       (lib.mkIf enabledAgents {
         home.file."${opencodeDir}/agents" = {

@@ -39,7 +39,9 @@
 
           skillsPackage = pkgs.runCommand "abilities-skills" { } ''
             mkdir -p $out
-            cp -r ${self}/skills/* $out/
+            if [ -d ${self}/skills ]; then
+              cp -r ${self}/skills/. $out/
+            fi
           '';
           opencodeAgentsPackage = pkgs.runCommand "abilities-opencode-agents" { } ''
             mkdir -p $out
