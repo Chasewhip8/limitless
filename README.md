@@ -23,7 +23,7 @@
 
 - **One module to enable**: `programs.limitless.enable = true` wires OpenCode, agents, skills, plugins, MCPs, and language servers together.
 - **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, advisor pushback, implementation, and final review.
-- **Reusable skills**: local skills and CLI-backed skills are installed into the agent skills directory for architecture docs, TypeScript/service patterns, Effect guidance, and browser automation.
+- **Reusable skills**: local skills, including CLI companion skills, are installed into the agent skills directory for architecture docs, TypeScript/service patterns, Effect guidance, and browser automation.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
 - **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional GitHub source-code research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.

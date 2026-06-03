@@ -1,11 +1,11 @@
 ---
 name: agent-browser
-description: Browser automation via the agent-browser CLI. Navigate pages, interact with elements, take screenshots, and extract content from live browser sessions. Use for web verification, scraping, form filling, and end-to-end testing.
+description: Always load this skill when automating browser interactions, verifying web pages, scraping page content, filling forms, or running end-to-end browser checks with the agent-browser CLI
 ---
 
 # Agent Browser
 
-Use this skill when automating browser interactions via the `agent-browser` CLI.
+Browser interactions via the `agent-browser` CLI.
 
 ## When to Use
 

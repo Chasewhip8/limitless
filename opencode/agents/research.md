@@ -7,10 +7,6 @@ permission:
     edit: deny
     bash: deny
     ast_grep_replace: deny
-    webfetch: allow
-    github_code_search: allow
-    github_file_read: allow
-    github_repo_tree: allow
 ---
 
 # Research

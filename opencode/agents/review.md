@@ -7,13 +7,6 @@ permission:
     edit: deny
     bash: deny
     ast_grep_replace: deny
-    github_code_search: deny
-    github_file_read: deny
-    github_repo_tree: deny
-    webfetch: deny
-    task:
-        research: allow
-        advisor: allow
 ---
 
 # Review

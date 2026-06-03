@@ -58,22 +58,6 @@
         "type": "github"
       }
     },
-    "convex-agent-plugins": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1771339712,
-        "narHash": "sha256-gjeuyds6l6qwg+B2yN8n3jhAMOJI6pj2SsPCojEInyQ=",
-        "owner": "get-convex",
-        "repo": "convex-agent-plugins",
-        "rev": "f104efb49a787a1ef4a6c84df496d58800ce334a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "get-convex",
-        "repo": "convex-agent-plugins",
-        "type": "github"
-      }
-    },
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
@@ -170,7 +154,6 @@
     },
     "root": {
       "inputs": {
-        "convex-agent-plugins": "convex-agent-plugins",
         "flake-utils": "flake-utils",
         "llm-agents": "llm-agents",
         "nixpkgs": "nixpkgs_2"

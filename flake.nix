@@ -9,10 +9,6 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    convex-agent-plugins = {
-      url = "github:get-convex/convex-agent-plugins";
-      flake = false;
-    };
     llm-agents.url = "github:numtide/llm-agents.nix";
   };
 
@@ -21,7 +17,6 @@
       self,
       nixpkgs,
       flake-utils,
-      convex-agent-plugins,
       llm-agents,
     }:
     let
@@ -45,7 +40,6 @@
           skillsPackage = pkgs.runCommand "abilities-skills" { } ''
             mkdir -p $out
             cp -r ${self}/skills/* $out/
-            cp -r ${convex-agent-plugins}/skills/* $out/
           '';
           opencodeAgentsPackage = pkgs.runCommand "abilities-opencode-agents" { } ''
             mkdir -p $out
