@@ -1,7 +1,7 @@
 ---
 description: Ruthless read-only review subagent for targeted vertical review of plans, diffs, and implementations.
 mode: subagent
-model: openai/gpt-5.5
+model: openai/gpt-5.5-fast
 reasoningEffort: xhigh
 permission:
     edit: deny
