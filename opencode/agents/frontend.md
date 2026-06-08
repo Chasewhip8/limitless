@@ -3,6 +3,10 @@ description: Ruthless frontend subagent for substantial browser-facing design, U
 mode: subagent
 model: anthropic/claude-opus-4-7
 reasoningEffort: max
+permission:
+    task:
+        "*": deny
+        research: allow
 ---
 
 # Frontend

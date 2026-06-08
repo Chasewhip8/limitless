@@ -3,6 +3,10 @@ description: Ruthless implementation subagent for heavy non-frontend engineering
 mode: subagent
 model: openai/gpt-5.5-fast
 reasoningEffort: xhigh
+permission:
+    task:
+        "*": deny
+        research: allow
 ---
 
 # Engineer
