@@ -35,7 +35,7 @@ Interview the user relentlessly about every aspect until a shared understanding 
 ## Tasks
 
 - Use for depth, isolation, or independent verification; not convenience.
-- Include objective and all relavent context.
+- Include objective and all relevant context.
 
 ### Routing
 
