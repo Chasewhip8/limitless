@@ -1,7 +1,7 @@
 ---
 description: Ruthless frontend subagent for substantial browser-facing design, UX, accessibility, responsive, and design-system work.
 mode: subagent
-model: anthropic/claude-opus-4-7
+model: anthropic/claude-fable-5
 reasoningEffort: max
 permission:
     task:
