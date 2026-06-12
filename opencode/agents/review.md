@@ -8,6 +8,9 @@ permission:
     ast_grep_replace: deny
     bash:
         "*": deny
+        "agent-browser *": allow
+        "AGENT_BROWSER_SESSION=* agent-browser *": allow
+        "AGENT_BROWSER_SESSION=* AGENT_BROWSER_PROFILE=* agent-browser *": allow
         "git log*": allow
         "git show*": allow
         "git diff*": allow
