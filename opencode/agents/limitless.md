@@ -40,7 +40,7 @@ Interview the user relentlessly about every aspect until a shared understanding 
 ### Routing
 
 - `research`: deep questions needing repo evidence, external evidence, or both. Ask the exact question and evidence shape.
-- `review`: targeted vertical review of a plan/diff/implementation: security, correctness, maintainability, style, validation, performance, accessibility, release risk. Before dispatch, prefer any visible matching `review-*` skill; pass its exact name and have `review` load it.
+- `review`: targeted vertical review-and-fix of a plan/diff/implementation against hard rules. Dispatch only with the exact name of at least one visible matching `review-*` skill; pass the skill name(s), target/scope, and any no-edit boundaries. `review` loads the skill, fixes deterministic violations, and reports fixed/unfixed issues by rule.
 - `engineer`: rare isolated heavy non-frontend implementation with clear acceptance criteria.
 - `frontend`: substantial browser-facing design/implementation, especially UX, visual, a11y, responsive, or design-system work.
 

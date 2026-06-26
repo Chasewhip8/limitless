@@ -158,7 +158,7 @@ describe('agent prompt frontmatter', () => {
 	})
 
 	test('read-only agents deny edit/bash', () => {
-		const readOnlyAgents = ['advisor', 'research', 'review']
+		const readOnlyAgents = ['advisor', 'research']
 		for (const agentName of readOnlyAgents) {
 			const permission = permissionFor(agentName)
 			expect(permission.edit, agentName).toBe('deny')
@@ -167,7 +167,7 @@ describe('agent prompt frontmatter', () => {
 	})
 
 	test('mutating custom tools are not allowed for read-only agents', () => {
-		const readOnlyAgents = ['advisor', 'research', 'review']
+		const readOnlyAgents = ['advisor', 'research']
 		const mutatingCustomTools = ['ast_grep_replace']
 
 		for (const agentName of readOnlyAgents) {
@@ -294,5 +294,20 @@ describe('research prompt', () => {
 		expectCanTask('engineer', 'research')
 		expectCanTask('frontend', 'research')
 		expectCanTask('review', 'research')
+	})
+})
+
+describe('review prompt', () => {
+	test('review is a skill-based review-and-fix agent', () => {
+		const frontmatter = readAgentFrontmatter('review')
+		const permission = permissionFor('review')
+		const content = readAgentContent('review')
+
+		expect(frontmatter.description).toContain('review-and-fix')
+		expect(permission.edit).toBe('allow')
+		expect(permission.ast_grep_replace).toBe('allow')
+		expect(content).toContain('Every pass must be based on at least one named review skill')
+		expect(content).toContain('<fixed_issues>')
+		expect(content).toContain('<unfixed_issues>')
 	})
 })
