@@ -19,6 +19,7 @@
 		"forceConsistentCasingInFileNames": true
 	},
 	"include": [
+		"scripts/**/*",
 		"src/**/*",
 		"packages/*/src/**/*",
 		"packages/*/index.ts",

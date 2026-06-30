@@ -103,6 +103,7 @@ export const TypstTemplate = Schema.Struct({
 	description: Schema.String,
 	defaultEntry: Schema.String,
 	files: Schema.Array(Schema.String),
+	authoring: Schema.String,
 	dataShape: Schema.Record(Schema.String, Schema.Unknown),
 })
 export type TypstTemplate = typeof TypstTemplate.Type

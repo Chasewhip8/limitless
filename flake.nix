@@ -74,6 +74,7 @@
               python3
               pkg-config
               statix
+              typst
               effectSolutionsPackage
               agentBrowserPackage
             ];

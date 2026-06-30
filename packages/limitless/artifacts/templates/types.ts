@@ -38,10 +38,17 @@ export const TemplateJsonFile = Schema.Struct({
 	value: Schema.Unknown,
 })
 
+export const TemplateBinaryFile = Schema.Struct({
+	kind: Schema.Literal('binary'),
+	path: TemplatePath,
+	content: Schema.Uint8Array,
+})
+
 export const TemplateArtifactEntry = Schema.Union([
 	TemplateDirectory,
 	TemplateTextFile,
 	TemplateJsonFile,
+	TemplateBinaryFile,
 ])
 export type TemplateArtifactEntry = typeof TemplateArtifactEntry.Type
 

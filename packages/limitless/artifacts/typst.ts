@@ -75,13 +75,27 @@ export const typstCompile = Effect.fn(function* typstCompile(
 		'typst_compile',
 		'Could not inspect Typst dist directory',
 	)
+	const fontDirectory = path.join(directory, 'assets', 'fonts')
+	const hasFontDirectory = yield* ensureDirectory(
+		fontDirectory,
+		false,
+		'typst_compile',
+		'Could not inspect Typst font directory',
+	)
 
 	const outputFile = `${manifest.slug}.pdf`
 	const outputRelative = path.posix.join('dist', outputFile)
 	const outputPath = path.join(directory, outputRelative)
 	yield* ensureOutputPath(outputPath)
 
-	const args = ['compile', '--root', directory, entry, outputRelative]
+	const args = [
+		'compile',
+		...(hasFontDirectory ? ['--font-path', fontDirectory] : []),
+		'--root',
+		directory,
+		entry,
+		outputRelative,
+	]
 	const result = yield* runCommand(options.typstBin ?? TYPST_BIN, args, {
 		cwd: directory,
 		timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,

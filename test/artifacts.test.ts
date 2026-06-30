@@ -196,7 +196,7 @@ describe('artifact create and list', () => {
 				title: 'Strategy Brief',
 				template: 'brief',
 			})
-			for (const relativePath of ['manifest.json', 'main.typ', 'data.json']) {
+			for (const relativePath of ['manifest.json', 'main.typ']) {
 				await expect(
 					readFile(path.join(workspace, created.path, relativePath), 'utf8'),
 				).resolves.toEqual(expect.any(String))
@@ -261,9 +261,111 @@ describe('typst tools', () => {
 				expect.objectContaining({
 					name: 'brief',
 					defaultEntry: 'main.typ',
-					files: ['main.typ', 'data.json', 'assets/', 'dist/'],
+					files: ['main.typ', 'assets/', 'dist/'],
+				}),
+				expect.objectContaining({
+					name: 'sphere-institutional',
+					defaultEntry: 'main.typ',
+					files: ['main.typ', 'sphere.typ', 'assets/', 'dist/'],
+				}),
+				expect.objectContaining({
+					name: 'sphere-institutional-print',
+					defaultEntry: 'main.typ',
+					files: ['main.typ', 'sphere.typ', 'assets/', 'dist/'],
+				}),
+				expect.objectContaining({
+					name: 'sphere-institutional-showcase',
+					defaultEntry: 'main.typ',
+					files: ['main.typ', 'sphere.typ', 'assets/', 'dist/'],
 				}),
 			])
+		})
+	})
+
+	test('creates Sphere artifacts with packaged Inter fonts', async () => {
+		await withWorkspace(async (workspace) => {
+			const created = await runArtifactCreate(
+				{
+					kind: 'document',
+					title: 'Sphere Deck',
+					slug: 'sphere-deck',
+					template: 'sphere-institutional',
+				},
+				context(workspace),
+			)
+			const artifactPath = path.join(workspace, created.path)
+			await expect(readFile(path.join(artifactPath, 'sphere.typ'), 'utf8')).resolves.toContain(
+				'#let sphere-font = "Inter"',
+			)
+			await expect(readFile(path.join(artifactPath, 'sphere.typ'), 'utf8')).resolves.toContain(
+				'image("assets/sphere-logo.svg"',
+			)
+			await expect(
+				readFile(path.join(artifactPath, 'assets', 'sphere-logo.svg'), 'utf8'),
+			).resolves.toContain('<svg width="263" height="57"')
+			const regularFont = await readFile(
+				path.join(artifactPath, 'assets', 'fonts', 'Inter-Variable.ttf'),
+			)
+			const italicFont = await readFile(
+				path.join(artifactPath, 'assets', 'fonts', 'Inter-Italic-Variable.ttf'),
+			)
+			expect(regularFont.byteLength).toBeGreaterThan(0)
+			expect(italicFont.byteLength).toBeGreaterThan(0)
+			await expect(
+				readFile(path.join(artifactPath, 'assets', 'fonts', 'OFL.txt'), 'utf8'),
+			).resolves.toContain('SIL OPEN FONT LICENSE')
+
+			const fakeTypst = path.join(workspace, 'fake-typst')
+			await writeFile(
+				fakeTypst,
+				'#!/bin/sh\nprintf "%s\\n" "$@" > args.txt\nlast=\nfor arg do last=$arg; done\ntouch "$last"\n',
+			)
+			await chmod(fakeTypst, 0o755)
+
+			const result = await runTypstCompile(
+				{ artifact: created.slug },
+				context(workspace),
+				fakeTypst,
+			)
+
+			expect(result).toMatchObject({
+				ok: true,
+				artifact: 'sphere-deck',
+				outputPath: '.limitless/artifacts/sphere-deck/dist/sphere-deck.pdf',
+			})
+			await expect(readFile(path.join(artifactPath, 'args.txt'), 'utf8')).resolves.toBe(
+				[
+					'compile',
+					'--font-path',
+					path.join(artifactPath, 'assets', 'fonts'),
+					'--root',
+					artifactPath,
+					'main.typ',
+					'dist/sphere-deck.pdf',
+					'',
+				].join('\n'),
+			)
+		})
+	})
+
+	test('creates the complete Sphere showcase template', async () => {
+		await withWorkspace(async (workspace) => {
+			const created = await runArtifactCreate(
+				{
+					kind: 'document',
+					title: 'Sphere Institutional Showcase',
+					slug: 'sphere-showcase',
+					template: 'sphere-institutional-showcase',
+				},
+				context(workspace),
+			)
+			const artifactPath = path.join(workspace, created.path)
+			await expect(readFile(path.join(artifactPath, 'main.typ'), 'utf8')).resolves.toContain(
+				'Analytical dark mode',
+			)
+			await expect(readFile(path.join(artifactPath, 'sphere.typ'), 'utf8')).resolves.toContain(
+				'#let sphere-step-chart',
+			)
 		})
 	})
 

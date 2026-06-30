@@ -83,6 +83,24 @@ export const writeNewFile = Effect.fn(function* writeNewFile(
 	})
 })
 
+export const writeBinaryFile = Effect.fn(function* writeBinaryFile(
+	filePath: string,
+	content: Uint8Array,
+	toolName: string,
+) {
+	return yield* Effect.tryPromise({
+		try: async () => {
+			const handle = await open(filePath, 'wx')
+			try {
+				await handle.writeFile(content)
+			} finally {
+				await handle.close()
+			}
+		},
+		catch: (error) => artifactOperationError(toolName, 'Could not write artifact file', error),
+	})
+})
+
 export const writeJsonFile = Effect.fn(function* writeJsonFile(
 	filePath: string,
 	value: unknown,

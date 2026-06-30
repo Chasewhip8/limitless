@@ -153,7 +153,7 @@ The Limitless plugin exposes:
 - `typst_templates_list`: inspect built-in Typst templates.
 - `typst_compile`: compile a document artifact to PDF.
 
-Document artifacts keep editable `main.typ` and `data.json` sources alongside generated files in `dist/`.
+Document artifacts are source-first: edit `main.typ` directly, use template-provided `.typ` framework files such as `sphere.typ` when present, place charts/images/assets under `assets/`, and write generated outputs to `dist/`. The Sphere templates include a starter institutional document, a print-friendly variant, and a full showcase reference (`sphere-institutional-showcase`) that exercises cards, KPI strips, charts, tables, process diagrams, proof grids, dark analytical pages, and roadmaps.
 
 ## Maintainers
 

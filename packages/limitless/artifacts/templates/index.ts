@@ -1,14 +1,22 @@
 import path from 'node:path'
 import { Effect } from 'effect'
 import { toolInputError } from '../errors'
-import { ensureDirectory, writeJsonFile, writeNewFile } from '../files'
+import { ensureDirectory, writeBinaryFile, writeJsonFile, writeNewFile } from '../files'
 import type { TypstTemplatesListInput, TypstTemplatesListResult } from '../schemas'
 import { briefTemplate } from './brief'
+import { sphereInstitutionalTemplate } from './sphere-institutional'
+import { sphereInstitutionalPrintTemplate } from './sphere-institutional-print'
+import { sphereInstitutionalShowcaseTemplate } from './sphere-institutional-showcase'
 import type { TemplateArtifactEntry } from './types'
 
 const DEFAULT_TEMPLATE = 'brief'
 
-export const TYPST_TEMPLATE_DEFINITIONS = [briefTemplate] as const
+export const TYPST_TEMPLATE_DEFINITIONS = [
+	briefTemplate,
+	sphereInstitutionalTemplate,
+	sphereInstitutionalPrintTemplate,
+	sphereInstitutionalShowcaseTemplate,
+] as const
 export type TypstTemplateDefinition = (typeof TYPST_TEMPLATE_DEFINITIONS)[number]
 
 export const resolveTemplate = Effect.fn(function* resolveTemplate(
@@ -46,6 +54,9 @@ export const instantiateTemplate = Effect.fn(function* instantiateTemplate(
 				break
 			case 'json':
 				yield* writeJsonFile(target, entry.value, input.toolName)
+				break
+			case 'binary':
+				yield* writeBinaryFile(target, entry.content, input.toolName)
 				break
 			default: {
 				const exhaustive: never = entry
