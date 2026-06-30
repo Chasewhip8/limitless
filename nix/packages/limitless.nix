@@ -50,7 +50,8 @@ pkgs.stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out"
     substitute "dist/limitless.js" "$out/limitless.js" \
-      --replace-fail "@AST_GREP_BIN@" "${pkgs.ast-grep}/bin/ast-grep"
+      --replace-fail "@AST_GREP_BIN@" "${pkgs.ast-grep}/bin/ast-grep" \
+      --replace-fail "@TYPST_BIN@" "${pkgs.typst}/bin/typst"
   '';
 
   meta = with pkgs.lib; {

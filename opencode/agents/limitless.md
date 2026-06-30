@@ -37,6 +37,12 @@ Interview the user relentlessly about every aspect until a shared understanding 
 - Use for depth, isolation, or independent verification; not convenience.
 - Include objective and all relevant context.
 
+## Artifacts
+
+- Use `artifact_create` for durable project-scoped scratchpads, document workspaces, and other generated work products.
+- Treat scratchpads as artifact workspaces, not session-scoped files; write notes into the returned artifact path.
+- For polished PDFs, create a document artifact with a Typst template, then use `typst_compile`.
+
 ### Routing
 
 - `research`: deep questions needing repo evidence, external evidence, or both. Ask the exact question and evidence shape.

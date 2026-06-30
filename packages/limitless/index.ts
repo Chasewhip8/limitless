@@ -2,6 +2,16 @@ import path from 'node:path'
 import { type Plugin, type PluginOptions, type ToolContext, tool } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
 import {
+	ArtifactCreateInput,
+	ArtifactListInput,
+	artifactCreate,
+	artifactList,
+	TypstCompileInput,
+	TypstTemplatesListInput,
+	typstCompile,
+	typstTemplatesList,
+} from './artifacts'
+import {
 	GitHubCodeSearchInput,
 	GitHubFileReadInput,
 	GitHubRepoTreeInput,
@@ -19,12 +29,6 @@ import {
 	lspSymbols,
 } from './lsp'
 import { createNotificationRunner, normalizeNotificationConfig } from './notifications'
-import {
-	ScratchpadCreateInput,
-	ScratchpadListInput,
-	scratchpadCreate,
-	scratchpadList,
-} from './scratchpad'
 import {
 	type CommandResult,
 	DEFAULT_TIMEOUT_MS,
@@ -299,24 +303,57 @@ export function createLimitless(): Plugin {
 				if (input.tool === 'question') await notifications.notify('question')
 			},
 			tool: {
-				scratchpad_create: tool({
+				artifact_create: tool({
 					description:
-						'Create an empty session-scoped scratchpad file and return its workspace-relative path.',
+						'Create a durable project-scoped artifact workspace for scratchpads, documents, or generic files.',
 					args: {
-						name: tool.schema.string(),
+						kind: tool.schema.string().optional(),
+						title: tool.schema.string().optional(),
+						slug: tool.schema.string().optional(),
+						template: tool.schema.string().optional(),
 					},
 					execute(args, context) {
-						return executeTool('scratchpad_create', ScratchpadCreateInput, args, context, (input) =>
-							scratchpadCreate(input, context),
+						return executeTool('artifact_create', ArtifactCreateInput, args, context, (input) =>
+							artifactCreate(input, context),
 						)
 					},
 				}),
-				scratchpad_list: tool({
-					description: 'List session-scoped scratchpad files and their workspace-relative paths.',
+				artifact_list: tool({
+					description: 'List durable project-scoped artifact workspaces.',
+					args: {
+						kind: tool.schema.string().optional(),
+						template: tool.schema.string().optional(),
+					},
+					execute(args, context) {
+						return executeTool('artifact_list', ArtifactListInput, args, context, (input) =>
+							artifactList(input, context),
+						)
+					},
+				}),
+				typst_templates_list: tool({
+					description: 'List built-in Typst document templates for artifact_create.',
 					args: {},
 					execute(args, context) {
-						return executeTool('scratchpad_list', ScratchpadListInput, args, context, (input) =>
-							scratchpadList(input, context),
+						return executeTool(
+							'typst_templates_list',
+							TypstTemplatesListInput,
+							args,
+							context,
+							(input) => typstTemplatesList(input),
+						)
+					},
+				}),
+				typst_compile: tool({
+					description: 'Compile a Typst document artifact to PDF using the packaged Typst binary.',
+					args: {
+						artifact: tool.schema.string(),
+						entry: tool.schema.string().optional(),
+						format: tool.schema.string().optional(),
+						timeoutMs: tool.schema.number().optional(),
+					},
+					execute(args, context) {
+						return executeTool('typst_compile', TypstCompileInput, args, context, (input) =>
+							typstCompile(input, context),
 						)
 					},
 				}),
