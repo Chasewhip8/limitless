@@ -33,7 +33,7 @@
 #let warning-bg = rgb("#FFF7E6")
 
 #let sphere-page-margin = (left: 0.72in, right: 0.72in, top: 0.74in, bottom: 0.66in)
-#let sphere-card-inset = 10pt
+#let sphere-card-inset = (x: 10pt, y: 8pt)
 
 #let sphere-background(variant: "page") = {
   if variant == "sphere-institutional" {
@@ -69,17 +69,17 @@
   dark-mode: false,
 ) = {
   let primary = if dark-mode { dark-text } else { navy }
-  let secondary = if dark-mode { dark-muted } else { quiet }
+  let secondary = if dark-mode { dark-muted } else { slate }
   [
-    #text(size: 20pt, fill: primary)[#kicker]
+    #text(size: 21pt, fill: primary)[#kicker]
     #h(3pt)
-    #text(size: 20pt, fill: secondary)[| #title]
+    #text(size: 21pt, fill: secondary)[| #title]
     #if subtitle != none [
       #linebreak()
-      #v(0.2em)
-      #text(size: 8.4pt, fill: secondary)[#subtitle]
+      #v(0.18em)
+      #text(size: 8.6pt, fill: secondary)[#subtitle]
     ]
-    #v(1.05em)
+    #v(0.9em)
   ]
 }
 
@@ -143,7 +143,8 @@
 #let sphere-card(
   title: none,
   subtitle: none,
-  accent: blue,
+  accent: none,
+  accent-rule: false,
   fill: white,
   inset: sphere-card-inset,
   body,
@@ -155,16 +156,16 @@
   inset: inset,
 )[
   #if title != none [
-    #text(size: 9.4pt, weight: "bold", fill: navy)[#title]
+    #text(size: 9.2pt, weight: "bold", fill: navy)[#title]
     #if subtitle != none [
       #linebreak()
-      #text(size: 7pt, fill: muted)[#subtitle]
+      #text(size: 6.8pt, fill: muted)[#subtitle]
     ]
-    #v(0.5em)
+    #v(0.34em)
   ]
-  #if accent != none [
-    #box(width: 24pt, height: 2pt, fill: accent)
-    #v(0.62em)
+  #if accent-rule and accent != none [
+    #box(width: 18pt, height: 1.1pt, fill: accent)
+    #v(0.34em)
   ]
   #body
 ]
@@ -182,10 +183,8 @@
       #linebreak()
       #text(size: 7pt, fill: dark-muted)[#subtitle]
     ]
-    #v(0.5em)
+    #v(0.36em)
   ]
-  #box(width: 24pt, height: 2pt, fill: accent)
-  #v(0.62em)
   #body
 ]
 
@@ -240,21 +239,18 @@
   fill: fill,
   stroke: 0.6pt + line,
   radius: 5pt,
-  inset: 0pt,
+  inset: (x: 9pt, y: 8pt),
 )[
-  #box(width: 100%, height: 2.2pt, fill: accent)
-  #box(width: 100%, inset: (x: 9pt, y: 8pt))[
-    #text(size: 6.7pt, fill: muted)[#label]
-    #v(0.2em)
-    #text(size: 17pt, weight: "bold", fill: navy)[#value]
-    #if detail != none [
-      #v(0.2em)
-      #text(size: 6.8pt, weight: "bold", fill: accent)[#detail]
-    ]
-    #if caption != none [
-      #v(0.25em)
-      #sphere-small(caption)
-    ]
+  #text(size: 6.7pt, fill: muted)[#label]
+  #v(0.2em)
+  #text(size: 18pt, weight: "bold", fill: blue)[#value]
+  #if detail != none [
+    #v(0.18em)
+    #text(size: 6.7pt, weight: "bold", fill: blue-700)[#detail]
+  ]
+  #if caption != none [
+    #v(0.24em)
+    #sphere-small(caption)
   ]
 ]
 
@@ -379,11 +375,11 @@
   gutter: 10pt,
   sphere-icon(icon, color: accent),
   block[
-    #text(size: 7.2pt, weight: "bold", fill: blue-300)[#title]
+    #text(size: 7.2pt, weight: "bold", fill: blue-500)[#title]
     #linebreak()
-    #text(size: 9pt, weight: "bold", fill: navy)[#subtitle]
-    #v(0.28em)
-    #sphere-small(body)
+    #text(size: 8.8pt, weight: "bold", fill: navy)[#subtitle]
+    #v(0.12em)
+    #text(size: 7pt, fill: muted)[#body]
   ],
 )
 
