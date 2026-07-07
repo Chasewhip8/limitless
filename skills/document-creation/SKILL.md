@@ -1,6 +1,6 @@
 ---
 name: document-creation
-description: Always load this skill when creating a document, brief, report, or polished PDF — including Sphere-branded documents ("create a Sphere document") or turning markdown, notes, or research into a finished document artifact
+description: Always load this skill when creating a document, brief, report, or polished PDF — including Sphere-branded documents or turning markdown, notes, or research into a finished document artifact
 ---
 
 # Document Creation
