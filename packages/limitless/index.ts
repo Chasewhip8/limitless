@@ -13,12 +13,12 @@ import { AstGrepReplaceInput, AstGrepSearchInput } from './lib/astgrep'
 import { DiagnosticsInput } from './lib/diagnostics'
 import { GitHubCodeSearchInput, GitHubFileReadInput, GitHubRepoTreeInput } from './lib/github'
 import { LspReferencesInput, LspRenameInput, LspSymbolsInput } from './lib/lsp'
-import { ArtifactTemplatesListInput } from './lib/template'
+import { ArtifactTemplateReadInput, ArtifactTemplatesListInput } from './lib/template'
 import { TypstCompileInput } from './lib/typst'
 import { lspReferences, lspRename, lspSymbols } from './lsp'
 import { createNotificationRunner, normalizeNotificationConfig } from './notifications'
 import { executeTool } from './shared'
-import { artifactTemplatesList } from './templates'
+import { artifactTemplateRead, artifactTemplatesList } from './templates'
 import { typstCompile } from './typst'
 
 const pathArgs = {
@@ -139,6 +139,23 @@ export function createLimitless(): Plugin {
 							args,
 							context,
 							(input) => artifactTemplatesList(input),
+						)
+					},
+				}),
+				artifact_template_read: tool({
+					description:
+						'Read a text file from a built-in artifact template without creating an artifact (for example the sphere-showcase authoring reference).',
+					args: {
+						template: tool.schema.string(),
+						file: tool.schema.string(),
+					},
+					execute(args, context) {
+						return executeTool(
+							'artifact_template_read',
+							ArtifactTemplateReadInput,
+							args,
+							context,
+							(input) => artifactTemplateRead(input),
 						)
 					},
 				}),

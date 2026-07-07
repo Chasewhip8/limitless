@@ -43,3 +43,17 @@ export const ArtifactTemplatesListResult = Schema.Struct({
 	invalidTemplates: Schema.optional(Schema.Array(InvalidArtifactTemplate)),
 })
 export type ArtifactTemplatesListResult = typeof ArtifactTemplatesListResult.Type
+
+export const ArtifactTemplateReadInput = Schema.Struct({
+	template: Schema.String,
+	file: Schema.String,
+})
+export type ArtifactTemplateReadInput = typeof ArtifactTemplateReadInput.Type
+
+export const ArtifactTemplateReadResult = Schema.Struct({
+	ok: Schema.Literal(true),
+	template: ArtifactTemplateName,
+	file: Schema.String,
+	content: Schema.String,
+})
+export type ArtifactTemplateReadResult = typeof ArtifactTemplateReadResult.Type

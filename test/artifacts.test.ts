@@ -17,8 +17,11 @@ import {
 } from '../packages/limitless/artifacts'
 import { executeTool } from '../packages/limitless/shared'
 import {
+	ArtifactTemplateReadInput,
+	type ArtifactTemplateReadResult,
 	ArtifactTemplatesListInput,
 	type ArtifactTemplatesListResult,
+	artifactTemplateRead,
 	artifactTemplatesList,
 } from '../packages/limitless/templates'
 import {
@@ -106,6 +109,34 @@ async function runTemplatesList(ctx: ArtifactContext): Promise<ArtifactTemplates
 		(args) => artifactTemplatesList(args),
 	)
 	return parseToolOutput<ArtifactTemplatesListResult>(result)
+}
+
+async function runTemplateRead(
+	input: { readonly template?: string; readonly file?: string },
+	ctx: ArtifactContext,
+): Promise<ArtifactTemplateReadResult> {
+	const result = await executeTool(
+		'artifact_template_read',
+		ArtifactTemplateReadInput,
+		input,
+		ctx,
+		(args) => artifactTemplateRead(args),
+	)
+	return parseToolOutput<ArtifactTemplateReadResult>(result)
+}
+
+async function runTemplateReadPayload(
+	input: { readonly template?: string; readonly file?: string },
+	ctx: ArtifactContext,
+): Promise<unknown> {
+	const result = await executeTool(
+		'artifact_template_read',
+		ArtifactTemplateReadInput,
+		input,
+		ctx,
+		(args) => artifactTemplateRead(args),
+	)
+	return parseToolOutput<unknown>(result)
 }
 
 async function runTypstCompile(
@@ -401,6 +432,47 @@ describe('template and typst tools', () => {
 			await expect(
 				readFile(path.join(artifactPath, 'sphere', 'charts.typ'), 'utf8'),
 			).resolves.toContain('#let sphere-column-chart')
+		})
+	})
+
+	test('reads template and framework files without creating an artifact', async () => {
+		await withWorkspace(async (workspace) => {
+			const ctx = context(workspace)
+
+			const main = await runTemplateRead({ template: 'sphere-showcase', file: 'main.typ' }, ctx)
+			expect(main).toMatchObject({ ok: true, template: 'sphere-showcase', file: 'main.typ' })
+			expect(main.content).toContain('#sphere-kpi-page(')
+
+			const theme = await runTemplateRead(
+				{ template: 'sphere-showcase', file: 'sphere/theme.typ' },
+				ctx,
+			)
+			expect(theme.content).toContain('#let sphere-font = "Inter"')
+
+			const listed = await runArtifactList({}, ctx)
+			expect(listed.artifacts).toEqual([])
+		})
+	})
+
+	test('rejects unknown, traversal, directory, and binary template file reads', async () => {
+		await withWorkspace(async (workspace) => {
+			const ctx = context(workspace)
+			const rejected = [
+				{ template: 'sphere-showcase', file: 'missing.typ' },
+				{ template: 'sphere-showcase', file: 'sphere/' },
+				{ template: 'sphere-showcase', file: '../sphere/main.typ' },
+				{ template: 'sphere-showcase', file: '/etc/passwd' },
+				{ template: 'unknown-template', file: 'main.typ' },
+				{ template: 'sphere-showcase', file: 'assets/cover.png' },
+				{ template: 'sphere-showcase', file: 'assets/fonts/Inter-Variable.ttf' },
+			]
+			for (const input of rejected) {
+				await expect(runTemplateReadPayload(input, ctx)).resolves.toMatchObject({
+					ok: false,
+					error: 'ToolInputError',
+					tool: 'artifact_template_read',
+				})
+			}
 		})
 	})
 

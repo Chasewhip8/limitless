@@ -151,6 +151,7 @@ The Limitless plugin exposes:
 - `artifact_create`: create a durable artifact workspace.
 - `artifact_list`: list artifact workspaces for the current project.
 - `artifact_templates_list`: inspect built-in artifact templates.
+- `artifact_template_read`: read a built-in template file without creating an artifact (e.g. the `sphere-showcase` authoring reference).
 - `typst_compile`: compile a document artifact to PDF.
 
 Artifact templates are plain directories with a small `manifest.json`; `artifact_create` copies the folder contents into a new artifact and writes the artifact manifest. A template may declare a `framework` (a directory under top-level `frameworks/<name>/`); its files are composed into the artifact first, so document workspaces stay fully self-contained and keep compiling identically even after the plugin updates. Typst is handled separately by `typst_compile`, which compiles an artifact entry such as `main.typ` into `dist/`.

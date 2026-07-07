@@ -1,4 +1,4 @@
-import { lstat, readdir } from 'node:fs/promises'
+import { lstat, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Effect, Option, Schema } from 'effect'
@@ -7,6 +7,8 @@ import { isMissingPath, toolInputError, toolOperationError } from './lib/errors'
 import {
 	ArtifactTemplateManifest,
 	ArtifactTemplateName,
+	type ArtifactTemplateReadInput,
+	type ArtifactTemplateReadResult,
 	type ArtifactTemplatesListInput,
 	type ArtifactTemplatesListResult,
 	type ArtifactTemplate as ArtifactTemplateType,
@@ -18,6 +20,8 @@ export {
 	ArtifactTemplate,
 	ArtifactTemplateManifest,
 	ArtifactTemplateName,
+	ArtifactTemplateReadInput,
+	type ArtifactTemplateReadResult,
 	ArtifactTemplatesListInput,
 	type ArtifactTemplatesListResult,
 } from './lib/template'
@@ -157,6 +161,75 @@ const composedTemplateFiles = Effect.fn(function* composedTemplateFiles(
 		files.add(file)
 	}
 	return [...files].sort((left, right) => left.localeCompare(right))
+})
+
+const MAX_TEMPLATE_FILE_BYTES = 256 * 1024
+
+const readTemplateFileBuffer = Effect.fn(function* readTemplateFileBuffer(
+	filePath: string,
+	toolName: string,
+) {
+	return yield* Effect.tryPromise({
+		try: async () => {
+			try {
+				const info = await lstat(filePath)
+				if (!info.isFile()) return undefined
+			} catch (error) {
+				if (isMissingPath(error)) return undefined
+				throw error
+			}
+			return await readFile(filePath)
+		},
+		catch: (error) => toolOperationError(toolName, 'Could not read template file', error),
+	})
+})
+
+export const artifactTemplateRead = Effect.fn(function* artifactTemplateRead(
+	input: ArtifactTemplateReadInput,
+) {
+	const toolName = 'artifact_template_read'
+	const template = yield* resolveArtifactTemplate(input.template, toolName)
+	const files = yield* composedTemplateFiles(
+		template.directory,
+		template.frameworkDirectory,
+		toolName,
+	)
+	if (input.file.endsWith('/') || !files.includes(input.file)) {
+		return yield* toolInputError(toolName, `unknown template file: ${input.file}`)
+	}
+
+	// artifact_create copies the framework first and the template on top, so
+	// probe the template directory before the framework directory.
+	const roots = [template.directory, template.frameworkDirectory].filter(
+		(root): root is string => root !== undefined,
+	)
+	let buffer: Buffer | undefined
+	for (const root of roots) {
+		buffer = yield* readTemplateFileBuffer(path.join(root, input.file), toolName)
+		if (buffer !== undefined) break
+	}
+	if (buffer === undefined) {
+		return yield* toolInputError(toolName, `unknown template file: ${input.file}`)
+	}
+	if (buffer.byteLength > MAX_TEMPLATE_FILE_BYTES) {
+		return yield* toolInputError(
+			toolName,
+			'template file is too large to read inline; create an artifact from the template to copy it',
+		)
+	}
+	if (buffer.includes(0)) {
+		return yield* toolInputError(
+			toolName,
+			'template file is binary; only text files can be read inline',
+		)
+	}
+
+	return {
+		ok: true,
+		template: template.name,
+		file: input.file,
+		content: buffer.toString('utf8'),
+	} satisfies ArtifactTemplateReadResult
 })
 
 export const artifactTemplatesList = Effect.fn(function* artifactTemplatesList(
