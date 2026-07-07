@@ -1,0 +1,8 @@
+{
+	"name": "sphere-showcase",
+	"description": "Complete example institutional document built with the Sphere framework: cover, executive summary, company, market, architecture, comparison, proof, roadmap, risk, contact, and QA pages with realistic placeholder data.",
+	"title": "Sphere Showcase",
+	"kind": "document",
+	"framework": "sphere",
+	"authoring": "Use this as the reference for what finished pages look like and copy its patterns into real documents. All figures are illustrative; replace them with sourced data."
+}

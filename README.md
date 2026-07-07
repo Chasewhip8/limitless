@@ -144,16 +144,18 @@ The command is executed directly, without a shell. Completion notifications fire
 
 ## Artifacts and documents
 
-Limitless stores durable project-local work products under `.limitless/artifacts/`. The old session-scoped scratchpad concept is unified into artifact workspaces: create a `scratchpad` artifact for notes, a `document` artifact for Typst-backed PDFs, or a `generic` artifact for ad hoc files. Artifacts are scoped to the current worktree, not the current chat session; the creating session is recorded only in the manifest metadata.
+Limitless stores durable project-local work products under `.limitless/artifacts/`. The old session-scoped scratchpad concept is unified into artifact workspaces: create a `scratchpad` artifact for notes, a `document` artifact from a top-level `templates/<name>/` folder, or a `generic` artifact for ad hoc files. Artifacts are scoped to the current worktree, not the current chat session; the creating session is recorded only in the manifest metadata.
 
 The Limitless plugin exposes:
 
 - `artifact_create`: create a durable artifact workspace.
 - `artifact_list`: list artifact workspaces for the current project.
-- `typst_templates_list`: inspect built-in Typst templates.
+- `artifact_templates_list`: inspect built-in artifact templates.
 - `typst_compile`: compile a document artifact to PDF.
 
-Document artifacts are source-first: edit `main.typ` directly, use template-provided `.typ` framework files such as `sphere.typ` when present, place charts/images/assets under `assets/`, and write generated outputs to `dist/`. The Sphere templates include a starter institutional document, a print-friendly variant, and a full showcase reference (`sphere-institutional-showcase`) that exercises cards, KPI strips, charts, tables, process diagrams, proof grids, dark analytical pages, and roadmaps.
+Artifact templates are plain directories with a small `manifest.json`; `artifact_create` copies the folder contents into a new artifact and writes the artifact manifest. A template may declare a `framework` (a directory under top-level `frameworks/<name>/`); its files are composed into the artifact first, so document workspaces stay fully self-contained and keep compiling identically even after the plugin updates. Typst is handled separately by `typst_compile`, which compiles an artifact entry such as `main.typ` into `dist/`.
+
+Document artifacts are source-first: edit `main.typ` directly, compose with framework `.typ` modules such as `sphere.typ` and its `sphere/` files when present, and place charts/images/assets under `assets/`. The Sphere framework is opinionated about assembly: cards, charts, and panels placed in a `sphere-grid` or `sphere-two-column` are measured and stretched to equal heights per row, charts auto-scale, and every evidence-bearing component takes a `source:` that feeds the `sphere-lint()` QA page. Built-in templates: `brief` (plain default), `sphere` (Sphere-branded institutional starter on the shared `sphere` framework), and `sphere-showcase` (a complete example institutional document — cover, executive summary, market, architecture, comparison, proof, roadmap, risk, and QA pages — that doubles as the component reference). New Sphere document types (PRDs, PR/FAQs, memos) are added by dropping a new `templates/<name>/` folder that reuses the framework.
 
 ## Maintainers
 

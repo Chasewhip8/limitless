@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { type DiagnosticCheck, summarizeDiagnostics } from '../packages/limitless/index'
+import { summarizeDiagnostics } from '../packages/limitless/diagnostics'
+import type { DiagnosticCheck } from '../packages/limitless/lib/diagnostics'
 
 function passedCheck(name: string): DiagnosticCheck {
 	return {

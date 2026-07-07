@@ -14,14 +14,18 @@ import {
 	artifactSlugFromString,
 	artifactsRoot,
 	decodeArtifactSlugSync,
-	TypstCompileInput,
-	type TypstCompileResult,
-	TypstTemplatesListInput,
-	type TypstTemplatesListResult,
-	typstCompile,
-	typstTemplatesList,
 } from '../packages/limitless/artifacts'
 import { executeTool } from '../packages/limitless/shared'
+import {
+	ArtifactTemplatesListInput,
+	type ArtifactTemplatesListResult,
+	artifactTemplatesList,
+} from '../packages/limitless/templates'
+import {
+	TypstCompileInput,
+	type TypstCompileResult,
+	typstCompile,
+} from '../packages/limitless/typst'
 
 type ArtifactContext = Parameters<typeof artifactCreate>[1]
 
@@ -93,15 +97,15 @@ async function runArtifactList(
 	return parseToolOutput<ArtifactListResult>(result)
 }
 
-async function runTemplatesList(ctx: ArtifactContext): Promise<TypstTemplatesListResult> {
+async function runTemplatesList(ctx: ArtifactContext): Promise<ArtifactTemplatesListResult> {
 	const result = await executeTool(
-		'typst_templates_list',
-		TypstTemplatesListInput,
+		'artifact_templates_list',
+		ArtifactTemplatesListInput,
 		{},
 		ctx,
-		(args) => typstTemplatesList(args),
+		(args) => artifactTemplatesList(args),
 	)
-	return parseToolOutput<TypstTemplatesListResult>(result)
+	return parseToolOutput<ArtifactTemplatesListResult>(result)
 }
 
 async function runTypstCompile(
@@ -183,7 +187,7 @@ describe('artifact create and list', () => {
 		})
 	})
 
-	test('creates document artifacts from the built-in Typst template', async () => {
+	test('creates document artifacts from the built-in template', async () => {
 		await withWorkspace(async (workspace) => {
 			const created = await runArtifactCreate(
 				{ kind: 'document', title: 'Strategy Brief', slug: 'strategy-brief' },
@@ -209,6 +213,24 @@ describe('artifact create and list', () => {
 				kind: 'document',
 				template: 'brief',
 			})
+		})
+	})
+
+	test('uses template manifest kind when kind is omitted', async () => {
+		await withWorkspace(async (workspace) => {
+			const created = await runArtifactCreate(
+				{ title: 'Sphere Deck', slug: 'sphere-template', template: 'sphere' },
+				context(workspace),
+			)
+
+			expect(created.manifest).toMatchObject({
+				slug: 'sphere-template',
+				kind: 'document',
+				template: 'sphere',
+			})
+			await expect(
+				readFile(path.join(workspace, created.path, 'sphere.typ'), 'utf8'),
+			).resolves.toContain('#import "sphere/theme.typ"')
 		})
 	})
 
@@ -253,32 +275,42 @@ describe('artifact create and list', () => {
 	})
 })
 
-describe('typst tools', () => {
-	test('lists built-in Typst templates', async () => {
+describe('template and typst tools', () => {
+	test('lists built-in artifact templates', async () => {
 		await withWorkspace(async (workspace) => {
 			const result = await runTemplatesList(context(workspace))
-			expect(result.templates).toEqual([
-				expect.objectContaining({
-					name: 'brief',
-					defaultEntry: 'main.typ',
-					files: ['main.typ', 'assets/', 'dist/'],
-				}),
-				expect.objectContaining({
-					name: 'sphere-institutional',
-					defaultEntry: 'main.typ',
-					files: ['main.typ', 'sphere.typ', 'assets/', 'dist/'],
-				}),
-				expect.objectContaining({
-					name: 'sphere-institutional-print',
-					defaultEntry: 'main.typ',
-					files: ['main.typ', 'sphere.typ', 'assets/', 'dist/'],
-				}),
-				expect.objectContaining({
-					name: 'sphere-institutional-showcase',
-					defaultEntry: 'main.typ',
-					files: ['main.typ', 'sphere.typ', 'assets/', 'dist/'],
-				}),
+			expect(result.templates.map((entry) => entry.name)).toEqual([
+				'brief',
+				'sphere',
+				'sphere-showcase',
 			])
+
+			const [brief, sphere] = result.templates
+			expect(brief).toMatchObject({
+				name: 'brief',
+				kind: 'document',
+				path: 'templates/brief',
+				files: ['main.typ'],
+			})
+			expect(brief).not.toHaveProperty('framework')
+			expect(brief).not.toHaveProperty('metadata')
+
+			expect(sphere).toMatchObject({
+				name: 'sphere',
+				kind: 'document',
+				framework: 'sphere',
+				path: 'templates/sphere',
+				authoring: expect.any(String),
+				files: expect.arrayContaining([
+					'main.typ',
+					'sphere.typ',
+					'sphere/',
+					'sphere/theme.typ',
+					'assets/',
+					'assets/fonts/Inter-Variable.ttf',
+				]),
+			})
+			expect(sphere).not.toHaveProperty('metadata')
 		})
 	})
 
@@ -289,17 +321,20 @@ describe('typst tools', () => {
 					kind: 'document',
 					title: 'Sphere Deck',
 					slug: 'sphere-deck',
-					template: 'sphere-institutional',
+					template: 'sphere',
 				},
 				context(workspace),
 			)
 			const artifactPath = path.join(workspace, created.path)
-			await expect(readFile(path.join(artifactPath, 'sphere.typ'), 'utf8')).resolves.toContain(
-				'#let sphere-font = "Inter"',
+			await expect(readFile(path.join(artifactPath, 'main.typ'), 'utf8')).resolves.toEqual(
+				expect.any(String),
 			)
-			await expect(readFile(path.join(artifactPath, 'sphere.typ'), 'utf8')).resolves.toContain(
-				'image("assets/sphere-logo.svg"',
-			)
+			await expect(
+				readFile(path.join(artifactPath, 'sphere', 'theme.typ'), 'utf8'),
+			).resolves.toContain('#let sphere-font = "Inter"')
+			await expect(
+				readFile(path.join(artifactPath, 'sphere', 'chrome.typ'), 'utf8'),
+			).resolves.toContain('image("../assets/sphere-logo.svg"')
 			await expect(
 				readFile(path.join(artifactPath, 'assets', 'sphere-logo.svg'), 'utf8'),
 			).resolves.toContain('<svg width="263" height="57"')
@@ -355,17 +390,38 @@ describe('typst tools', () => {
 					kind: 'document',
 					title: 'Sphere Institutional Showcase',
 					slug: 'sphere-showcase',
-					template: 'sphere-institutional-showcase',
+					template: 'sphere-showcase',
 				},
 				context(workspace),
 			)
 			const artifactPath = path.join(workspace, created.path)
 			await expect(readFile(path.join(artifactPath, 'main.typ'), 'utf8')).resolves.toContain(
-				'Analytical dark mode',
+				'#sphere-kpi-page(',
 			)
-			await expect(readFile(path.join(artifactPath, 'sphere.typ'), 'utf8')).resolves.toContain(
-				'#let sphere-step-chart',
-			)
+			await expect(
+				readFile(path.join(artifactPath, 'sphere', 'charts.typ'), 'utf8'),
+			).resolves.toContain('#let sphere-column-chart')
+		})
+	})
+
+	test('rejects explicit kind mismatches and unknown templates', async () => {
+		await withWorkspace(async (workspace) => {
+			const ctx = context(workspace)
+			await expect(
+				runArtifactCreatePayload({ kind: 'scratchpad', slug: 'bad-kind', template: 'sphere' }, ctx),
+			).resolves.toMatchObject({
+				ok: false,
+				error: 'ToolInputError',
+				tool: 'artifact_create',
+			})
+
+			await expect(
+				runArtifactCreatePayload({ slug: 'bad-template', template: 'unknown-template' }, ctx),
+			).resolves.toMatchObject({
+				ok: false,
+				error: 'ToolInputError',
+				tool: 'artifact_create',
+			})
 		})
 	})
 

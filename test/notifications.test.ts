@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import {
 	DEFAULT_NOTIFICATION_TIMEOUT_MS,
 	isNotificationEventEnabled,
@@ -7,12 +7,15 @@ import {
 
 describe('normalizeNotificationConfig', () => {
 	test('is disabled by default', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 		const config = normalizeNotificationConfig(undefined)
 
 		expect(config.enabled).toBe(false)
 		expect(config.command).toBeNull()
 		expect(config.events).toEqual({ complete: true, question: true })
 		expect(config.timeoutMs).toBe(DEFAULT_NOTIFICATION_TIMEOUT_MS)
+		expect(warn).not.toHaveBeenCalled()
+		warn.mockRestore()
 	})
 
 	test('enables a direct command when configured', () => {
@@ -36,6 +39,23 @@ describe('normalizeNotificationConfig', () => {
 
 		expect(config.enabled).toBe(false)
 		expect(isNotificationEventEnabled(config, 'complete')).toBe(false)
+	})
+
+	test('disables and warns once for malformed blocks', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+		const config = normalizeNotificationConfig({
+			notifications: {
+				enable: true,
+				command: ['notify-send'],
+				events: { complete: 'yes' },
+			},
+		})
+
+		expect(config.enabled).toBe(false)
+		expect(config.command).toBeNull()
+		expect(warn).toHaveBeenCalledTimes(1)
+		expect(warn.mock.calls[0]?.[0]).toContain('[limitless] invalid notifications config:')
+		warn.mockRestore()
 	})
 
 	test('respects per-event toggles', () => {

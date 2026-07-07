@@ -4,6 +4,9 @@ mode: subagent
 model: openai/gpt-5.5-fast
 reasoningEffort: xhigh
 permission:
+    github_code_search: deny
+    github_file_read: deny
+    github_repo_tree: deny
     task:
         "*": deny
         research: allow

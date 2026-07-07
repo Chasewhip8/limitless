@@ -8,20 +8,13 @@ permission:
     artifact_create: deny
     ast_grep_replace: deny
     typst_compile: deny
-    bash:
+    bash: deny
+    webfetch: allow
+    github_code_search: allow
+    github_file_read: allow
+    github_repo_tree: allow
+    task:
         "*": deny
-        "git log*": allow
-        "git show*": allow
-        "git diff*": allow
-        "git blame*": allow
-        "git status*": allow
-        "ls": allow
-        "ls *": allow
-        "cat *": allow
-        "head *": allow
-        "tail *": allow
-        "wc *": allow
-        "stat *": allow
 ---
 
 # Research

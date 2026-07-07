@@ -1,12 +1,13 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
 	assertAllowedRepo,
-	githubCodeSearch,
-	githubFileRead,
-	githubRepoTree,
+	githubCodeSearch as githubCodeSearchEffect,
+	githubFileRead as githubFileReadEffect,
+	githubRepoTree as githubRepoTreeEffect,
 	normalizeGitHubPluginConfig,
 	normalizeRepo,
 	parseRateLimitHeaders,
@@ -15,6 +16,18 @@ import {
 const tokenEnv = 'LIMITLESS_TEST_GITHUB_TOKEN'
 const config = { tokenEnv, allowedRepos: [], allowUnrestrictedRepos: true }
 const tempDirs: Array<string> = []
+
+function githubCodeSearch(...args: Parameters<typeof githubCodeSearchEffect>) {
+	return Effect.runPromise(githubCodeSearchEffect(...args))
+}
+
+function githubFileRead(...args: Parameters<typeof githubFileReadEffect>) {
+	return Effect.runPromise(githubFileReadEffect(...args))
+}
+
+function githubRepoTree(...args: Parameters<typeof githubRepoTreeEffect>) {
+	return Effect.runPromise(githubRepoTreeEffect(...args))
+}
 
 async function tokenFile(content: string): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), 'limitless-github-'))
@@ -127,6 +140,44 @@ describe('GitHub helpers', () => {
 				allowUnrestrictedRepos: true,
 			},
 		})
+	})
+
+	test('plugin config is disabled without warnings when absent', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+		expect(normalizeGitHubPluginConfig(undefined)).toEqual({
+			enabled: false,
+			config: {
+				tokenEnv: 'GITHUB_TOKEN',
+				allowedRepos: [],
+				allowUnrestrictedRepos: false,
+			},
+		})
+		expect(warn).not.toHaveBeenCalled()
+		warn.mockRestore()
+	})
+
+	test('plugin config disables and warns once for malformed blocks', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+		expect(
+			normalizeGitHubPluginConfig({
+				github: {
+					enable: true,
+					allowedRepos: ['owner/repo', 42],
+				},
+			}),
+		).toEqual({
+			enabled: false,
+			config: {
+				tokenEnv: 'GITHUB_TOKEN',
+				allowedRepos: [],
+				allowUnrestrictedRepos: false,
+			},
+		})
+		expect(warn).toHaveBeenCalledTimes(1)
+		expect(warn.mock.calls[0]?.[0]).toContain('[limitless] invalid github config:')
+		warn.mockRestore()
 	})
 
 	test('invalid repo names are rejected', () => {

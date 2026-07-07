@@ -1,0 +1,8 @@
+{
+	"name": "sphere",
+	"description": "Sphere-branded institutional PDF starter with frame chrome, cover, page templates, and evidence-aware components.",
+	"title": "Sphere",
+	"kind": "document",
+	"framework": "sphere",
+	"authoring": "Edit main.typ directly and compose pages with sphere.typ components. See the sphere-showcase template for every component in action."
+}

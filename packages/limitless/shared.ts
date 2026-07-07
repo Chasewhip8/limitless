@@ -3,48 +3,34 @@ import { access } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import type { ToolContext, ToolResult } from '@opencode-ai/plugin'
-import { Effect, Schema } from 'effect'
+import { Effect, Match, Schema } from 'effect'
+import type { CommandResult, RunOptions } from './lib/command'
+import {
+	FileAccessError,
+	isMissingPath,
+	LspToolError,
+	type ToolFailure,
+	ToolInputError,
+} from './lib/errors'
 
 const execFileAsync = promisify(execFile)
 
 export const DEFAULT_TIMEOUT_MS = 30_000
 export const DEFAULT_MAX_BUFFER = 1024 * 1024 * 8
 
-export class ToolInputError extends Schema.TaggedErrorClass<ToolInputError>()('ToolInputError', {
-	tool: Schema.String,
-	message: Schema.String,
-}) {}
-
-export class FileAccessError extends Schema.TaggedErrorClass<FileAccessError>()('FileAccessError', {
-	filePath: Schema.String,
-	message: Schema.String,
-}) {}
-
-export class LspToolError extends Schema.TaggedErrorClass<LspToolError>()('LspToolError', {
-	tool: Schema.String,
-	message: Schema.String,
-	server: Schema.optional(Schema.String),
-}) {}
-
-export type ToolFailure = ToolInputError | FileAccessError | LspToolError
-
-export type CommandResult = {
-	readonly ok: boolean
-	readonly exitCode: number | null
-	readonly signal?: string | null
-	readonly stdout: string
-	readonly stderr: string
-}
-
-export type RunOptions = {
-	readonly cwd?: string
-	readonly timeout?: number
-	readonly maxBuffer?: number
-}
+export { FileAccessError, LspToolError, ToolInputError }
+export type { CommandResult, RunOptions, ToolFailure }
 
 export function objectProperty(value: unknown, key: PropertyKey): unknown {
 	if (typeof value !== 'object' || value === null) return undefined
 	return Reflect.get(value, key)
+}
+
+export function optionalField<const Key extends string, Value>(
+	key: Key,
+	value: Value | undefined,
+): Partial<Record<Key, Value>> {
+	return value === undefined ? {} : ({ [key]: value } as Record<Key, Value>)
 }
 
 export function describeUnknown(value: unknown): string {
@@ -72,40 +58,27 @@ export function toToolResult(value: unknown): ToolResult {
 }
 
 export function failurePayload(error: ToolFailure): Record<string, unknown> {
-	switch (error._tag) {
-		case 'ToolInputError':
-			return {
-				ok: false,
-				error: error._tag,
-				tool: error.tool,
-				message: error.message,
-			}
-		case 'FileAccessError':
-			return {
-				ok: false,
-				error: error._tag,
-				filePath: error.filePath,
-				message: error.message,
-			}
-		case 'LspToolError': {
-			const payload: Record<string, unknown> = {
-				ok: false,
-				error: error._tag,
-				tool: error.tool,
-				message: error.message,
-			}
-			if (error.server !== undefined) payload.server = error.server
-			return payload
-		}
-		default: {
-			const exhaustive: never = error
-			return {
-				ok: false,
-				error: 'UnexpectedToolFailure',
-				message: describeUnknown(exhaustive),
-			}
-		}
-	}
+	return Match.valueTags(error, {
+		ToolInputError: (error) => ({
+			ok: false,
+			error: error._tag,
+			tool: error.tool,
+			message: error.message,
+		}),
+		FileAccessError: (error) => ({
+			ok: false,
+			error: error._tag,
+			filePath: error.filePath,
+			message: error.message,
+		}),
+		LspToolError: (error) => ({
+			ok: false,
+			error: error._tag,
+			tool: error.tool,
+			message: error.message,
+			...optionalField('server', error.server),
+		}),
+	})
 }
 
 export function executeTool<T>(
@@ -149,7 +122,11 @@ export function commandFailure(error: unknown): CommandResult {
 	return typeof signal === 'string' ? { ...result, signal } : result
 }
 
-export function runCommand(command: string, args: ReadonlyArray<string>, options: RunOptions = {}) {
+export const runCommand = Effect.fn(function* runCommand(
+	command: string,
+	args: ReadonlyArray<string>,
+	options: RunOptions = {},
+) {
 	const execOptions: ExecFileOptionsWithStringEncoding = {
 		env: process.env,
 		encoding: 'utf8',
@@ -158,7 +135,7 @@ export function runCommand(command: string, args: ReadonlyArray<string>, options
 	}
 	if (options.cwd !== undefined) execOptions.cwd = options.cwd
 
-	return Effect.tryPromise({
+	return yield* Effect.tryPromise({
 		try: () => execFileAsync(command, [...args], execOptions),
 		catch: commandFailure,
 	}).pipe(
@@ -172,21 +149,16 @@ export function runCommand(command: string, args: ReadonlyArray<string>, options
 			}),
 		}),
 	)
-}
+})
 
-function isMissingPathError(error: unknown): boolean {
-	const code = objectProperty(error, 'code')
-	return code === 'ENOENT' || code === 'ENOTDIR'
-}
-
-export function exists(filePath: string): Effect.Effect<boolean, FileAccessError> {
-	return Effect.tryPromise({
+export const exists = Effect.fn(function* exists(filePath: string) {
+	return yield* Effect.tryPromise({
 		try: () => access(filePath),
 		catch: (error) => error,
 	}).pipe(
 		Effect.matchEffect({
 			onFailure: (error) =>
-				isMissingPathError(error)
+				isMissingPath(error)
 					? Effect.succeed(false)
 					: Effect.fail(
 							new FileAccessError({
@@ -197,36 +169,27 @@ export function exists(filePath: string): Effect.Effect<boolean, FileAccessError
 			onSuccess: () => Effect.succeed(true),
 		}),
 	)
-}
+})
 
-export function findUp(
-	names: ReadonlyArray<string>,
-	start: string,
-): Effect.Effect<string | undefined, FileAccessError> {
-	return Effect.gen(function* () {
-		let current = path.resolve(start)
+export const findUp = Effect.fn(function* findUp(names: ReadonlyArray<string>, start: string) {
+	let current = path.resolve(start)
 
-		while (true) {
-			for (const name of names) {
-				const candidate = path.join(current, name)
-				if (yield* exists(candidate)) return candidate
-			}
-
-			const parent = path.dirname(current)
-			if (parent === current) return undefined
-			current = parent
+	while (true) {
+		for (const name of names) {
+			const candidate = path.join(current, name)
+			if (yield* exists(candidate)) return candidate
 		}
-	})
-}
 
-export function findExecutable(
-	name: string,
-	start: string,
-): Effect.Effect<string, FileAccessError> {
-	return findUp([path.join('node_modules', '.bin', name)], start).pipe(
-		Effect.map((local) => local ?? name),
-	)
-}
+		const parent = path.dirname(current)
+		if (parent === current) return undefined
+		current = parent
+	}
+})
+
+export const findExecutable = Effect.fn(function* findExecutable(name: string, start: string) {
+	const local = yield* findUp([path.join('node_modules', '.bin', name)], start)
+	return local ?? name
+})
 
 export function workspaceRoot(
 	input: { readonly workspace?: string | undefined },

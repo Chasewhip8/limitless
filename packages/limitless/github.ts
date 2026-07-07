@@ -1,103 +1,35 @@
 import { Buffer } from 'node:buffer'
 import { readFile } from 'node:fs/promises'
-import { Schema } from 'effect'
-import { describeUnknown } from './shared'
+import { Effect, Schema } from 'effect'
+import { ToolInputError } from './lib/errors'
+import {
+	type GitHubCodeSearchInput,
+	GitHubCodeSearchInput as GitHubCodeSearchInputSchema,
+	type GitHubCodeSearchResult,
+	type GitHubConfig,
+	type GitHubFileReadInput,
+	GitHubFileReadInput as GitHubFileReadInputSchema,
+	type GitHubFileReadResult,
+	GitHubOptionsBlock,
+	type GitHubPluginConfig,
+	type GitHubRepoTreeInput,
+	GitHubRepoTreeInput as GitHubRepoTreeInputSchema,
+	type GitHubRepoTreeResult,
+	type RateLimitInfo,
+} from './lib/github'
+import { describeUnknown, objectProperty, optionalField } from './shared'
 
-export type GitHubConfig = {
-	readonly tokenEnv: string
-	readonly tokenFile?: string
-	readonly allowedRepos: ReadonlyArray<string>
-	readonly allowUnrestrictedRepos: boolean
-}
-
-export type GitHubPluginConfig = {
-	readonly enabled: boolean
-	readonly config: GitHubConfig
-}
-
-export type RateLimitInfo = {
-	readonly limit?: number
-	readonly remaining?: number
-	readonly reset?: number
-	readonly retryAfter?: number
-}
-
-export const GitHubCodeSearchInput = Schema.Struct({
-	query: Schema.String,
-	repos: Schema.optional(Schema.Array(Schema.String)),
-	owner: Schema.optional(Schema.String),
-	language: Schema.optional(Schema.String),
-	filename: Schema.optional(Schema.String),
-	extension: Schema.optional(Schema.String),
-	maxResults: Schema.optional(Schema.Finite),
-})
-
-export type GitHubCodeSearchInput = typeof GitHubCodeSearchInput.Type
-
-export const GitHubFileReadInput = Schema.Struct({
-	repo: Schema.String,
-	path: Schema.String,
-	ref: Schema.optional(Schema.String),
-	maxBytes: Schema.optional(Schema.Finite),
-})
-
-export type GitHubFileReadInput = typeof GitHubFileReadInput.Type
-
-export const GitHubRepoTreeInput = Schema.Struct({
-	repo: Schema.String,
-	ref: Schema.optional(Schema.String),
-	pathPrefix: Schema.optional(Schema.String),
-	recursive: Schema.optional(Schema.Boolean),
-	maxEntries: Schema.optional(Schema.Finite),
-})
-
-export type GitHubRepoTreeInput = typeof GitHubRepoTreeInput.Type
-
-export type GitHubCodeSearchResult = {
-	readonly ok: boolean
-	readonly results: ReadonlyArray<{
-		readonly repo: string
-		readonly path: string
-		readonly sha?: string
-		readonly htmlUrl?: string
-		readonly score?: number
-		readonly textMatches?: ReadonlyArray<{
-			readonly fragment: string
-			readonly matches?: ReadonlyArray<unknown>
-		}>
-	}>
-	readonly rateLimit?: RateLimitInfo
-	readonly gaps?: ReadonlyArray<string>
-}
-
-export type GitHubFileReadResult = {
-	readonly ok: boolean
-	readonly repo: string
-	readonly path: string
-	readonly ref?: string
-	readonly sha?: string
-	readonly content?: string
-	readonly encoding?: string
-	readonly htmlUrl?: string
-	readonly size?: number
-	readonly rateLimit?: RateLimitInfo
-	readonly gaps?: ReadonlyArray<string>
-}
-
-export type GitHubRepoTreeResult = {
-	readonly ok: boolean
-	readonly repo: string
-	readonly ref?: string
-	readonly entries: ReadonlyArray<{
-		readonly path: string
-		readonly type: 'file' | 'dir' | 'symlink' | 'submodule' | 'unknown'
-		readonly sha?: string
-		readonly size?: number
-	}>
-	readonly recursive?: boolean
-	readonly truncated?: boolean
-	readonly rateLimit?: RateLimitInfo
-	readonly gaps?: ReadonlyArray<string>
+export {
+	GitHubCodeSearchInputSchema as GitHubCodeSearchInput,
+	type GitHubCodeSearchResult,
+	type GitHubConfig,
+	GitHubFileReadInputSchema as GitHubFileReadInput,
+	type GitHubFileReadResult,
+	GitHubOptionsBlock,
+	type GitHubPluginConfig,
+	GitHubRepoTreeInputSchema as GitHubRepoTreeInput,
+	type GitHubRepoTreeResult,
+	type RateLimitInfo,
 }
 
 const DEFAULT_TOKEN_ENV = 'GITHUB_TOKEN'
@@ -110,24 +42,12 @@ const MAX_TREE_ENTRIES = 1_000
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000
 const MAX_RESPONSE_BYTES = 2_000_000
 
-function isObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function stringValue(value: unknown): string | undefined {
 	return typeof value === 'string' ? value : undefined
 }
 
 function numberValue(value: unknown): number | undefined {
 	return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function stringArray(value: unknown): ReadonlyArray<string> {
-	return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : []
-}
-
-function objectProperty(value: unknown, key: string): unknown {
-	return isObject(value) ? value[key] : undefined
 }
 
 function positiveInteger(value: number | undefined, fallback: number, maximum: number): number {
@@ -141,15 +61,6 @@ function trimmed(value: string | undefined): string | undefined {
 	return result.length === 0 ? undefined : result
 }
 
-function optionalProperty<T extends string, V>(
-	key: T,
-	value: V | undefined,
-): Partial<Record<T, V>> {
-	const result: Partial<Record<T, V>> = {}
-	if (value !== undefined) result[key] = value
-	return result
-}
-
 function withGaps<T extends Record<string, unknown>>(
 	payload: T,
 	gaps: ReadonlyArray<string>,
@@ -157,21 +68,43 @@ function withGaps<T extends Record<string, unknown>>(
 	return gaps.length === 0 ? payload : { ...payload, gaps }
 }
 
+function disabledGitHubConfig(): GitHubPluginConfig {
+	return {
+		enabled: false,
+		config: {
+			tokenEnv: DEFAULT_TOKEN_ENV,
+			allowedRepos: [],
+			allowUnrestrictedRepos: false,
+		},
+	}
+}
+
+function warnInvalidConfig(error: unknown): void {
+	console.warn(`[limitless] invalid github config: ${describeUnknown(error)}`)
+}
+
 export function normalizeGitHubPluginConfig(options: unknown): GitHubPluginConfig {
 	const github = objectProperty(options, 'github')
-	const enabled = objectProperty(github, 'enable') === true
-	const tokenEnv = trimmed(stringValue(objectProperty(github, 'tokenEnv'))) ?? DEFAULT_TOKEN_ENV
-	const tokenFile = trimmed(stringValue(objectProperty(github, 'tokenFile')))
-	const allowedRepos = stringArray(objectProperty(github, 'allowedRepos'))
-	const allowUnrestrictedRepos = objectProperty(github, 'allowUnrestrictedRepos') === true
+	if (github === undefined) return disabledGitHubConfig()
+
+	let decoded: typeof GitHubOptionsBlock.Type
+	try {
+		decoded = Schema.decodeUnknownSync(GitHubOptionsBlock)(github)
+	} catch (error) {
+		warnInvalidConfig(error)
+		return disabledGitHubConfig()
+	}
+
+	const tokenEnv = trimmed(decoded.tokenEnv) ?? DEFAULT_TOKEN_ENV
+	const tokenFile = trimmed(decoded.tokenFile)
 
 	return {
-		enabled,
+		enabled: decoded.enable === true,
 		config: {
 			tokenEnv,
-			...optionalProperty('tokenFile', tokenFile),
-			allowedRepos,
-			allowUnrestrictedRepos,
+			...optionalField('tokenFile', tokenFile),
+			allowedRepos: decoded.allowedRepos ?? [],
+			allowUnrestrictedRepos: decoded.allowUnrestrictedRepos ?? false,
 		},
 	}
 }
@@ -219,10 +152,10 @@ function parseHeaderNumber(headers: Headers, name: string): number | undefined {
 
 export function parseRateLimitHeaders(headers: Headers): RateLimitInfo {
 	return {
-		...optionalProperty('limit', parseHeaderNumber(headers, 'x-ratelimit-limit')),
-		...optionalProperty('remaining', parseHeaderNumber(headers, 'x-ratelimit-remaining')),
-		...optionalProperty('reset', parseHeaderNumber(headers, 'x-ratelimit-reset')),
-		...optionalProperty('retryAfter', parseHeaderNumber(headers, 'retry-after')),
+		...optionalField('limit', parseHeaderNumber(headers, 'x-ratelimit-limit')),
+		...optionalField('remaining', parseHeaderNumber(headers, 'x-ratelimit-remaining')),
+		...optionalField('reset', parseHeaderNumber(headers, 'x-ratelimit-reset')),
+		...optionalField('retryAfter', parseHeaderNumber(headers, 'retry-after')),
 	}
 }
 
@@ -477,14 +410,14 @@ function searchResultItem(value: unknown): GitHubCodeSearchResult['results'][num
 	return {
 		repo: normalizeRepo(repo),
 		path,
-		...optionalProperty('sha', sha),
-		...optionalProperty('htmlUrl', htmlUrl),
-		...optionalProperty('score', score),
-		...optionalProperty('textMatches', matches),
+		...optionalField('sha', sha),
+		...optionalField('htmlUrl', htmlUrl),
+		...optionalField('score', score),
+		...optionalField('textMatches', matches),
 	}
 }
 
-export async function githubCodeSearch(
+async function githubCodeSearchRequest(
 	config: GitHubConfig,
 	input: GitHubCodeSearchInput,
 ): Promise<GitHubCodeSearchResult> {
@@ -575,7 +508,7 @@ export async function githubCodeSearch(
 
 		if (results.length === 0) gaps.push('GitHub code search returned no results.')
 		return withGaps(
-			{ ok: results.length > 0, results, ...optionalProperty('rateLimit', rateLimit) },
+			{ ok: results.length > 0, results, ...optionalField('rateLimit', rateLimit) },
 			gaps,
 		)
 	} catch (error) {
@@ -592,7 +525,7 @@ function decodeBase64Content(value: string): string | undefined {
 	return decoded.toString('utf8')
 }
 
-export async function githubFileRead(
+async function githubFileReadRequest(
 	config: GitHubConfig,
 	input: GitHubFileReadInput,
 ): Promise<GitHubFileReadResult> {
@@ -621,7 +554,7 @@ export async function githubFileRead(
 				ok: false,
 				repo,
 				path: targetPath,
-				...optionalProperty('ref', input.ref),
+				...optionalField('ref', input.ref),
 				rateLimit,
 				gaps: [...gaps, ...failureGaps],
 			}
@@ -644,11 +577,11 @@ export async function githubFileRead(
 					ok: false,
 					repo,
 					path: targetPath,
-					...optionalProperty('ref', input.ref),
-					...optionalProperty('sha', sha),
-					...optionalProperty('encoding', encoding),
-					...optionalProperty('htmlUrl', htmlUrl),
-					...optionalProperty('size', size),
+					...optionalField('ref', input.ref),
+					...optionalField('sha', sha),
+					...optionalField('encoding', encoding),
+					...optionalField('htmlUrl', htmlUrl),
+					...optionalField('size', size),
 					rateLimit,
 				},
 				gaps,
@@ -667,12 +600,12 @@ export async function githubFileRead(
 				ok: content !== undefined,
 				repo,
 				path: targetPath,
-				...optionalProperty('ref', input.ref),
-				...optionalProperty('sha', sha),
-				...optionalProperty('content', content),
-				...optionalProperty('encoding', encoding),
-				...optionalProperty('htmlUrl', htmlUrl),
-				...optionalProperty('size', size),
+				...optionalField('ref', input.ref),
+				...optionalField('sha', sha),
+				...optionalField('content', content),
+				...optionalField('encoding', encoding),
+				...optionalField('htmlUrl', htmlUrl),
+				...optionalField('size', size),
 				rateLimit,
 			},
 			gaps,
@@ -703,8 +636,8 @@ function treeEntry(value: unknown): GitHubRepoTreeResult['entries'][number] | un
 	return {
 		path,
 		type: normalizeTreeType(objectProperty(value, 'type'), mode),
-		...optionalProperty('sha', sha),
-		...optionalProperty('size', size),
+		...optionalField('sha', sha),
+		...optionalField('size', size),
 	}
 }
 
@@ -713,7 +646,7 @@ function normalizePathPrefix(value: string | undefined): string | undefined {
 	return prefix === '' ? undefined : prefix
 }
 
-export async function githubRepoTree(
+async function githubRepoTreeRequest(
 	config: GitHubConfig,
 	input: GitHubRepoTreeInput,
 ): Promise<GitHubRepoTreeResult> {
@@ -742,7 +675,7 @@ export async function githubRepoTree(
 			return {
 				ok: false,
 				repo,
-				...optionalProperty('ref', input.ref),
+				...optionalField('ref', input.ref),
 				entries: [],
 				rateLimit,
 				gaps: [...gaps, ...failureGaps],
@@ -773,10 +706,10 @@ export async function githubRepoTree(
 			{
 				ok: entries.length > 0,
 				repo,
-				...optionalProperty('ref', input.ref),
-				...optionalProperty('recursive', recursive ? true : undefined),
+				...optionalField('ref', input.ref),
+				...optionalField('recursive', recursive ? true : undefined),
 				entries,
-				...optionalProperty('truncated', truncated ? true : undefined),
+				...optionalField('truncated', truncated ? true : undefined),
 				rateLimit,
 			},
 			gaps,
@@ -785,3 +718,45 @@ export async function githubRepoTree(
 		return { ok: false, repo, entries: [], gaps: [describeUnknown(error)] }
 	}
 }
+
+export const githubCodeSearch = Effect.fn(function* githubCodeSearch(
+	config: GitHubConfig,
+	input: GitHubCodeSearchInput,
+) {
+	return yield* Effect.tryPromise({
+		try: () => githubCodeSearchRequest(config, input),
+		catch: (error) =>
+			new ToolInputError({
+				tool: 'github_code_search',
+				message: describeUnknown(error),
+			}),
+	})
+})
+
+export const githubFileRead = Effect.fn(function* githubFileRead(
+	config: GitHubConfig,
+	input: GitHubFileReadInput,
+) {
+	return yield* Effect.tryPromise({
+		try: () => githubFileReadRequest(config, input),
+		catch: (error) =>
+			new ToolInputError({
+				tool: 'github_file_read',
+				message: describeUnknown(error),
+			}),
+	})
+})
+
+export const githubRepoTree = Effect.fn(function* githubRepoTree(
+	config: GitHubConfig,
+	input: GitHubRepoTreeInput,
+) {
+	return yield* Effect.tryPromise({
+		try: () => githubRepoTreeRequest(config, input),
+		catch: (error) =>
+			new ToolInputError({
+				tool: 'github_repo_tree',
+				message: describeUnknown(error),
+			}),
+	})
+})

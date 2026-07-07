@@ -6,8 +6,12 @@ reasoningEffort: xhigh
 permission:
     edit: allow
     ast_grep_replace: allow
+    github_code_search: deny
+    github_file_read: deny
+    github_repo_tree: deny
     task:
         "*": deny
+        advisor: allow
         research: allow
 ---
 

@@ -3,19 +3,16 @@
 import { rm } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { artifactCreate, decodeArtifactSlugSync } from '../packages/limitless/artifacts'
+import { ArtifactCreateInput, type ArtifactCreateResult } from '../packages/limitless/lib/artifact'
 import {
-	ArtifactCreateInput,
-	type ArtifactCreateResult,
-	artifactCreate,
-	decodeArtifactSlugSync,
-	TypstCompileInput,
-	type TypstCompileResult,
-	TypstTemplatesListInput,
-	type TypstTemplatesListResult,
-	typstCompile,
-	typstTemplatesList,
-} from '../packages/limitless/artifacts'
+	ArtifactTemplatesListInput,
+	type ArtifactTemplatesListResult,
+} from '../packages/limitless/lib/template'
+import { TypstCompileInput, type TypstCompileResult } from '../packages/limitless/lib/typst'
 import { executeTool } from '../packages/limitless/shared'
+import { artifactTemplatesList } from '../packages/limitless/templates'
+import { typstCompile } from '../packages/limitless/typst'
 
 type ArtifactContext = Parameters<typeof artifactCreate>[1]
 
@@ -80,11 +77,15 @@ function assertToolSuccess<T>(toolName: string, payload: T | ToolFailurePayload)
 	throw new Error(`${toolName} failed: ${payload.message ?? payload.error}`)
 }
 
-function assertSafeArtifactsDirectory(): void {
-	const relativeTarget = path.relative(worktree, artifactsDirectory)
-	if (relativeTarget !== path.join('.limitless', 'artifacts')) {
-		throw new Error(`Refusing to delete unexpected artifacts path: ${artifactsDirectory}`)
+// Only ever delete this script's own example artifacts; other artifacts in the
+// workspace (scratchpads, documents) belong to users and agents.
+async function removeExampleArtifact(slug: ArtifactSlugValue): Promise<void> {
+	const target = path.join(artifactsDirectory, slug)
+	const relativeTarget = path.relative(worktree, target)
+	if (!relativeTarget.startsWith(path.join('.limitless', 'artifacts', 'example-'))) {
+		throw new Error(`Refusing to delete unexpected artifacts path: ${target}`)
 	}
+	await rm(target, { recursive: true, force: true })
 }
 
 function titleForTemplate(templateName: string): string {
@@ -94,13 +95,13 @@ function titleForTemplate(templateName: string): string {
 		.join(' ')} Example`
 }
 
-async function listTemplates(): Promise<TypstTemplatesListResult> {
-	const payload = parseToolOutput<TypstTemplatesListResult | ToolFailurePayload>(
-		await executeTool('typst_templates_list', TypstTemplatesListInput, {}, context, (args) =>
-			typstTemplatesList(args),
+async function listTemplates(): Promise<ArtifactTemplatesListResult> {
+	const payload = parseToolOutput<ArtifactTemplatesListResult | ToolFailurePayload>(
+		await executeTool('artifact_templates_list', ArtifactTemplatesListInput, {}, context, (args) =>
+			artifactTemplatesList(args),
 		),
 	)
-	return assertToolSuccess('typst_templates_list', payload)
+	return assertToolSuccess('artifact_templates_list', payload)
 }
 
 async function createDocument(input: {
@@ -134,15 +135,12 @@ async function compileDocument(slug: ArtifactSlugValue): Promise<TypstCompileRes
 }
 
 async function main(): Promise<void> {
-	assertSafeArtifactsDirectory()
-	await rm(artifactsDirectory, { recursive: true, force: true })
-	console.log(`Deleted ${path.relative(worktree, artifactsDirectory)}`)
-
 	const templates = await listTemplates()
 	const generated: GeneratedExample[] = []
 
-	for (const template of templates.templates) {
+	for (const template of templates.templates.filter((candidate) => candidate.kind === 'document')) {
 		const slug = decodeArtifactSlugSync(`example-${template.name}`)
+		await removeExampleArtifact(slug)
 		const created = await createDocument({
 			title: titleForTemplate(template.name),
 			slug,

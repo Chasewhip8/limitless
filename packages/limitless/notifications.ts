@@ -1,16 +1,17 @@
 import type { PluginOptions } from '@opencode-ai/plugin'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
+import {
+	type NotificationConfig,
+	type NotificationEvent,
+	NotificationOptionsBlock,
+} from './lib/notifications'
 import { describeUnknown, objectProperty, runCommand } from './shared'
 
-export type NotificationEvent = 'complete' | 'question'
-
-export type NotificationConfig = {
-	readonly enabled: boolean
-	readonly command: readonly [string, ...string[]] | null
-	readonly events: Readonly<Record<NotificationEvent, boolean>>
-	readonly includeChildSessions: boolean
-	readonly timeoutMs: number
-}
+export {
+	type NotificationConfig,
+	type NotificationEvent,
+	NotificationOptionsBlock,
+} from './lib/notifications'
 
 export const DEFAULT_NOTIFICATION_TIMEOUT_MS = 5_000
 
@@ -31,50 +32,55 @@ function asObject(value: unknown): object | undefined {
 	return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined
 }
 
-function booleanProperty(record: object, key: string): boolean | undefined {
-	const value = objectProperty(record, key)
-	return typeof value === 'boolean' ? value : undefined
-}
-
-function finitePositiveProperty(record: object, key: string): number | undefined {
-	const value = objectProperty(record, key)
-	return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
-}
-
-function parseCommand(value: unknown): readonly [string, ...string[]] | null {
-	if (!Array.isArray(value) || value.length === 0) return null
+function parseCommand(
+	value: ReadonlyArray<string> | undefined,
+): readonly [string, ...string[]] | null {
+	if (value === undefined || value.length === 0) return null
 	const [command, ...args] = value
-	if (typeof command !== 'string' || command.length === 0) return null
-	if (!args.every((arg): arg is string => typeof arg === 'string')) return null
+	if (command === undefined || command.length === 0) return null
 	return [command, ...args]
 }
 
-function parseEvents(value: unknown): Readonly<Record<NotificationEvent, boolean>> {
-	const raw = asObject(value)
-	if (raw === undefined) return defaultEvents
-
+function parseEvents(
+	value: typeof NotificationOptionsBlock.Type.events,
+): Readonly<Record<NotificationEvent, boolean>> {
 	return {
-		complete: booleanProperty(raw, 'complete') ?? defaultEvents.complete,
-		question: booleanProperty(raw, 'question') ?? defaultEvents.question,
+		complete: value?.complete ?? defaultEvents.complete,
+		question: value?.question ?? defaultEvents.question,
 	}
+}
+
+function positiveTimeout(value: number | undefined): number {
+	return value === undefined || value <= 0 ? DEFAULT_NOTIFICATION_TIMEOUT_MS : value
+}
+
+function warnInvalidConfig(error: unknown): void {
+	console.warn(`[limitless] invalid notifications config: ${describeUnknown(error)}`)
 }
 
 export function normalizeNotificationConfig(
 	options: PluginOptions | undefined,
 ): NotificationConfig {
-	const raw = asObject(objectProperty(options, 'notifications'))
+	const raw = objectProperty(options, 'notifications')
 	if (raw === undefined) return disabledConfig
 
-	const explicitlyEnabled =
-		booleanProperty(raw, 'enable') ?? booleanProperty(raw, 'enabled') ?? false
-	const command = parseCommand(objectProperty(raw, 'command'))
+	let decoded: typeof NotificationOptionsBlock.Type
+	try {
+		decoded = Schema.decodeUnknownSync(NotificationOptionsBlock)(raw)
+	} catch (error) {
+		warnInvalidConfig(error)
+		return disabledConfig
+	}
+
+	const explicitlyEnabled = decoded.enable ?? decoded.enabled ?? false
+	const command = parseCommand(decoded.command)
 
 	return {
 		enabled: explicitlyEnabled && command !== null,
 		command,
-		events: parseEvents(objectProperty(raw, 'events')),
-		includeChildSessions: booleanProperty(raw, 'includeChildSessions') ?? false,
-		timeoutMs: finitePositiveProperty(raw, 'timeoutMs') ?? DEFAULT_NOTIFICATION_TIMEOUT_MS,
+		events: parseEvents(decoded.events),
+		includeChildSessions: decoded.includeChildSessions ?? false,
+		timeoutMs: positiveTimeout(decoded.timeoutMs),
 	}
 }
 

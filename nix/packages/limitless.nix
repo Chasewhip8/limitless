@@ -53,12 +53,8 @@ pkgs.stdenvNoCC.mkDerivation {
       --replace-fail "@AST_GREP_BIN@" "${pkgs.ast-grep}/bin/ast-grep" \
       --replace-fail "@TYPST_BIN@" "${pkgs.typst}/bin/typst"
 
-    mkdir -p "$out/assets"
-    cp -r packages/limitless/artifacts/frameworks/sphere/assets/. "$out/assets/"
-    cp packages/limitless/artifacts/frameworks/sphere/sphere.typ "$out/sphere.typ"
-    cp packages/limitless/artifacts/templates/sphere-institutional/main.typ "$out/sphere-institutional-main.typ"
-    cp packages/limitless/artifacts/templates/sphere-institutional-print/main.typ "$out/sphere-institutional-print-main.typ"
-    cp packages/limitless/artifacts/templates/sphere-institutional-showcase/main.typ "$out/sphere-institutional-showcase-main.typ"
+    cp -r templates "$out/templates"
+    cp -r frameworks "$out/frameworks"
   '';
 
   meta = with pkgs.lib; {

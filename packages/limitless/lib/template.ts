@@ -1,0 +1,45 @@
+import { Schema } from 'effect'
+import { ArtifactKind, pathSegmentFilter } from './artifact'
+
+export const ArtifactTemplateName = Schema.String.check(pathSegmentFilter('template name')).pipe(
+	Schema.brand('ArtifactTemplateName'),
+)
+export type ArtifactTemplateName = typeof ArtifactTemplateName.Type
+
+export const ArtifactTemplateManifest = Schema.Struct({
+	name: ArtifactTemplateName,
+	description: Schema.String,
+	title: Schema.optional(Schema.String),
+	kind: Schema.optional(ArtifactKind),
+	framework: Schema.optional(ArtifactTemplateName),
+	authoring: Schema.optional(Schema.String),
+})
+export type ArtifactTemplateManifest = typeof ArtifactTemplateManifest.Type
+
+export const ArtifactTemplate = Schema.Struct({
+	name: ArtifactTemplateName,
+	description: Schema.String,
+	path: Schema.String,
+	files: Schema.Array(Schema.String),
+	title: Schema.optional(Schema.String),
+	kind: Schema.optional(ArtifactKind),
+	framework: Schema.optional(ArtifactTemplateName),
+	authoring: Schema.optional(Schema.String),
+})
+export type ArtifactTemplate = typeof ArtifactTemplate.Type
+
+export const InvalidArtifactTemplate = Schema.Struct({
+	name: Schema.String,
+	reason: Schema.String,
+})
+export type InvalidArtifactTemplate = typeof InvalidArtifactTemplate.Type
+
+export const ArtifactTemplatesListInput = Schema.Struct({})
+export type ArtifactTemplatesListInput = typeof ArtifactTemplatesListInput.Type
+
+export const ArtifactTemplatesListResult = Schema.Struct({
+	ok: Schema.Literal(true),
+	templates: Schema.Array(ArtifactTemplate),
+	invalidTemplates: Schema.optional(Schema.Array(InvalidArtifactTemplate)),
+})
+export type ArtifactTemplatesListResult = typeof ArtifactTemplatesListResult.Type

@@ -3,7 +3,25 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
-import { Effect, Schema } from 'effect'
+import { Effect } from 'effect'
+import type {
+	JsonRpcId,
+	JsonRpcMessage,
+	LspDocument,
+	LspLocation,
+	LspLocationLink,
+	LspPosition,
+	LspRange,
+	LspReferencesInput as LspReferencesInputType,
+	LspRenameInput as LspRenameInputType,
+	LspServerConfig,
+	LspSymbolsInput as LspSymbolsInputType,
+	NormalizedEdit,
+	NormalizedLocation,
+	NormalizedSymbol,
+	PendingRequest,
+	WorkspaceEditPreview,
+} from './lib/lsp'
 import {
 	DEFAULT_TIMEOUT_MS,
 	describeUnknown,
@@ -14,126 +32,7 @@ import {
 	workspaceRoot,
 } from './shared'
 
-type JsonRpcId = number | string
-
-type JsonRpcMessage = {
-	readonly id?: unknown
-	readonly method?: unknown
-	readonly params?: unknown
-	readonly result?: unknown
-	readonly error?: unknown
-}
-
-type PendingRequest = {
-	readonly method: string
-	readonly resolve: (value: unknown) => void
-	readonly reject: (error: Error) => void
-	readonly timeout: ReturnType<typeof setTimeout>
-}
-
-type LspServerConfig = {
-	readonly id: string
-	readonly command: ReadonlyArray<string>
-	readonly extensions: ReadonlyArray<string>
-	readonly env: Readonly<Record<string, string>>
-	readonly initialization: unknown
-	readonly languageIds: Readonly<Record<string, string>>
-}
-
-type LspDocument = {
-	readonly uri: string
-	readonly content: string
-}
-
-type LspPosition = {
-	readonly line: number
-	readonly character: number
-}
-
-type LspRange = {
-	readonly start: LspPosition
-	readonly end: LspPosition
-}
-
-type LspLocation = {
-	readonly uri: string
-	readonly range: LspRange
-}
-
-type LspLocationLink = {
-	readonly targetUri: string
-	readonly targetRange: LspRange
-	readonly targetSelectionRange?: LspRange
-}
-
-type NormalizedLocation = {
-	readonly uri: string
-	readonly filePath: string
-	readonly range: LspRange
-	readonly text?: string
-}
-
-type NormalizedSymbol = {
-	readonly name: string
-	readonly kind?: number
-	readonly detail?: string
-	readonly filePath?: string
-	readonly range?: LspRange
-	readonly selectionRange?: LspRange
-	readonly children?: ReadonlyArray<NormalizedSymbol>
-}
-
-type NormalizedEdit = {
-	readonly filePath: string
-	readonly range: LspRange
-	readonly newText: string
-}
-
-type WorkspaceEditPreview = {
-	readonly edits: ReadonlyArray<NormalizedEdit>
-	readonly unsupportedChanges: ReadonlyArray<unknown>
-}
-
-export const LspReferencesInput = Schema.Struct({
-	workspace: Schema.optional(Schema.String),
-	filePath: Schema.optional(Schema.String),
-	path: Schema.optional(Schema.String),
-	server: Schema.optional(Schema.String),
-	timeoutMs: Schema.optional(Schema.Finite),
-	maxResults: Schema.optional(Schema.Finite),
-	offset: Schema.optional(Schema.Finite),
-	line: Schema.optional(Schema.Finite),
-	character: Schema.optional(Schema.Finite),
-	includeDeclaration: Schema.optional(Schema.Boolean),
-})
-
-export type LspReferencesInput = typeof LspReferencesInput.Type
-
-export const LspSymbolsInput = Schema.Struct({
-	workspace: Schema.optional(Schema.String),
-	filePath: Schema.optional(Schema.String),
-	path: Schema.optional(Schema.String),
-	server: Schema.optional(Schema.String),
-	timeoutMs: Schema.optional(Schema.Finite),
-	query: Schema.optional(Schema.String),
-	maxResults: Schema.optional(Schema.Finite),
-})
-
-export type LspSymbolsInput = typeof LspSymbolsInput.Type
-
-export const LspRenameInput = Schema.Struct({
-	workspace: Schema.optional(Schema.String),
-	filePath: Schema.optional(Schema.String),
-	path: Schema.optional(Schema.String),
-	server: Schema.optional(Schema.String),
-	timeoutMs: Schema.optional(Schema.Finite),
-	offset: Schema.optional(Schema.Finite),
-	line: Schema.optional(Schema.Finite),
-	character: Schema.optional(Schema.Finite),
-	newName: Schema.String,
-})
-
-export type LspRenameInput = typeof LspRenameInput.Type
+export { LspReferencesInput, LspRenameInput, LspSymbolsInput } from './lib/lsp'
 
 const builtInLanguageIds: Record<string, string> = {
 	'.cjs': 'javascript',
@@ -179,11 +78,14 @@ function isStringArray(value: unknown): value is ReadonlyArray<string> {
 	return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
-function stringRecord(value: unknown): Record<string, string> {
+function stringRecord(
+	value: unknown,
+	normalizeKey: (key: string) => string = (key) => key,
+): Record<string, string> {
 	if (!isObject(value)) return {}
 	const result: Record<string, string> = {}
 	for (const [key, item] of Object.entries(value)) {
-		if (typeof item === 'string') result[normalizeExtension(key)] = item
+		if (typeof item === 'string') result[normalizeKey(key)] = item
 	}
 	return result
 }
@@ -218,7 +120,7 @@ function normalizeLspConfig(config: unknown): ReadonlyArray<LspServerConfig> {
 			extensions: isStringArray(extensions) ? extensions.map(normalizeExtension) : [],
 			env: stringRecord(objectProperty(raw, 'env')),
 			initialization: objectProperty(raw, 'initialization'),
-			languageIds: stringRecord(objectProperty(raw, 'languageIds')),
+			languageIds: stringRecord(objectProperty(raw, 'languageIds'), normalizeExtension),
 		})
 	}
 	return servers
@@ -227,6 +129,14 @@ function normalizeLspConfig(config: unknown): ReadonlyArray<LspServerConfig> {
 function lspError(tool: string, message: string, server?: string) {
 	const payload = server === undefined ? { tool, message } : { tool, message, server }
 	return new LspToolError(payload)
+}
+
+function lspTry<T>(tool: string, try_: () => Promise<T>): Effect.Effect<T, LspToolError> {
+	return Effect.tryPromise({
+		try: try_,
+		catch: (error) =>
+			error instanceof LspToolError ? error : lspError(tool, describeUnknown(error)),
+	})
 }
 
 async function getOpenCodeConfig(input: PluginInput, workspace: string): Promise<unknown> {
@@ -346,7 +256,7 @@ function integer(value: number | undefined): number | undefined {
 	return Number.isInteger(value) ? value : undefined
 }
 
-function resolvePosition(
+const resolvePosition = Effect.fn(function* resolvePosition(
 	tool: string,
 	content: string,
 	input: {
@@ -354,11 +264,11 @@ function resolvePosition(
 		readonly line?: number | undefined
 		readonly character?: number | undefined
 	},
-): LspPosition {
+) {
 	const offset = integer(input.offset)
 	if (offset !== undefined) {
 		if (offset < 0 || offset > content.length) {
-			throw lspError(tool, `Offset ${offset} is outside the file.`)
+			return yield* lspError(tool, `Offset ${offset} is outside the file.`)
 		}
 		return positionAtOffset(content, offset)
 	}
@@ -366,15 +276,14 @@ function resolvePosition(
 	const line = integer(input.line)
 	const character = integer(input.character)
 	if (line === undefined || character === undefined) {
-		throw lspError(tool, 'Provide either offset or both zero-based line and character.')
+		return yield* lspError(tool, 'Provide either offset or both zero-based line and character.')
 	}
 	const position = { line, character }
 	if (offsetAtPosition(content, position) === undefined) {
-		throw lspError(tool, `Position ${line}:${character} is outside the file.`)
+		return yield* lspError(tool, `Position ${line}:${character} is outside the file.`)
 	}
 	return position
-}
-
+})
 function textForRange(content: string, range: LspRange): string | undefined {
 	const start = offsetAtPosition(content, range.start)
 	const end = offsetAtPosition(content, range.end)
@@ -505,7 +414,6 @@ class LspConnection {
 			throw error
 		}
 	}
-
 	async request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
 		if (this.closed) throw new Error('LSP connection is closed.')
 		const id = this.nextId
@@ -529,12 +437,10 @@ class LspConnection {
 		}
 		return response
 	}
-
 	async notify(method: string, params: unknown): Promise<void> {
 		if (this.closed) return
 		await this.send({ jsonrpc: '2.0', method, params })
 	}
-
 	async openDocument(filePath: string): Promise<LspDocument> {
 		const uri = fileUri(filePath)
 		const content = await readFile(filePath, 'utf8')
@@ -548,19 +454,9 @@ class LspConnection {
 		})
 		return { uri, content }
 	}
-
 	async closeDocument(document: LspDocument): Promise<void> {
 		await this.notify('textDocument/didClose', { textDocument: { uri: document.uri } })
 	}
-
-	async disposeDocument(document: LspDocument): Promise<void> {
-		try {
-			await this.closeDocument(document)
-		} catch (error) {
-			this.abort(`Unable to close LSP document: ${describeUnknown(error)}`)
-		}
-	}
-
 	async shutdown(): Promise<void> {
 		if (this.closed) return
 		try {
@@ -581,7 +477,6 @@ class LspConnection {
 		killTimer.unref?.()
 		this.process.once('exit', () => clearTimeout(killTimer))
 	}
-
 	private initializeParams() {
 		return {
 			processId: process.pid,
@@ -601,7 +496,6 @@ class LspConnection {
 			initializationOptions: this.config.initialization,
 		}
 	}
-
 	private async send(message: unknown): Promise<void> {
 		if (!this.process.stdin.writable) throw new Error('LSP server stdin is closed.')
 		const body = JSON.stringify(message)
@@ -613,21 +507,17 @@ class LspConnection {
 			})
 		})
 	}
-
 	private sendResponse(id: JsonRpcId, result: unknown): void {
 		this.sendBestEffort({ jsonrpc: '2.0', id, result })
 	}
-
 	private sendErrorResponse(id: JsonRpcId, code: number, message: string): void {
 		this.sendBestEffort({ jsonrpc: '2.0', id, error: { code, message } })
 	}
-
 	private sendBestEffort(message: unknown): void {
 		void this.send(message).catch((error: unknown) => {
 			this.abort(`Unable to write LSP response: ${describeUnknown(error)}`)
 		})
 	}
-
 	private handleStdout(chunk: Buffer): void {
 		this.stdout = Buffer.concat([this.stdout, chunk])
 		if (this.stdout.length > 1024 * 1024 * 16) {
@@ -653,11 +543,9 @@ class LspConnection {
 			this.handleMessage(body)
 		}
 	}
-
 	private handleStderr(chunk: Buffer): void {
 		this.stderr = `${this.stderr}${chunk.toString('utf8')}`.slice(-16_384)
 	}
-
 	private handleMessage(body: string): void {
 		let message: JsonRpcMessage
 		try {
@@ -695,7 +583,6 @@ class LspConnection {
 			pending.resolve(message.result)
 		}
 	}
-
 	private serverRequestResponse(
 		method: string,
 		params: unknown,
@@ -713,7 +600,6 @@ class LspConnection {
 		}
 		return { supported: false }
 	}
-
 	private closePending(message: string): void {
 		const stderr = this.stderr.trim()
 		const detail = stderr.length === 0 ? message : `${message}\n${stderr}`
@@ -724,67 +610,125 @@ class LspConnection {
 			this.pending.delete(id)
 		}
 	}
-
 	private abort(message: string): void {
 		this.closePending(message)
 		if (!this.process.killed) this.process.kill()
 	}
 }
 
-async function withConnection<T>(
+function connectionResource(
+	tool: string,
 	config: LspServerConfig,
 	workspace: string,
 	timeoutMs: number,
-	use: (connection: LspConnection) => Promise<T>,
-): Promise<T> {
-	const connection = await LspConnection.start(config, workspace, timeoutMs)
-	try {
-		return await use(connection)
-	} finally {
-		await connection.shutdown()
-	}
+) {
+	return Effect.acquireRelease(
+		lspTry(tool, () => LspConnection.start(config, workspace, timeoutMs)),
+		(connection) => ignoreFailure(lspTry(tool, () => connection.shutdown())),
+	)
 }
 
-async function runOnCapableServer<T>(
+function documentResource(tool: string, connection: LspConnection, filePath: string) {
+	return Effect.acquireRelease(
+		lspTry(tool, () => connection.openDocument(filePath)),
+		(document) => ignoreFailure(lspTry(tool, () => connection.closeDocument(document))),
+	)
+}
+
+function ignoreFailure<T>(effect: Effect.Effect<T, LspToolError>) {
+	return effect.pipe(
+		Effect.match({
+			onFailure: () => undefined,
+			onSuccess: () => undefined,
+		}),
+	)
+}
+
+function attempt<T>(effect: Effect.Effect<T, LspToolError>) {
+	return effect.pipe(
+		Effect.match({
+			onFailure: (error) => ({ ok: false as const, message: error.message }),
+			onSuccess: (value) => ({ ok: true as const, value }),
+		}),
+	)
+}
+
+function withDocument<T>(
+	tool: string,
+	connection: LspConnection,
+	filePath: string,
+	use: (document: LspDocument) => Effect.Effect<T, LspToolError>,
+) {
+	return Effect.scoped(
+		Effect.gen(function* () {
+			const document = yield* documentResource(tool, connection, filePath)
+			return yield* use(document)
+		}),
+	)
+}
+
+function request(
+	tool: string,
+	connection: LspConnection,
+	method: string,
+	params: unknown,
+	timeoutMs: number,
+) {
+	return lspTry(tool, () => connection.request(method, params, timeoutMs))
+}
+
+function normalizeLocationsEffect(
+	tool: string,
+	workspace: string,
+	locations: ReadonlyArray<unknown>,
+) {
+	return lspTry(tool, () => normalizeLocations(workspace, locations))
+}
+
+function runOnCapableServer<T>(
 	tool: string,
 	workspace: string,
 	servers: ReadonlyArray<LspServerConfig>,
 	capability: string,
 	timeoutMs: number,
-	use: (connection: LspConnection) => Promise<T>,
-): Promise<T> {
-	const errors: Array<string> = []
-	for (const config of servers) {
-		try {
-			return await withConnection(config, workspace, timeoutMs, async (connection) => {
-				if (!hasCapability(connection.capabilities, capability)) {
-					throw new Error(`Server ${config.id} does not support ${capability}.`)
-				}
-				return use(connection)
-			})
-		} catch (error) {
-			errors.push(`${config.id}: ${describeUnknown(error)}`)
+	use: (connection: LspConnection) => Effect.Effect<T, LspToolError>,
+) {
+	return Effect.gen(function* () {
+		const errors: Array<string> = []
+		for (const config of servers) {
+			const result = yield* attempt(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const connection = yield* connectionResource(tool, config, workspace, timeoutMs)
+						if (!hasCapability(connection.capabilities, capability)) {
+							return yield* lspError(tool, `Server ${config.id} does not support ${capability}.`)
+						}
+						return yield* use(connection)
+					}),
+				),
+			)
+			if (result.ok) return result.value
+			errors.push(`${config.id}: ${result.message}`)
 		}
-	}
-	throw lspError(
-		tool,
-		`No matching LSP server completed ${capability}. ${errors.join('; ') || 'No candidates.'}`,
-	)
+		return yield* lspError(
+			tool,
+			`No matching LSP server completed ${capability}. ${errors.join('; ') || 'No candidates.'}`,
+		)
+	})
 }
 
-function resolveFile(
+const resolveFile = Effect.fn(function* resolveFile(
 	tool: string,
 	workspace: string,
 	input: { readonly filePath?: string | undefined; readonly path?: string | undefined },
-): string {
+) {
 	const filePath = input.filePath ?? input.path
 	if (filePath === undefined || filePath.length === 0) {
-		throw lspError(tool, 'filePath or path is required.')
+		return yield* lspError(tool, 'filePath or path is required.')
 	}
 	return workspacePath(workspace, filePath)
-}
-
-function requireCandidates(
+})
+const requireCandidates = Effect.fn(function* requireCandidates(
 	tool: string,
 	servers: ReadonlyArray<LspServerConfig>,
 	filePath: string | undefined,
@@ -793,11 +737,10 @@ function requireCandidates(
 	const candidates = matchingServers(servers, filePath, serverId)
 	if (candidates.length === 0) {
 		const target = serverId ?? (filePath === undefined ? 'workspace' : pathExtension(filePath))
-		throw lspError(tool, `No configured LSP server matches ${target}.`)
+		return yield* lspError(tool, `No configured LSP server matches ${target}.`)
 	}
 	return candidates
-}
-
+})
 function maybeLimit<T>(items: ReadonlyArray<T>, maxResults: number | undefined) {
 	const integerLimit = integer(maxResults)
 	if (integerLimit === undefined || integerLimit <= 0) return { items, truncated: false }
@@ -929,223 +872,215 @@ function collectWorkspaceEdits(workspace: string, workspaceEdit: unknown): Works
 	return { edits, unsupportedChanges }
 }
 
-export function lspReferences(
+export const lspReferences = Effect.fn(function* lspReferences(
 	pluginInput: PluginInput,
-	input: LspReferencesInput,
+	input: LspReferencesInputType,
 	context: ToolContext,
 ) {
-	return Effect.gen(function* () {
-		const workspace = workspaceRoot(input, context)
-		const filePath = resolveFile('lsp_references', workspace, input)
-		const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-		const configs = yield* loadServerConfigs(pluginInput, 'lsp_references', workspace)
-		const candidates = requireCandidates('lsp_references', configs, filePath, input.server)
-		return yield* Effect.tryPromise({
-			try: async () =>
-				runOnCapableServer(
-					'lsp_references',
-					workspace,
-					candidates,
-					'referencesProvider',
-					timeoutMs,
-					async (connection) => {
-						const document = await connection.openDocument(filePath)
-						try {
-							const position = resolvePosition('lsp_references', document.content, input)
-							const raw = await connection.request(
-								'textDocument/references',
-								{
-									textDocument: { uri: document.uri },
-									position,
-									context: { includeDeclaration: input.includeDeclaration ?? true },
-								},
-								timeoutMs,
-							)
-							const rawLocations = Array.isArray(raw) ? raw : []
-							const limitedRaw = maybeLimit(rawLocations, input.maxResults)
-							const locations = await normalizeLocations(workspace, limitedRaw.items)
-							return {
-								ok: true,
-								tool: 'lsp_references',
-								server: connection.config.id,
-								filePath: workspaceRelative(workspace, filePath),
-								position,
-								locations,
-								truncated: limitedRaw.truncated,
-							}
-						} finally {
-							await connection.disposeDocument(document)
-						}
-					},
-				),
-			catch: (error) =>
-				error instanceof LspToolError ? error : lspError('lsp_references', describeUnknown(error)),
-		})
-	})
-}
-
-export function lspSymbols(pluginInput: PluginInput, input: LspSymbolsInput, context: ToolContext) {
-	return Effect.gen(function* () {
-		const workspace = workspaceRoot(input, context)
-		const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-		const filePathInput = input.filePath ?? input.path
-		const filePath =
-			filePathInput === undefined ? undefined : workspacePath(workspace, filePathInput)
-		const configs = yield* loadServerConfigs(pluginInput, 'lsp_symbols', workspace)
-		const candidates = requireCandidates('lsp_symbols', configs, filePath, input.server)
-		return yield* Effect.tryPromise({
-			try: async () => {
-				if (input.query !== undefined) {
-					const symbols: Array<NormalizedSymbol> = []
-					const errors: Array<Record<string, string>> = []
-					for (const config of candidates) {
-						try {
-							const result = await runOnCapableServer(
-								'lsp_symbols',
-								workspace,
-								[config],
-								'workspaceSymbolProvider',
-								timeoutMs,
-								(connection) =>
-									connection.request('workspace/symbol', { query: input.query }, timeoutMs),
-							)
-							if (Array.isArray(result)) {
-								for (const item of result) {
-									const symbol = normalizeSymbolInformation(item, workspace)
-									if (symbol !== undefined) symbols.push(symbol)
-								}
-							}
-						} catch (error) {
-							errors.push({ server: config.id, message: describeUnknown(error) })
-						}
+	const tool = 'lsp_references'
+	const workspace = workspaceRoot(input, context)
+	const filePath = yield* resolveFile(tool, workspace, input)
+	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
+	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const candidates = yield* requireCandidates(tool, configs, filePath, input.server)
+	return yield* runOnCapableServer(
+		tool,
+		workspace,
+		candidates,
+		'referencesProvider',
+		timeoutMs,
+		(connection) =>
+			withDocument(tool, connection, filePath, (document) =>
+				Effect.gen(function* () {
+					const position = yield* resolvePosition(tool, document.content, input)
+					const raw = yield* request(
+						tool,
+						connection,
+						'textDocument/references',
+						{
+							textDocument: { uri: document.uri },
+							position,
+							context: { includeDeclaration: input.includeDeclaration ?? true },
+						},
+						timeoutMs,
+					)
+					const rawLocations = Array.isArray(raw) ? raw : []
+					const limitedRaw = maybeLimit(rawLocations, input.maxResults)
+					const locations = yield* normalizeLocationsEffect(tool, workspace, limitedRaw.items)
+					return {
+						ok: true,
+						tool,
+						server: connection.config.id,
+						filePath: workspaceRelative(workspace, filePath),
+						position,
+						locations,
+						truncated: limitedRaw.truncated,
 					}
-					if (symbols.length === 0 && errors.length > 0) {
-						throw lspError(
-							'lsp_symbols',
-							`No workspace symbol provider succeeded. ${errors.map((error) => `${error.server}: ${error.message}`).join('; ')}`,
-						)
+				}),
+			),
+	)
+})
+export const lspSymbols = Effect.fn(function* lspSymbols(
+	pluginInput: PluginInput,
+	input: LspSymbolsInputType,
+	context: ToolContext,
+) {
+	const tool = 'lsp_symbols'
+	const workspace = workspaceRoot(input, context)
+	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
+	const filePathInput = input.filePath ?? input.path
+	const filePath = filePathInput === undefined ? undefined : workspacePath(workspace, filePathInput)
+	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const candidates = yield* requireCandidates(tool, configs, filePath, input.server)
+	if (input.query !== undefined) {
+		const symbols: Array<NormalizedSymbol> = []
+		const errors: Array<Record<string, string>> = []
+		for (const config of candidates) {
+			const result = yield* attempt(
+				runOnCapableServer(
+					tool,
+					workspace,
+					[config],
+					'workspaceSymbolProvider',
+					timeoutMs,
+					(connection) =>
+						request(tool, connection, 'workspace/symbol', { query: input.query }, timeoutMs),
+				),
+			)
+			if (result.ok && Array.isArray(result.value)) {
+				for (const item of result.value) {
+					const symbol = normalizeSymbolInformation(item, workspace)
+					if (symbol !== undefined) symbols.push(symbol)
+				}
+			} else if (!result.ok) {
+				errors.push({ server: config.id, message: result.message })
+			}
+		}
+		if (symbols.length === 0 && errors.length > 0) {
+			return yield* lspError(
+				tool,
+				`No workspace symbol provider succeeded. ${errors.map((error) => `${error.server}: ${error.message}`).join('; ')}`,
+			)
+		}
+		const limited = maybeLimit(symbols, input.maxResults)
+		return {
+			ok: true,
+			tool,
+			mode: 'workspace',
+			query: input.query,
+			symbols: limited.items,
+			truncated: limited.truncated,
+			errors,
+		}
+	}
+
+	if (filePath === undefined) {
+		return yield* lspError(
+			tool,
+			'Provide filePath/path for document symbols or query plus filePath/server for workspace symbols.',
+		)
+	}
+	return yield* runOnCapableServer(
+		tool,
+		workspace,
+		candidates,
+		'documentSymbolProvider',
+		timeoutMs,
+		(connection) =>
+			withDocument(tool, connection, filePath, (document) =>
+				Effect.gen(function* () {
+					const raw = yield* request(
+						tool,
+						connection,
+						'textDocument/documentSymbol',
+						{ textDocument: { uri: document.uri } },
+						timeoutMs,
+					)
+					const symbols: Array<NormalizedSymbol> = []
+					if (Array.isArray(raw)) {
+						for (const item of raw) {
+							const symbol = normalizeDocumentSymbol(item, workspace, document.uri)
+							if (symbol !== undefined) symbols.push(symbol)
+						}
 					}
 					const limited = maybeLimit(symbols, input.maxResults)
 					return {
 						ok: true,
-						tool: 'lsp_symbols',
-						mode: 'workspace',
-						query: input.query,
+						tool,
+						mode: 'document',
+						server: connection.config.id,
+						filePath: workspaceRelative(workspace, filePath),
 						symbols: limited.items,
 						truncated: limited.truncated,
-						errors,
 					}
-				}
+				}),
+			),
+	)
+})
 
-				if (filePath === undefined) {
-					throw lspError(
-						'lsp_symbols',
-						'Provide filePath/path for document symbols or query plus filePath/server for workspace symbols.',
+export const lspRename = Effect.fn(function* lspRename(
+	pluginInput: PluginInput,
+	input: LspRenameInputType,
+	context: ToolContext,
+) {
+	const tool = 'lsp_rename'
+	const workspace = workspaceRoot(input, context)
+	const filePath = yield* resolveFile(tool, workspace, input)
+	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
+	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const candidates = yield* requireCandidates(tool, configs, filePath, input.server)
+
+	return yield* runOnCapableServer(
+		tool,
+		workspace,
+		candidates,
+		'renameProvider',
+		timeoutMs,
+		(connection) =>
+			withDocument(tool, connection, filePath, (document) =>
+				Effect.gen(function* () {
+					const position = yield* resolvePosition(tool, document.content, input)
+					if (hasPrepareRename(connection.capabilities)) {
+						const prepare = yield* request(
+							tool,
+							connection,
+							'textDocument/prepareRename',
+							{ textDocument: { uri: document.uri }, position },
+							timeoutMs,
+						)
+						if (prepare === null) {
+							return yield* lspError(
+								tool,
+								'Server rejected rename at this position.',
+								connection.config.id,
+							)
+						}
+					}
+					const workspaceEdit = yield* request(
+						tool,
+						connection,
+						'textDocument/rename',
+						{
+							textDocument: { uri: document.uri },
+							position,
+							newName: input.newName,
+						},
+						timeoutMs,
 					)
-				}
-				return runOnCapableServer(
-					'lsp_symbols',
-					workspace,
-					candidates,
-					'documentSymbolProvider',
-					timeoutMs,
-					async (connection) => {
-						const document = await connection.openDocument(filePath)
-						try {
-							const raw = await connection.request(
-								'textDocument/documentSymbol',
-								{ textDocument: { uri: document.uri } },
-								timeoutMs,
-							)
-							const symbols = Array.isArray(raw)
-								? raw
-										.map((item) => normalizeDocumentSymbol(item, workspace, document.uri))
-										.filter((symbol) => symbol !== undefined)
-								: []
-							const limited = maybeLimit(symbols, input.maxResults)
-							return {
-								ok: true,
-								tool: 'lsp_symbols',
-								mode: 'document',
-								server: connection.config.id,
-								filePath: workspaceRelative(workspace, filePath),
-								symbols: limited.items,
-								truncated: limited.truncated,
-							}
-						} finally {
-							await connection.disposeDocument(document)
-						}
-					},
-				)
-			},
-			catch: (error) =>
-				error instanceof LspToolError ? error : lspError('lsp_symbols', describeUnknown(error)),
-		})
-	})
-}
-
-export function lspRename(pluginInput: PluginInput, input: LspRenameInput, context: ToolContext) {
-	return Effect.gen(function* () {
-		const workspace = workspaceRoot(input, context)
-		const filePath = resolveFile('lsp_rename', workspace, input)
-		const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-		const configs = yield* loadServerConfigs(pluginInput, 'lsp_rename', workspace)
-		const candidates = requireCandidates('lsp_rename', configs, filePath, input.server)
-		return yield* Effect.tryPromise({
-			try: async () =>
-				runOnCapableServer(
-					'lsp_rename',
-					workspace,
-					candidates,
-					'renameProvider',
-					timeoutMs,
-					async (connection) => {
-						const document = await connection.openDocument(filePath)
-						try {
-							const position = resolvePosition('lsp_rename', document.content, input)
-							if (hasPrepareRename(connection.capabilities)) {
-								const prepare = await connection.request(
-									'textDocument/prepareRename',
-									{ textDocument: { uri: document.uri }, position },
-									timeoutMs,
-								)
-								if (prepare === null) {
-									throw lspError(
-										'lsp_rename',
-										'Server rejected rename at this position.',
-										connection.config.id,
-									)
-								}
-							}
-							const workspaceEdit = await connection.request(
-								'textDocument/rename',
-								{
-									textDocument: { uri: document.uri },
-									position,
-									newName: input.newName,
-								},
-								timeoutMs,
-							)
-							const preview = collectWorkspaceEdits(workspace, workspaceEdit)
-							return {
-								ok: preview.unsupportedChanges.length === 0,
-								tool: 'lsp_rename',
-								server: connection.config.id,
-								filePath: workspaceRelative(workspace, filePath),
-								position,
-								newName: input.newName,
-								mode: 'preview',
-								applied: false,
-								edits: preview.edits,
-								unsupportedChanges: preview.unsupportedChanges,
-							}
-						} finally {
-							await connection.disposeDocument(document)
-						}
-					},
-				),
-			catch: (error) =>
-				error instanceof LspToolError ? error : lspError('lsp_rename', describeUnknown(error)),
-		})
-	})
-}
+					const preview = collectWorkspaceEdits(workspace, workspaceEdit)
+					return {
+						ok: preview.unsupportedChanges.length === 0,
+						tool,
+						server: connection.config.id,
+						filePath: workspaceRelative(workspace, filePath),
+						position,
+						newName: input.newName,
+						mode: 'preview',
+						applied: false,
+						edits: preview.edits,
+						unsupportedChanges: preview.unsupportedChanges,
+					}
+				}),
+			),
+	)
+})

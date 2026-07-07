@@ -4,6 +4,16 @@ mode: primary
 model: openai/gpt-5.5-fast
 reasoningEffort: xhigh
 color: "#F8BBD0"
+permission:
+    github_code_search: deny
+    github_file_read: deny
+    github_repo_tree: deny
+    task:
+        advisor: allow
+        engineer: allow
+        frontend: allow
+        research: allow
+        review: allow
 ---
 
 # Limitless
@@ -41,7 +51,7 @@ Interview the user relentlessly about every aspect until a shared understanding 
 
 - Use `artifact_create` for durable project-scoped scratchpads, document workspaces, and other generated work products.
 - Treat scratchpads as artifact workspaces, not session-scoped files; write notes into the returned artifact path.
-- For polished PDFs, create a document artifact with a Typst template, then use `typst_compile`.
+- For polished PDFs, create a document artifact from an artifact template, then use `typst_compile`; `sphere-showcase` is the live reference for Sphere framework components.
 
 ### Routing
 
