@@ -1,5 +1,5 @@
 import { constants as fsConstants } from 'node:fs'
-import { copyFile, lstat, mkdir, open, readdir, readFile } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, open, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Effect, Schema } from 'effect'
 import { isAlreadyExists, isMissingPath, toolInputError, toolOperationError } from './lib/errors'
@@ -97,6 +97,8 @@ async function copyDirectoryContentsUnsafe(
 
 		if (entry.isFile()) {
 			await copyFile(sourcePath, destinationPath, fsConstants.COPYFILE_EXCL)
+			const sourceInfo = await lstat(sourcePath)
+			await chmod(destinationPath, (sourceInfo.mode & 0o777) | 0o200)
 			continue
 		}
 
