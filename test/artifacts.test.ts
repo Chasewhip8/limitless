@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
@@ -62,7 +62,6 @@ function parseToolOutput<T>(result: Awaited<ReturnType<typeof executeTool>>): T 
 
 async function runArtifactCreate(
 	input: {
-		readonly kind?: string
 		readonly title?: string
 		readonly slug?: string
 		readonly template?: string
@@ -77,7 +76,6 @@ async function runArtifactCreate(
 
 async function runArtifactCreatePayload(
 	input: {
-		readonly kind?: string
 		readonly title?: string
 		readonly slug?: string
 		readonly template?: string
@@ -91,7 +89,7 @@ async function runArtifactCreatePayload(
 }
 
 async function runArtifactList(
-	input: { readonly kind?: string; readonly template?: string },
+	input: { readonly template?: string },
 	ctx: ArtifactContext,
 ): Promise<ArtifactListResult> {
 	const result = await executeTool('artifact_list', ArtifactListInput, input, ctx, (args) =>
@@ -176,10 +174,10 @@ describe('artifact paths', () => {
 })
 
 describe('artifact create and list', () => {
-	test('creates a durable scratchpad artifact without session path scoping', async () => {
+	test('creates an empty artifact without session path scoping', async () => {
 		await withWorkspace(async (workspace) => {
 			const created = await runArtifactCreate(
-				{ kind: 'scratchpad', title: 'Pricing notes', slug: 'pricing-notes' },
+				{ title: 'Pricing notes', slug: 'pricing-notes' },
 				context(workspace, 'session-a'),
 			)
 
@@ -191,25 +189,25 @@ describe('artifact create and list', () => {
 				created: true,
 			})
 			expect(created.path).not.toContain('session-a')
-			expect(await readFile(path.join(workspace, created.path, 'scratch.md'), 'utf8')).toBe('')
+			expect((await readdir(path.join(workspace, created.path))).sort()).toEqual(['manifest.json'])
 
 			const manifest = JSON.parse(
 				await readFile(path.join(workspace, created.manifestPath), 'utf8'),
 			) as Record<string, unknown>
 			expect(manifest).toMatchObject({
 				slug: 'pricing-notes',
-				kind: 'scratchpad',
 				title: 'Pricing notes',
 				createdAt: expect.any(String),
 				createdBy: { sessionID: 'session-a', agent: 'limitless' },
 			})
+			expect(manifest.kind).toBeUndefined()
+			expect(manifest.template).toBeUndefined()
 			expect(manifest.updatedAt).toBeUndefined()
 
 			const list = await runArtifactList({}, context(workspace, 'session-b'))
 			expect(list.artifacts).toEqual([
 				{
 					slug: 'pricing-notes',
-					kind: 'scratchpad',
 					title: 'Pricing notes',
 					path: '.limitless/artifacts/pricing-notes',
 					createdAt: manifest.createdAt,
@@ -218,36 +216,36 @@ describe('artifact create and list', () => {
 		})
 	})
 
-	test('creates document artifacts from the built-in template', async () => {
+	test('creates artifacts from the built-in template', async () => {
 		await withWorkspace(async (workspace) => {
 			const created = await runArtifactCreate(
-				{ kind: 'document', title: 'Strategy Brief', slug: 'strategy-brief' },
+				{ template: 'brief', title: 'Strategy Brief', slug: 'strategy-brief' },
 				context(workspace),
 			)
 
 			expect(created.manifest).toMatchObject({
 				slug: 'strategy-brief',
-				kind: 'document',
 				title: 'Strategy Brief',
 				template: 'brief',
 			})
+			expect(created.manifest).not.toHaveProperty('kind')
 			for (const relativePath of ['manifest.json', 'main.typ']) {
 				await expect(
 					readFile(path.join(workspace, created.path, relativePath), 'utf8'),
 				).resolves.toEqual(expect.any(String))
 			}
 
-			const list = await runArtifactList({ kind: 'document' }, context(workspace))
+			const list = await runArtifactList({ template: 'brief' }, context(workspace))
 			expect(list.artifacts).toHaveLength(1)
 			expect(list.artifacts[0]).toMatchObject({
 				slug: 'strategy-brief',
-				kind: 'document',
 				template: 'brief',
 			})
+			expect(list.artifacts[0]).not.toHaveProperty('kind')
 		})
 	})
 
-	test('uses template manifest kind when kind is omitted', async () => {
+	test('records the template when template is specified', async () => {
 		await withWorkspace(async (workspace) => {
 			const created = await runArtifactCreate(
 				{ title: 'Sphere Deck', slug: 'sphere-template', template: 'sphere' },
@@ -256,9 +254,9 @@ describe('artifact create and list', () => {
 
 			expect(created.manifest).toMatchObject({
 				slug: 'sphere-template',
-				kind: 'document',
 				template: 'sphere',
 			})
+			expect(created.manifest).not.toHaveProperty('kind')
 			await expect(
 				readFile(path.join(workspace, created.path, 'sphere.typ'), 'utf8'),
 			).resolves.toContain('#import "sphere/theme.typ"')
@@ -319,16 +317,15 @@ describe('template and typst tools', () => {
 			const [brief, sphere] = result.templates
 			expect(brief).toMatchObject({
 				name: 'brief',
-				kind: 'document',
 				path: 'templates/brief',
 				files: ['main.typ'],
 			})
+			expect(brief).not.toHaveProperty('kind')
 			expect(brief).not.toHaveProperty('framework')
 			expect(brief).not.toHaveProperty('metadata')
 
 			expect(sphere).toMatchObject({
 				name: 'sphere',
-				kind: 'document',
 				framework: 'sphere',
 				path: 'templates/sphere',
 				authoring: expect.any(String),
@@ -341,6 +338,7 @@ describe('template and typst tools', () => {
 					'assets/fonts/Inter-Variable.ttf',
 				]),
 			})
+			expect(sphere).not.toHaveProperty('kind')
 			expect(sphere).not.toHaveProperty('metadata')
 		})
 	})
@@ -349,7 +347,6 @@ describe('template and typst tools', () => {
 		await withWorkspace(async (workspace) => {
 			const created = await runArtifactCreate(
 				{
-					kind: 'document',
 					title: 'Sphere Deck',
 					slug: 'sphere-deck',
 					template: 'sphere',
@@ -418,7 +415,6 @@ describe('template and typst tools', () => {
 		await withWorkspace(async (workspace) => {
 			const created = await runArtifactCreate(
 				{
-					kind: 'document',
 					title: 'Sphere Institutional Showcase',
 					slug: 'sphere-showcase',
 					template: 'sphere-showcase',
@@ -476,17 +472,9 @@ describe('template and typst tools', () => {
 		})
 	})
 
-	test('rejects explicit kind mismatches and unknown templates', async () => {
+	test('rejects unknown templates', async () => {
 		await withWorkspace(async (workspace) => {
 			const ctx = context(workspace)
-			await expect(
-				runArtifactCreatePayload({ kind: 'scratchpad', slug: 'bad-kind', template: 'sphere' }, ctx),
-			).resolves.toMatchObject({
-				ok: false,
-				error: 'ToolInputError',
-				tool: 'artifact_create',
-			})
-
 			await expect(
 				runArtifactCreatePayload({ slug: 'bad-template', template: 'unknown-template' }, ctx),
 			).resolves.toMatchObject({
@@ -500,7 +488,7 @@ describe('template and typst tools', () => {
 	test('compiles a document artifact with the configured Typst binary', async () => {
 		await withWorkspace(async (workspace) => {
 			const created = await runArtifactCreate(
-				{ kind: 'document', title: 'Strategy Brief', slug: 'strategy-brief' },
+				{ template: 'brief', title: 'Strategy Brief', slug: 'strategy-brief' },
 				context(workspace),
 			)
 			const fakeTypst = path.join(workspace, 'fake-typst')

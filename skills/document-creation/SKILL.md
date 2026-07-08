@@ -11,7 +11,7 @@ You can produce finished, compiled PDF documents. A document is a self-contained
 
 - `artifact_templates_list` — the available templates, their metadata, and full file listings.
 - `artifact_template_read` — read any template file inline (`template`, `file`); no artifact needed to study a template.
-- `artifact_create` — instantiate a workspace from a template (`kind: "document"`, `template`, `title`, optional `slug`).
+- `artifact_create` — instantiate a workspace from a template (`template`, `title`, optional `slug`).
 - `typst_compile` — compile an artifact's `main.typ` (or another root `.typ` entry) to `dist/<slug>.pdf`.
 - `artifact_list` — every artifact workspace already in the project.
 

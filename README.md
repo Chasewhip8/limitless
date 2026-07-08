@@ -25,8 +25,8 @@
 - **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, advisor pushback, implementation, and final review.
 - **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed with their tools for Effect guidance and browser automation.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
-- **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces replace session-scoped scratchpads and can hold notes, source files, assets, and generated outputs.
-- **Typst document generation**: create document artifacts from built-in Typst templates and compile them to PDF with the packaged Typst binary.
+- **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces can be empty or hold notes, source files, assets, and generated outputs.
+- **Typst document generation**: create artifacts from built-in Typst templates and compile them to PDF with the packaged Typst binary.
 - **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional GitHub source-code research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **MCP defaults**: Context7 is enabled out of the box; Linear MCP remains opt-in and reads `LINEAR_API_KEY` from the OpenCode process environment.
@@ -144,7 +144,7 @@ The command is executed directly, without a shell. Completion notifications fire
 
 ## Artifacts and documents
 
-Limitless stores durable project-local work products under `.limitless/artifacts/`. The old session-scoped scratchpad concept is unified into artifact workspaces: create a `scratchpad` artifact for notes, a `document` artifact from a top-level `templates/<name>/` folder, or a `generic` artifact for ad hoc files. Artifacts are scoped to the current worktree, not the current chat session; the creating session is recorded only in the manifest metadata.
+Limitless stores durable project-local work products under `.limitless/artifacts/`. Create an empty artifact for ad hoc notes or files, or instantiate one from a top-level `templates/<name>/` folder. Artifacts are scoped to the current worktree, not the current chat session; the creating session is recorded only in the manifest metadata.
 
 The Limitless plugin exposes:
 

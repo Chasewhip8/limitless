@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { ArtifactKind, pathSegmentFilter } from './artifact'
+import { pathSegmentFilter } from './artifact'
 
 export const ArtifactTemplateName = Schema.String.check(pathSegmentFilter('template name')).pipe(
 	Schema.brand('ArtifactTemplateName'),
@@ -10,7 +10,6 @@ export const ArtifactTemplateManifest = Schema.Struct({
 	name: ArtifactTemplateName,
 	description: Schema.String,
 	title: Schema.optional(Schema.String),
-	kind: Schema.optional(ArtifactKind),
 	framework: Schema.optional(ArtifactTemplateName),
 	authoring: Schema.optional(Schema.String),
 })
@@ -22,7 +21,6 @@ export const ArtifactTemplate = Schema.Struct({
 	path: Schema.String,
 	files: Schema.Array(Schema.String),
 	title: Schema.optional(Schema.String),
-	kind: Schema.optional(ArtifactKind),
 	framework: Schema.optional(ArtifactTemplateName),
 	authoring: Schema.optional(Schema.String),
 })

@@ -78,7 +78,7 @@ function assertToolSuccess<T>(toolName: string, payload: T | ToolFailurePayload)
 }
 
 // Only ever delete this script's own example artifacts; other artifacts in the
-// workspace (scratchpads, documents) belong to users and agents.
+// workspace (notes, documents) belong to users and agents.
 async function removeExampleArtifact(slug: ArtifactSlugValue): Promise<void> {
 	const target = path.join(artifactsDirectory, slug)
 	const relativeTarget = path.relative(worktree, target)
@@ -110,12 +110,8 @@ async function createDocument(input: {
 	readonly template: string
 }): Promise<ArtifactCreateResult> {
 	const payload = parseToolOutput<ArtifactCreateResult | ToolFailurePayload>(
-		await executeTool(
-			'artifact_create',
-			ArtifactCreateInput,
-			{ kind: 'document', ...input },
-			context,
-			(args) => artifactCreate(args, context),
+		await executeTool('artifact_create', ArtifactCreateInput, input, context, (args) =>
+			artifactCreate(args, context),
 		),
 	)
 	return assertToolSuccess('artifact_create', payload)
@@ -138,7 +134,9 @@ async function main(): Promise<void> {
 	const templates = await listTemplates()
 	const generated: GeneratedExample[] = []
 
-	for (const template of templates.templates.filter((candidate) => candidate.kind === 'document')) {
+	for (const template of templates.templates.filter((candidate) =>
+		candidate.files.includes('main.typ'),
+	)) {
 		const slug = decodeArtifactSlugSync(`example-${template.name}`)
 		await removeExampleArtifact(slug)
 		const created = await createDocument({

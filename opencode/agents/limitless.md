@@ -55,8 +55,8 @@ Interview the user relentlessly about every aspect until a shared understanding 
 
 ## Artifacts
 
-- Use `artifact_create` for durable project-scoped scratchpads, document workspaces, and other generated work products.
-- Treat scratchpads as artifact workspaces, not session-scoped files; write notes into the returned artifact path.
+- Use artifacts for durable project-scoped workspaces; pass `template` when a built-in template fits, otherwise create an empty artifact.
+- Do not rely on a dedicated scratchpad artifact type; for notes, create an empty artifact and add a normal Markdown file if needed.
 
 ### Routing
 

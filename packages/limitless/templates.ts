@@ -26,8 +26,6 @@ export {
 	type ArtifactTemplatesListResult,
 } from './lib/template'
 
-export const DEFAULT_DOCUMENT_TEMPLATE = 'brief'
-
 const TEMPLATE_MANIFEST_FILE = 'manifest.json'
 const TEMPLATES_DIRECTORY = 'templates'
 const FRAMEWORKS_DIRECTORY = 'frameworks'
@@ -300,7 +298,6 @@ export const artifactTemplatesList = Effect.fn(function* artifactTemplatesList(
 			path: path.posix.join(TEMPLATES_DIRECTORY, manifestResult.value.name),
 			files: filesResult.value,
 			...optionalField('title', manifestResult.value.title),
-			...optionalField('kind', manifestResult.value.kind),
 			...optionalField('framework', manifestResult.value.framework),
 			...optionalField('authoring', manifestResult.value.authoring),
 		})

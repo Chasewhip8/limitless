@@ -104,9 +104,8 @@ export function createLimitless(): Plugin {
 			tool: {
 				artifact_create: tool({
 					description:
-						'Create a durable project-scoped artifact workspace, optionally from a built-in artifact template.',
+						'Create an empty durable project-scoped artifact workspace or instantiate one from a built-in artifact template.',
 					args: {
-						kind: tool.schema.string().optional(),
 						title: tool.schema.string().optional(),
 						slug: tool.schema.string().optional(),
 						template: tool.schema.string().optional(),
@@ -118,9 +117,9 @@ export function createLimitless(): Plugin {
 					},
 				}),
 				artifact_list: tool({
-					description: 'List durable project-scoped artifact workspaces.',
+					description:
+						'List durable project-scoped artifact workspaces, optionally filtered by template.',
 					args: {
-						kind: tool.schema.string().optional(),
 						template: tool.schema.string().optional(),
 					},
 					execute(args, context) {

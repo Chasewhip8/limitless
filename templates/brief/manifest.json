@@ -2,6 +2,5 @@
 	"name": "brief",
 	"description": "A clean source-first brief for prose, sections, and lightweight figures.",
 	"title": "Brief",
-	"kind": "document",
 	"authoring": "Edit main.typ directly. Add charts, images, and other source material under assets/ as needed."
 }

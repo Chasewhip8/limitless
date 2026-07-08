@@ -23,13 +23,6 @@ export const ArtifactFileName = Schema.String.check(pathSegmentFilter('file name
 )
 export type ArtifactFileName = typeof ArtifactFileName.Type
 
-export const ArtifactKind = Schema.Union([
-	Schema.Literal('scratchpad'),
-	Schema.Literal('document'),
-	Schema.Literal('generic'),
-])
-export type ArtifactKind = typeof ArtifactKind.Type
-
 export const ArtifactCreator = Schema.Struct({
 	sessionID: Schema.String,
 	agent: Schema.String,
@@ -38,7 +31,6 @@ export type ArtifactCreator = typeof ArtifactCreator.Type
 
 export const ArtifactManifest = Schema.Struct({
 	slug: ArtifactSlug,
-	kind: ArtifactKind,
 	createdAt: Schema.String,
 	title: Schema.optional(Schema.String),
 	template: Schema.optional(Schema.String),
@@ -47,7 +39,6 @@ export const ArtifactManifest = Schema.Struct({
 export type ArtifactManifest = typeof ArtifactManifest.Type
 
 export const ArtifactCreateInput = Schema.Struct({
-	kind: Schema.optional(Schema.String),
 	title: Schema.optional(Schema.String),
 	slug: Schema.optional(ArtifactSlug),
 	template: Schema.optional(Schema.String),
@@ -65,14 +56,12 @@ export const ArtifactCreateResult = Schema.Struct({
 export type ArtifactCreateResult = typeof ArtifactCreateResult.Type
 
 export const ArtifactListInput = Schema.Struct({
-	kind: Schema.optional(Schema.String),
 	template: Schema.optional(Schema.String),
 })
 export type ArtifactListInput = typeof ArtifactListInput.Type
 
 export const ArtifactListEntry = Schema.Struct({
 	slug: ArtifactSlug,
-	kind: ArtifactKind,
 	path: Schema.String,
 	createdAt: Schema.String,
 	title: Schema.optional(Schema.String),
