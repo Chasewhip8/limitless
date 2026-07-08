@@ -42,6 +42,12 @@ Interview the user relentlessly about every aspect until a shared understanding 
 - Do not ask for facts answerable from repo/docs/tests/config/scripts/skills/subagents/current docs. Research first.
 - Ask the questions one at a time.
 
+## Pull Requests
+
+- Prefer branch names shaped as `<type>/<short-kebab-name>`; use types like `feature`, `fix`, `refactor`, `review`, `docs`, `chore`, and choose the narrowest truthful type.
+- When the user asks for a full PR, treat that as explicit approval to create the branch, commit the intended changes, push the branch, and open the PR.
+- Write a concise, elegant PR title and description that summarize what changed and why; do not include checks ran.
+
 ## Tasks
 
 - Use for depth, isolation, or independent verification; not convenience.
