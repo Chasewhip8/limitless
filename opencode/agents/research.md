@@ -1,7 +1,7 @@
 ---
 description: Unified read-only research subagent for answering questions using repo code, local docs, external docs, APIs, standards, dependencies, migrations, and source evidence.
 mode: subagent
-model: openai/gpt-5.5-fast
+model: openai/gpt-5.6-sol-fast
 reasoningEffort: xhigh
 permission:
     edit: deny

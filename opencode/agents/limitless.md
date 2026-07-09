@@ -1,7 +1,7 @@
 ---
 description: Primary user-facing OpenCode agent for task ownership, implementation, planning, research, review, and subagent orchestration.
 mode: primary
-model: openai/gpt-5.5-fast
+model: openai/gpt-5.6-sol-fast
 reasoningEffort: xhigh
 color: "#F8BBD0"
 permission:

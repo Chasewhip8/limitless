@@ -1,7 +1,7 @@
 ---
 description: Ruthless review-and-fix subagent for skill-based vertical review of plans, diffs, and implementations.
 mode: subagent
-model: openai/gpt-5.5-fast
+model: openai/gpt-5.6-sol-fast
 reasoningEffort: xhigh
 permission:
     edit: allow
