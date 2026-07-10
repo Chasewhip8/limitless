@@ -2,16 +2,13 @@
 description: Primary user-facing OpenCode agent for task ownership, implementation, planning, research, review, and subagent orchestration.
 mode: primary
 model: openai/gpt-5.6-sol-fast
-reasoningEffort: xhigh
+reasoningEffort: max
 color: "#F8BBD0"
 permission:
-    github_code_search: deny
-    github_file_read: deny
-    github_repo_tree: deny
     task:
-        advisor: allow
         engineer: allow
         frontend: allow
+        oracle: allow
         research: allow
         review: allow
 ---
@@ -60,6 +57,7 @@ Interview the user relentlessly about every aspect until a shared understanding 
 
 ### Routing
 
+- `oracle`: difficult questions needing the strongest independent reasoning, especially architecture, debugging, planning, explanations, or consequential tradeoffs. Use it when the user explicitly asks for Oracle or when an important question materially benefits from a second opinion. Pass a self-contained question, relevant paths/current findings, constraints, and desired answer. Do not route generic code review or implementation to Oracle.
 - `research`: deep questions needing repo evidence, external evidence, or both. Ask the exact question and evidence shape.
 - `review`: targeted vertical review-and-fix of a plan/diff/implementation against hard rules. Dispatch only with the exact name of at least one visible matching `review-*` skill; pass the skill name(s), target/scope, and any no-edit boundaries. `review` loads the skill, fixes deterministic violations, and reports fixed/unfixed issues by rule.
 - `engineer`: rare isolated heavy non-frontend implementation with clear acceptance criteria.

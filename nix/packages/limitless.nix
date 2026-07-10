@@ -20,7 +20,7 @@ let
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
     '';
 
-    outputHash = "sha256-l8cvLStiMGS8f3LZR/yqe23bf9qJEgLf/OYumcMFW+w=";
+    outputHash = "sha256-o6pqn5IEusqlpTyIFy3aut6uT7kI2LeOU9Jmt4dKa0o=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -51,6 +51,7 @@ pkgs.stdenvNoCC.mkDerivation {
     mkdir -p "$out"
     substitute "dist/limitless.js" "$out/limitless.js" \
       --replace-fail "@AST_GREP_BIN@" "${pkgs.ast-grep}/bin/ast-grep" \
+      --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git" \
       --replace-fail "@TYPST_BIN@" "${pkgs.typst}/bin/typst"
 
     cp -r templates "$out/templates"

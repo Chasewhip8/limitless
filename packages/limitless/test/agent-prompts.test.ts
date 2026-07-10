@@ -11,6 +11,7 @@ const agentsDirectory = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
 	'../../../opencode/agents',
 )
+const skillsDirectory = path.resolve(agentsDirectory, '../../skills')
 const agentFiles = readdirSync(agentsDirectory)
 	.filter((fileName) => fileName.endsWith('.md'))
 	.sort((left, right) => left.localeCompare(right))
@@ -55,7 +56,8 @@ function parseFrontmatter(content: string): FrontmatterObject {
 		}
 
 		const indent = leadingWhitespace.length
-		const key = rawKey.trim()
+		const key = parseScalar(rawKey.trim())
+		if (typeof key !== 'string') throw new Error(`Frontmatter key must be a string: ${line}`)
 		const value = rawValue.trim()
 		while (stack.length > 1 && indent <= lastStackItem(stack).indent) stack.pop()
 
@@ -126,7 +128,11 @@ function expectCannotTask(agentName: string, subagentName: string): void {
 	)
 }
 
-const githubToolNames = ['github_code_search', 'github_file_read', 'github_repo_tree'] as const
+const retiredGitHubToolNames = [
+	'github_code_search',
+	'github_file_read',
+	'github_repo_tree',
+] as const
 
 describe('agent prompt frontmatter', () => {
 	test('all agent markdown frontmatter parses', () => {
@@ -157,61 +163,53 @@ describe('agent prompt frontmatter', () => {
 		}
 	})
 
-	test('read-only agents deny edit/bash', () => {
-		const readOnlyAgents = ['advisor', 'research']
-		for (const agentName of readOnlyAgents) {
-			const permission = permissionFor(agentName)
-			expect(permission.edit, agentName).toBe('deny')
-			expect(permission.bash, agentName).toBe('deny')
+	test('research denies edit/bash', () => {
+		const permission = permissionFor('research')
+		expect(permission.edit).toBe('deny')
+		expect(permission.bash).toBe('deny')
+	})
+
+	test('research denies mutating custom tools', () => {
+		const mutatingCustomTools = ['artifact_create', 'ast_grep_replace', 'typst_compile']
+		const permission = permissionFor('research')
+		for (const toolName of mutatingCustomTools) {
+			expect(permission[toolName], toolName).toBe('deny')
 		}
 	})
 
-	test('mutating custom tools are not allowed for read-only agents', () => {
-		const readOnlyAgents = ['advisor', 'research']
-		const mutatingCustomTools = ['ast_grep_replace']
-
-		for (const agentName of readOnlyAgents) {
+	test('all agents inherit github_clone access without overriding top-level policy', () => {
+		for (const agentName of enabledAgentNames()) {
 			const permission = permissionFor(agentName)
-			for (const toolName of mutatingCustomTools) {
-				expect(permission[toolName], `${agentName} ${toolName}`).toBe('deny')
+			expect(permission.github_clone, `${agentName} github_clone`).not.toBe('deny')
+			for (const toolName of retiredGitHubToolNames) {
+				expect(permission[toolName], `${agentName} ${toolName}`).toBeUndefined()
 			}
-		}
-	})
-
-	test('GitHub tools are isolated to research', () => {
-		const nonGitHubAgents = enabledAgentNames().filter((agentName) => agentName !== 'research')
-
-		for (const agentName of nonGitHubAgents) {
-			const permission = permissionFor(agentName)
-			for (const toolName of githubToolNames) {
-				expect(permission[toolName], `${agentName} ${toolName}`).toBe('deny')
-			}
-		}
-
-		const researchPermission = permissionFor('research')
-		for (const toolName of githubToolNames) {
-			expect(researchPermission[toolName], `research ${toolName}`).toBe('allow')
 		}
 	})
 })
 
-describe('advisor prompt', () => {
-	test('advisor.md exists', () => {
-		expect(agentFiles).toContain('advisor.md')
+describe('oracle prompt', () => {
+	test('oracle.md replaces advisor.md', () => {
+		expect(agentFiles).toContain('oracle.md')
+		expect(agentFiles).not.toContain('advisor.md')
 	})
 
-	test('advisor frontmatter matches role and permissions', () => {
-		const frontmatter = readAgentFrontmatter('advisor')
-		const permission = permissionFor('advisor')
-		const task = requireObject(permission.task, 'advisor task permission')
+	test('oracle denies normal edit tools and otherwise inherits broad access', () => {
+		const frontmatter = readAgentFrontmatter('oracle')
+		const permission = permissionFor('oracle')
+		const task = requireObject(permission.task, 'oracle task permission')
 
 		expect(frontmatter.mode).toBe('subagent')
 		expect(frontmatter.hidden).toBe(true)
-		expect(frontmatter.model).toBe('anthropic/claude-opus-4-7')
+		expect(frontmatter.model).toBe('openai/gpt-5.6-sol-pro')
 		expect(frontmatter.model).not.toBe(readAgentFrontmatter('limitless').model)
+		expect(frontmatter.reasoningEffort).toBe('max')
 		expect(permission.edit).toBe('deny')
-		expect(permission.bash).toBe('deny')
-		expect(permission.webfetch).toBe('deny')
+		expect(permission.ast_grep_replace).toBe('deny')
+		expect(permission['*']).toBeUndefined()
+		expect(permission.bash).toBeUndefined()
+		expect(permission.artifact_create).toBeUndefined()
+		expect(permission.typst_compile).toBeUndefined()
 		expect(task.research).toBe('allow')
 	})
 
@@ -221,13 +219,13 @@ describe('advisor prompt', () => {
 		}
 	})
 
-	test('advisor task routing is limited to primary and review roles', () => {
+	test('oracle task routing is limited to primary agents', () => {
 		for (const agentName of enabledPrimaryAgentNames()) {
-			expectCanTask(agentName, 'advisor')
+			expectCanTask(agentName, 'oracle')
 		}
-		expectCanTask('review', 'advisor')
-		expectCannotTask('engineer', 'advisor')
-		expectCannotTask('frontend', 'advisor')
+		expectCannotTask('review', 'oracle')
+		expectCannotTask('engineer', 'oracle')
+		expectCannotTask('frontend', 'oracle')
 	})
 
 	test('strategy subagent is removed so planning stays in primary context', () => {
@@ -246,15 +244,9 @@ describe('advisor prompt', () => {
 		}
 	})
 
-	test('advisor prompt includes required return fields', () => {
-		const content = readAgentContent('advisor')
-		for (const field of [
-			'<judgment>',
-			'<strongest_objection>',
-			'<alternatives>',
-			'<recommended_next_step>',
-			'<gaps>',
-		]) {
+	test('oracle prompt includes required answer fields', () => {
+		const content = readAgentContent('oracle')
+		for (const field of ['<answer>', '<recommendation>', '<tradeoffs>', '<evidence>', '<gaps>']) {
 			expect(content).toContain(field)
 		}
 	})
@@ -281,16 +273,15 @@ describe('research prompt', () => {
 		expect(permission.edit).toBe('deny')
 		expect(permission.bash).toBe('deny')
 		expect(permission.webfetch).toBe('allow')
-		expect(permission.github_code_search).toBe('allow')
-		expect(permission.github_file_read).toBe('allow')
-		expect(permission.github_repo_tree).toBe('allow')
+		expect(permission.github_clone).toBeUndefined()
+		expect(readAgentContent('research')).toContain('call `github_clone` first')
 	})
 
 	test('research task routing includes callers that need evidence', () => {
 		for (const agentName of enabledPrimaryAgentNames()) {
 			expectCanTask(agentName, 'research')
 		}
-		expectCanTask('advisor', 'research')
+		expectCanTask('oracle', 'research')
 		expectCanTask('engineer', 'research')
 		expectCanTask('frontend', 'research')
 		expectCanTask('review', 'research')
@@ -304,10 +295,22 @@ describe('review prompt', () => {
 		const content = readAgentContent('review')
 
 		expect(frontmatter.description).toContain('review-and-fix')
-		expect(permission.edit).toBe('allow')
+		const edit = requireObject(permission.edit, 'review edit permission')
+		expect(edit['*']).toBe('allow')
+		expect(edit['.limitless/repos']).toBe('deny')
+		expect(edit['.limitless/repos/**']).toBe('deny')
 		expect(permission.ast_grep_replace).toBe('allow')
 		expect(content).toContain('Every pass must be based on at least one named review skill')
 		expect(content).toContain('<fixed_issues>')
 		expect(content).toContain('<unfixed_issues>')
+	})
+
+	test('review-general ships deterministic baseline rules', () => {
+		const content = readFileSync(path.join(skillsDirectory, 'review-general/SKILL.md'), 'utf8')
+		expect(content).toContain('name: review-general')
+		for (const rule of ['GEN-01', 'GEN-02', 'GEN-03', 'GEN-04', 'GEN-05']) {
+			expect(content).toContain(rule)
+		}
+		expect(content).toContain('Do not invent style rules')
 	})
 })

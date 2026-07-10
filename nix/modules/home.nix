@@ -16,12 +16,11 @@ let
       "\n\n" + builtins.readFile cfg.opencode.extraAgentsFile
     );
 
-  opencodeDir = cfg.opencode.configDir;
+  opencodeDir = ".config/opencode";
   opencodePluginDir = "${opencodeDir}/plugins";
+  skillsDirectory = ".agents/skills";
 
   enabledSkills = cfg.enable && cfg.skills.enable;
-  enabledAgents = cfg.enable && cfg.agents.enable;
-  enabledLimitless = cfg.enable && cfg.plugins.limitless.enable;
   enabledLsp = cfg.enable && cfg.lsp.enable;
   enabledLinear = cfg.enable && cfg.mcp.linear.enable;
   enabledOpencodeService = cfg.enable && cfg.opencode.service.enable;
@@ -83,17 +82,21 @@ let
     lsp = lspServers;
   };
 
-  opencodeConfig = lib.recursiveUpdate defaultOpencodeConfig cfg.opencode.settings;
+  opencodeConfig = lib.recursiveUpdate defaultOpencodeConfig cfg.opencode.settings // {
+    default_agent = "limitless";
+  };
 
   limitlessPluginOptions = {
     github = {
       inherit (cfg.github)
         enable
         tokenEnv
-        tokenFile
         allowedRepos
         allowUnrestrictedRepos
         ;
+    }
+    // lib.optionalAttrs (cfg.github.tokenFile != null) {
+      inherit (cfg.github) tokenFile;
     };
     notifications = {
       inherit (cfg.notifications)
@@ -132,17 +135,16 @@ in
         description = "OpenCode package to install. Defaults to the Numtide llm-agents.nix OpenCode package.";
       };
 
-      configDir = lib.mkOption {
-        type = lib.types.str;
-        default = ".config/opencode";
-        description = "Directory relative to $HOME for OpenCode configuration.";
-      };
-
       permission = lib.mkOption {
         inherit (jsonFormat) type;
         default = {
           "*" = "allow";
           external_directory = "allow";
+          edit = {
+            "*" = "allow";
+            ".limitless/repos" = "deny";
+            ".limitless/repos/**" = "deny";
+          };
           read = {
             "*" = "allow";
             # Private key and credential stores should be deliberate reads.
@@ -252,11 +254,6 @@ in
         description = "Package containing skill directories.";
       };
 
-      directory = lib.mkOption {
-        type = lib.types.str;
-        default = ".agents/skills";
-        description = "Directory relative to $HOME for skill installation.";
-      };
     };
 
     tools = {
@@ -292,12 +289,6 @@ in
     };
 
     agents = {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Whether to install packaged OpenCode agents.";
-      };
-
       package = lib.mkOption {
         type = lib.types.package;
         default = self.packages.${system}."opencode-agents";
@@ -306,12 +297,6 @@ in
     };
 
     plugins.limitless = {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Whether to install the Limitless OpenCode plugin.";
-      };
-
       package = lib.mkOption {
         type = lib.types.package;
         default = self.packages.${system}.limitless;
@@ -323,20 +308,20 @@ in
       enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
-        description = "Enable GitHub remote code research tools.";
+        description = "Enable project-local managed GitHub clones for source research.";
       };
 
       tokenEnv = lib.mkOption {
         type = lib.types.str;
         default = "GITHUB_TOKEN";
-        description = "Environment variable read by OpenCode for GitHub API authentication when tokenFile is unset.";
+        description = "Environment variable read by OpenCode for GitHub clone authentication when tokenFile is unset.";
       };
 
       tokenFile = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
         example = "/run/agenix/github-token";
-        description = "Optional runtime file containing a GitHub API token. The token value is never written to generated configuration.";
+        description = "Optional runtime file containing a GitHub token. The token value is never written to generated configuration.";
       };
 
       allowedRepos = lib.mkOption {
@@ -346,13 +331,13 @@ in
           "owner/repo"
           "org/service"
         ];
-        description = "Optional repository allowlist for remote code tools.";
+        description = "Optional repository allowlist for managed clones and every transitive submodule.";
       };
 
       allowUnrestrictedRepos = lib.mkOption {
         type = lib.types.bool;
         default = false;
-        description = "Allow GitHub tools to access any repository visible to the configured token when allowedRepos is empty.";
+        description = "Allow managed clones to access any GitHub repository visible to the configured token when allowedRepos is empty.";
       };
     };
 
@@ -705,6 +690,10 @@ in
             assertion = !cfg.notifications.enable || cfg.notifications.command != [ ];
             message = "programs.limitless.notifications.command must be non-empty when notifications are enabled.";
           }
+          {
+            assertion = lib.attrByPath [ "agent" "limitless" "disable" ] false cfg.opencode.settings != true;
+            message = "programs.limitless keeps the limitless default agent enabled; remove opencode.settings.agent.limitless.disable.";
+          }
         ];
 
         home = {
@@ -712,36 +701,10 @@ in
           file = {
             "${opencodeDir}/opencode.json".text = builtins.toJSON opencodeConfig;
             "${opencodeDir}/AGENTS.md".text = agentsText;
-          };
-        };
-      }
-      (lib.mkIf enabledSkills {
-        home.file."${cfg.skills.directory}" = {
-          source = enabledSkillsPackage;
-          recursive = true;
-        };
-      })
-      (lib.mkIf enabledAgentBrowser {
-        home.packages = [ cfg.tools.agentBrowser.package ];
-      })
-      (lib.mkIf enabledEffectSolutions {
-        home.packages = [ cfg.tools.effectSolutions.package ];
-      })
-      (lib.mkIf enabledAgents {
-        home.file."${opencodeDir}/agents" = {
-          source = cfg.agents.package;
-          recursive = true;
-        };
-      })
-      (lib.mkIf enabledLimitless {
-        home = {
-          packages = [ pkgs.ast-grep ];
-          file = {
-            "${opencodeDir}/package.json".text = builtins.toJSON {
-              type = "module";
-              dependencies."@opencode-ai/plugin" = "1.14.25";
+            "${opencodeDir}/agents" = {
+              source = cfg.agents.package;
+              recursive = true;
             };
-            "${opencodePluginDir}/package.json".text = ''{"type":"module"}'';
             "${opencodePluginDir}/limitless.js".text = ''
               import plugin from "${cfg.plugins.limitless.package}/limitless.js";
 
@@ -772,6 +735,18 @@ in
             '';
           };
         };
+      }
+      (lib.mkIf enabledSkills {
+        home.file."${skillsDirectory}" = {
+          source = enabledSkillsPackage;
+          recursive = true;
+        };
+      })
+      (lib.mkIf enabledAgentBrowser {
+        home.packages = [ cfg.tools.agentBrowser.package ];
+      })
+      (lib.mkIf enabledEffectSolutions {
+        home.packages = [ cfg.tools.effectSolutions.package ];
       })
       (lib.mkIf enabledLsp {
         home.packages = lspPackages;
@@ -794,8 +769,6 @@ in
         };
       })
       (lib.mkIf enabledLinear {
-        home.file."${opencodePluginDir}/package.json".text = ''{"type":"module"}'';
-
         home.file."${opencodePluginDir}/linear-mcp.js" = {
           source = "${self.packages.${system}."linear-mcp"}/linear-mcp.js";
         };

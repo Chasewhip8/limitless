@@ -6,7 +6,7 @@
 	"main": "./index.ts",
 	"types": "./index.ts",
 	"dependencies": {
-		"@opencode-ai/plugin": "1.14.25",
+		"@opencode-ai/plugin": "1.17.18",
 		"effect": "4.0.0-beta.48"
 	}
 }

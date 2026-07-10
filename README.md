@@ -22,14 +22,14 @@
 ## Features
 
 - **One module to enable**: `programs.limitless.enable = true` wires OpenCode, agents, skills, plugins, MCPs, and language servers together.
-- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, advisor pushback, implementation, and final review.
+- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, implementation, and skill-directed review.
 - **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed with their tools for Effect guidance and browser automation.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
 - **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces can be empty or hold notes, source files, assets, and generated outputs.
 - **Typst document generation**: create artifacts from built-in Typst templates and compile them to PDF with the packaged Typst binary.
-- **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional GitHub source-code research in one place.
+- **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional project-cached GitHub source research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
-- **MCP defaults**: Context7 is enabled out of the box; Linear MCP remains opt-in and reads `LINEAR_API_KEY` from the OpenCode process environment.
+- **Optional Linear MCP**: Linear remains opt-in and reads `LINEAR_API_KEY` from the OpenCode process environment.
 - **Native attention hooks**: optionally run a system command when a session completes or the question tool prompts the user.
 - **Safer agent permissions**: common work is allowed, while credential access, destructive git operations, broad deletion, publishing, privilege escalation, and infrastructure mutations ask first.
 - **Optional service mode**: OpenCode can run as a user service with a shell alias that attaches from the current directory.
@@ -41,7 +41,6 @@ programs.limitless = {
   enable = true;
 
   opencode = {
-    configDir = ".config/opencode";
     extraAgentsFile = null;
     settings = {};
     service = {
@@ -54,16 +53,12 @@ programs.limitless = {
 
   skills = {
     enable = true;
-    directory = ".agents/skills";
   };
 
   tools = {
     agentBrowser.enable = true;
     effectSolutions.enable = true;
   };
-
-  agents.enable = true;
-  plugins.limitless.enable = true;
 
   github = {
     enable = false;
@@ -111,7 +106,9 @@ programs.limitless = {
 
 `research` is read-only and researches local code, tests, docs, configuration, APIs, standards, current external facts, implementation source, official examples, and configured private GitHub repositories. It does not edit files or run shell commands.
 
-Enable optional GitHub source tools with:
+`oracle` is the high-reasoning question-answering subagent. Limitless uses it for difficult architecture, debugging, planning, explanation, and tradeoff questions that benefit from an independent second opinion; Oracle may delegate broad evidence gathering to `research`. It inherits the normal broad tool access but cannot use the standard edit or structured-replacement tools.
+
+Enable the optional `github_clone` source tool with:
 
 ```nix
 programs.limitless.github = {
@@ -123,9 +120,17 @@ programs.limitless.github = {
 };
 ```
 
-Provide the token through either the named environment variable, for example `GITHUB_TOKEN`, or a runtime token file such as `/run/agenix/github-token`, for private repositories, higher rate limits, and GitHub code search. When `tokenFile` is set, Limitless reads that file instead of `tokenEnv`. Limitless writes only the environment variable name, optional token file path, and repository allowlist into generated configuration, never the token value.
+Provide a token through either the named environment variable, for example `GITHUB_TOKEN`, or a runtime token file such as `/run/agenix/github-token` when cloning private repositories. When `tokenFile` is set, Limitless reads that file instead of `tokenEnv`. The token is passed to Git only through ephemeral, github.com-scoped environment configuration: it is never placed in a URL, command argument, tool result, generated configuration, or repository config. Limitless writes only the environment variable name, optional token file path, and repository policy into generated configuration.
 
-`allowedRepos` must be non-empty when GitHub tools are enabled unless you explicitly set `allowUnrestrictedRepos = true`. Use fine-grained read-only tokens. File reads and repo-tree requests without an explicit `ref` use GitHub's default branch, so results report that caveat. GitHub auth failures and rate limits are returned as explicit gaps.
+`allowedRepos` must be non-empty when GitHub support is enabled unless you explicitly set `allowUnrestrictedRepos = true`. The same policy is enforced independently for every transitive submodule, and non-GitHub submodule hosts are rejected. Use fine-grained read-only tokens.
+
+`github_clone` is available to every agent. It creates depth-one snapshots under the current worktree's `.limitless/repos/` directory and returns both relative and absolute paths plus the resolved commit. Calls without `ref` use a stable `github-owner-repo` directory and refresh the repository's current default branch every time. Branches, tags, and commit SHAs use deterministic ref-suffixed directories, so snapshots for different refs do not collide. Existing checkouts are refreshed only when their identity, clean HTTPS origin, tracked files, untracked files, and recursively initialized submodules are clean; dirty state is never overwritten. Initial clones are assembled in a same-directory staging path and atomically published, so a failed first clone leaves no final checkout.
+
+Accepted submodules are rewritten to clean HTTPS origins locally and initialized one level at a time with shallow fetches so each transitive repository is validated before Git can access it. Managed repositories are read-only supporting source: clone first, then use local read, glob, grep, or ast-grep search against the returned path. The generated OpenCode `edit` policy denies normal edit, write, and patch operations beneath `.limitless/repos/`; this is an agent guardrail rather than an operating-system sandbox, so unrestricted shell commands remain capable of bypassing it. Git LFS smudging is disabled, so pointer files are present but LFS objects are not downloaded or materialized.
+
+## Deterministic review
+
+The `review` subagent operates only against explicitly named `review-*` skills. The packaged `review-general` example checks repository-defined formatting, lint, compilation, type safety, tests, and diff hygiene; it treats checked-in scripts and CI as authoritative and does not invent subjective standards. Add narrower review skills for framework, security, accessibility, or domain-specific rules.
 
 ## Attention notifications
 
@@ -162,4 +167,4 @@ Document artifacts are source-first: edit `main.typ` directly, compose with fram
 
 Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate.
 
-For structure and implementation details, see `ARCHITECTURE.md` and the module options in `nix/modules/home.nix`.
+For structure and implementation details, see the module options in `nix/modules/home.nix`.

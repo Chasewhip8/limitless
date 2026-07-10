@@ -4,9 +4,6 @@ mode: subagent
 model: anthropic/claude-fable-5
 reasoningEffort: max
 permission:
-    github_code_search: deny
-    github_file_read: deny
-    github_repo_tree: deny
     task:
         "*": deny
         research: allow

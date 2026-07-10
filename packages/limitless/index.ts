@@ -2,16 +2,11 @@ import { type Plugin, type PluginOptions, tool } from '@opencode-ai/plugin'
 import { artifactCreate, artifactList } from './artifacts'
 import { astGrepReplace, astGrepSearch } from './astgrep'
 import { lspDiagnostics } from './diagnostics'
-import {
-	githubCodeSearch,
-	githubFileRead,
-	githubRepoTree,
-	normalizeGitHubPluginConfig,
-} from './github'
+import { githubClone, normalizeGitHubPluginConfig } from './github'
 import { ArtifactCreateInput, ArtifactListInput } from './lib/artifact'
 import { AstGrepReplaceInput, AstGrepSearchInput } from './lib/astgrep'
 import { DiagnosticsInput } from './lib/diagnostics'
-import { GitHubCodeSearchInput, GitHubFileReadInput, GitHubRepoTreeInput } from './lib/github'
+import { GitHubCloneInput } from './lib/github'
 import { LspReferencesInput, LspRenameInput, LspSymbolsInput } from './lib/lsp'
 import { ArtifactTemplateReadInput, ArtifactTemplatesListInput } from './lib/template'
 import { TypstCompileInput } from './lib/typst'
@@ -41,49 +36,16 @@ function githubTools(options: PluginOptions | undefined) {
 	if (!github.enabled) return {}
 
 	return {
-		github_code_search: tool({
-			description: 'Search remote GitHub source code.',
-			args: {
-				query: tool.schema.string(),
-				repos: tool.schema.array(tool.schema.string()).optional(),
-				owner: tool.schema.string().optional(),
-				language: tool.schema.string().optional(),
-				filename: tool.schema.string().optional(),
-				extension: tool.schema.string().optional(),
-				maxResults: tool.schema.number().optional(),
-			},
-			execute(args, context) {
-				return executeTool('github_code_search', GitHubCodeSearchInput, args, context, (input) =>
-					githubCodeSearch(github.config, input),
-				)
-			},
-		}),
-		github_file_read: tool({
-			description: 'Read a specific file from a GitHub repo.',
-			args: {
-				repo: tool.schema.string(),
-				path: tool.schema.string(),
-				ref: tool.schema.string().optional(),
-				maxBytes: tool.schema.number().optional(),
-			},
-			execute(args, context) {
-				return executeTool('github_file_read', GitHubFileReadInput, args, context, (input) =>
-					githubFileRead(github.config, input),
-				)
-			},
-		}),
-		github_repo_tree: tool({
-			description: 'Inspect repository structure when GitHub code search is insufficient.',
+		github_clone: tool({
+			description:
+				'Create or refresh a read-only shallow GitHub checkout under .limitless/repos, including allowed transitive submodules. Git LFS objects are not materialized.',
 			args: {
 				repo: tool.schema.string(),
 				ref: tool.schema.string().optional(),
-				pathPrefix: tool.schema.string().optional(),
-				recursive: tool.schema.boolean().optional(),
-				maxEntries: tool.schema.number().optional(),
 			},
 			execute(args, context) {
-				return executeTool('github_repo_tree', GitHubRepoTreeInput, args, context, (input) =>
-					githubRepoTree(github.config, input),
+				return executeTool('github_clone', GitHubCloneInput, args, context, (input) =>
+					githubClone(github.config, input, context),
 				)
 			},
 		}),

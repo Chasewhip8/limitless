@@ -23,84 +23,46 @@ export const GitHubPluginConfig = Schema.Struct({
 })
 export type GitHubPluginConfig = typeof GitHubPluginConfig.Type
 
-export const GitHubCodeSearchInput = Schema.Struct({
-	query: Schema.String,
-	repos: Schema.optional(Schema.Array(Schema.String)),
-	owner: Schema.optional(Schema.String),
-	language: Schema.optional(Schema.String),
-	filename: Schema.optional(Schema.String),
-	extension: Schema.optional(Schema.String),
-	maxResults: Schema.optional(Schema.Finite),
-})
-export type GitHubCodeSearchInput = typeof GitHubCodeSearchInput.Type
-
-export const GitHubFileReadInput = Schema.Struct({
-	repo: Schema.String,
-	path: Schema.String,
-	ref: Schema.optional(Schema.String),
-	maxBytes: Schema.optional(Schema.Finite),
-})
-export type GitHubFileReadInput = typeof GitHubFileReadInput.Type
-
-export const GitHubRepoTreeInput = Schema.Struct({
+export const GitHubCloneInput = Schema.Struct({
 	repo: Schema.String,
 	ref: Schema.optional(Schema.String),
-	pathPrefix: Schema.optional(Schema.String),
-	recursive: Schema.optional(Schema.Boolean),
-	maxEntries: Schema.optional(Schema.Finite),
 })
-export type GitHubRepoTreeInput = typeof GitHubRepoTreeInput.Type
+export type GitHubCloneInput = typeof GitHubCloneInput.Type
 
-export type RateLimitInfo = {
-	readonly limit?: number
-	readonly remaining?: number
-	readonly reset?: number
-	readonly retryAfter?: number
-}
-
-export type GitHubCodeSearchResult = {
-	readonly ok: boolean
-	readonly results: ReadonlyArray<{
-		readonly repo: string
-		readonly path: string
-		readonly sha?: string
-		readonly htmlUrl?: string
-		readonly score?: number
-		readonly textMatches?: ReadonlyArray<{
-			readonly fragment: string
-			readonly matches?: ReadonlyArray<unknown>
-		}>
-	}>
-	readonly rateLimit?: RateLimitInfo
-	readonly gaps?: ReadonlyArray<string>
-}
-
-export type GitHubFileReadResult = {
-	readonly ok: boolean
-	readonly repo: string
+export type GitHubSubmodule = {
 	readonly path: string
-	readonly ref?: string
-	readonly sha?: string
-	readonly content?: string
-	readonly encoding?: string
-	readonly htmlUrl?: string
-	readonly size?: number
-	readonly rateLimit?: RateLimitInfo
-	readonly gaps?: ReadonlyArray<string>
+	readonly repo: string
+	readonly url: string
+	readonly commit: string
+	readonly depth: number
 }
 
-export type GitHubRepoTreeResult = {
-	readonly ok: boolean
-	readonly repo: string
-	readonly ref?: string
-	readonly entries: ReadonlyArray<{
-		readonly path: string
-		readonly type: 'file' | 'dir' | 'symlink' | 'submodule' | 'unknown'
-		readonly sha?: string
-		readonly size?: number
-	}>
-	readonly recursive?: boolean
-	readonly truncated?: boolean
-	readonly rateLimit?: RateLimitInfo
-	readonly gaps?: ReadonlyArray<string>
-}
+export type GitHubCloneResult =
+	| {
+			readonly ok: true
+			readonly repo: string
+			readonly relativePath: string
+			readonly absolutePath: string
+			readonly requestedRef?: string
+			readonly resolvedCommit: string
+			readonly state: 'created' | 'updated'
+			readonly lfsObjectsMaterialized: false
+			readonly submodules: {
+				readonly complete: true
+				readonly entries: ReadonlyArray<GitHubSubmodule>
+			}
+	  }
+	| {
+			readonly ok: false
+			readonly repo?: string
+			readonly requestedRef?: string
+			readonly error: {
+				readonly code: string
+				readonly message: string
+			}
+			readonly submodules?: {
+				readonly complete: false
+				readonly entries: ReadonlyArray<GitHubSubmodule>
+				readonly gaps: ReadonlyArray<string>
+			}
+	  }

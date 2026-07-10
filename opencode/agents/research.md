@@ -1,8 +1,8 @@
 ---
 description: Unified read-only research subagent for answering questions using repo code, local docs, external docs, APIs, standards, dependencies, migrations, and source evidence.
 mode: subagent
-model: openai/gpt-5.6-sol-fast
-reasoningEffort: xhigh
+model: openai/gpt-5.6-sol
+reasoningEffort: max
 permission:
     edit: deny
     artifact_create: deny
@@ -10,9 +10,6 @@ permission:
     typst_compile: deny
     bash: deny
     webfetch: allow
-    github_code_search: allow
-    github_file_read: allow
-    github_repo_tree: allow
     task:
         "*": deny
 ---
@@ -41,7 +38,7 @@ You are `research`: read-only evidence gathering across local repository sources
 - Do not create artifact workspaces or compile Typst outputs; those tools write project-local files.
 - Use local read/search tools for repository evidence; use git history (log, blame, show, diff) when provenance or rationale matters.
 - Use webfetch for external/current docs and references.
-- Use GitHub file/tree/search for upstream source, symbols, examples, exact repos/paths/refs.
+- For GitHub source, call `github_clone` first, then use local read, glob, grep, or ast-grep search against the returned directory. Managed clones under `.limitless/repos/` are read-only supporting source; never mutate them.
 - Do not prescribe speculative implementation. When useful, report complete migration/refactor/API paths, repair seams, and smallest viable subsets supported by evidence.
 
 ## Output

@@ -17,6 +17,7 @@ const execFileAsync = promisify(execFile)
 
 export const DEFAULT_TIMEOUT_MS = 30_000
 export const DEFAULT_MAX_BUFFER = 1024 * 1024 * 8
+export const MANAGED_REPOS_RELATIVE_PATH = path.join('.limitless', 'repos')
 
 export { FileAccessError, LspToolError, ToolInputError }
 export type { CommandResult, RunOptions, ToolFailure }
@@ -128,12 +129,13 @@ export const runCommand = Effect.fn(function* runCommand(
 	options: RunOptions = {},
 ) {
 	const execOptions: ExecFileOptionsWithStringEncoding = {
-		env: process.env,
+		env: { ...process.env, ...options.env },
 		encoding: 'utf8',
 		timeout: options.timeout ?? DEFAULT_TIMEOUT_MS,
 		maxBuffer: options.maxBuffer ?? DEFAULT_MAX_BUFFER,
 	}
 	if (options.cwd !== undefined) execOptions.cwd = options.cwd
+	if (options.signal !== undefined) execOptions.signal = options.signal
 
 	return yield* Effect.tryPromise({
 		try: () => execFileAsync(command, [...args], execOptions),
@@ -208,4 +210,20 @@ export function workspacePath(workspace: string, filePath: string): string {
 export function workspaceRelative(workspace: string, filePath: string): string {
 	const relative = path.relative(workspace, filePath)
 	return relative.length === 0 ? '.' : relative
+}
+
+export function managedReposRoot(worktree: string): string {
+	return path.resolve(worktree, MANAGED_REPOS_RELATIVE_PATH)
+}
+
+export function pathIsInside(parent: string, candidate: string): boolean {
+	const relative = path.relative(path.resolve(parent), path.resolve(candidate))
+	return (
+		relative === '' ||
+		(!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+	)
+}
+
+export function pathsOverlap(left: string, right: string): boolean {
+	return pathIsInside(left, right) || pathIsInside(right, left)
 }

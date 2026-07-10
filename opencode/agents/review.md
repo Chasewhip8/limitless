@@ -1,17 +1,16 @@
 ---
 description: Ruthless review-and-fix subagent for skill-based vertical review of plans, diffs, and implementations.
 mode: subagent
-model: openai/gpt-5.6-sol-fast
-reasoningEffort: xhigh
+model: openai/gpt-5.6-sol
+reasoningEffort: max
 permission:
-    edit: allow
+    edit:
+        "*": allow
+        ".limitless/repos": deny
+        ".limitless/repos/**": deny
     ast_grep_replace: allow
-    github_code_search: deny
-    github_file_read: deny
-    github_repo_tree: deny
     task:
         "*": deny
-        advisor: allow
         research: allow
 ---
 
