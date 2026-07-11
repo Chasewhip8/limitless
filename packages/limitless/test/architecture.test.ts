@@ -75,6 +75,7 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 		'integrations/notifications',
 		new Set(['config.ts', 'events.ts', 'index.ts', 'runner.ts', 'schema.ts']),
 	],
+	['integrations/identity', new Set(['headers.ts', 'index.ts'])],
 ])
 
 const operationalTypes = new Map([
@@ -229,6 +230,7 @@ const barrelSurfaces = new Map<string, ReadonlySet<string>>([
 			'normalizeNotificationConfig',
 		]),
 	],
+	['integrations/identity/index.ts', new Set(['applyCodexIdentityHeaders'])],
 ])
 
 function relativePath(filePath: string): string {
@@ -607,6 +609,7 @@ describe('production architecture', () => {
 			sourceFiles.find((sourceFile) => sourceFile.fileName === rootIndex) as ts.SourceFile,
 		)
 		for (const featureIndex of [
+			'./integrations/identity/index',
 			'./integrations/notifications/index',
 			'./tools/artifacts/index',
 			'./tools/github/index',
