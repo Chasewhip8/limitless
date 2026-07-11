@@ -73,14 +73,16 @@ let
     cfg.lsp.extraServers
   ];
 
-  defaultOpencodeConfig = {
-    "$schema" = "https://opencode.ai/config.json";
-    inherit (cfg.opencode) permission;
-    default_agent = "limitless";
-  }
-  // lib.optionalAttrs enabledLsp {
-    lsp = lspServers;
-  };
+  baseOpencodeConfig = builtins.fromJSON (builtins.readFile "${self}/opencode/opencode.json");
+
+  defaultOpencodeConfig = lib.recursiveUpdate baseOpencodeConfig (
+    {
+      inherit (cfg.opencode) permission;
+    }
+    // lib.optionalAttrs enabledLsp {
+      lsp = lspServers;
+    }
+  );
 
   opencodeConfig = lib.recursiveUpdate defaultOpencodeConfig cfg.opencode.settings // {
     default_agent = "limitless";

@@ -107,6 +107,10 @@ programs.limitless = {
 
 `git.ignoreStorage` enables Home Manager's Git module by default and adds `.limitless/` to the global ignore file. Set it to `false` if a repository should manage that directory itself.
 
+The checked-in `opencode/opencode.json` is the base OpenCode configuration. Limitless deep-merges generated permissions and enabled language servers over that base, then deep-merges `opencode.settings` last. The `limitless` default agent remains enforced.
+
+The packaged GPT-5.6 Luna, Sol, and Terra models use the 400k short-context limits by default. Separate `-long` and `-fast-long` aliases expose the full 1.05M window. OpenAI does not officially support long context with Priority processing, so a Fast Long request may be downgraded to the default service tier.
+
 ## Research and remote source code
 
 `research` is read-only and researches local code, tests, docs, configuration, APIs, standards, current external facts, implementation source, official examples, and configured private GitHub repositories. It does not edit files or run shell commands.
