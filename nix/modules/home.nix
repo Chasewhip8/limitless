@@ -128,6 +128,12 @@ in
   options.programs.limitless = {
     enable = lib.mkEnableOption "the Limitless OpenCode suite";
 
+    git.ignoreStorage = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Add .limitless/ to Git's global ignore file through Home Manager.";
+    };
+
     opencode = {
       package = lib.mkOption {
         type = lib.types.package;
@@ -740,6 +746,12 @@ in
         home.file."${skillsDirectory}" = {
           source = enabledSkillsPackage;
           recursive = true;
+        };
+      })
+      (lib.mkIf cfg.git.ignoreStorage {
+        programs.git = {
+          enable = lib.mkDefault true;
+          ignores = [ ".limitless/" ];
         };
       })
       (lib.mkIf enabledAgentBrowser {

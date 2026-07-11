@@ -5,22 +5,21 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import type { ToolContext } from '@opencode-ai/plugin'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import {
-	assertAllowedRepo,
-	cloneDirectoryName,
-	type GitHubCloneOptions,
-	githubClone as githubCloneEffect,
-	normalizeGitHubPluginConfig,
-	normalizeRepo,
-	resolveGitHubSubmoduleUrl,
-} from '../github'
+import { resolveGitHubConfig } from '../index'
+import { githubClone as githubCloneEffect } from '../tools/github/clone'
+import { type GitHubCloneOptions, GitHubCloneResult } from '../tools/github/clone-schema'
+import { normalizeGitHubPluginConfig } from '../tools/github/config'
+import { assertAllowedRepo, cloneDirectoryName, normalizeRepo } from '../tools/github/repository'
+import { makeGitHubCloneRuntime } from '../tools/github/runtime'
+import { resolveGitHubSubmoduleUrl } from '../tools/github/submodules'
 
 const execFileAsync = promisify(execFile)
 const tokenEnv = 'LIMITLESS_TEST_GITHUB_TOKEN'
 const unrestrictedConfig = { tokenEnv, allowedRepos: [], allowUnrestrictedRepos: true }
 const tempDirectories: Array<string> = []
+const cloneRuntime = Effect.runSync(makeGitHubCloneRuntime())
 
 type RepositoryFixture = {
 	readonly repo: string
@@ -150,7 +149,11 @@ function githubClone(
 	context: Parameters<typeof githubCloneEffect>[2],
 	options: GitHubCloneOptions = {},
 ) {
-	return Effect.runPromise(githubCloneEffect(config, input, context, options))
+	return Effect.runPromise(
+		githubCloneEffect(config, input, context, cloneRuntime, options).pipe(
+			Effect.flatMap(Schema.decodeUnknownEffect(GitHubCloneResult)),
+		),
+	)
 }
 
 afterEach(async () => {
@@ -161,16 +164,18 @@ afterEach(async () => {
 })
 
 describe('GitHub configuration and naming', () => {
-	test('normalizes config without exposing token values', () => {
+	test('normalizes config without exposing token values', async () => {
 		expect(
-			normalizeGitHubPluginConfig({
-				github: {
-					enable: true,
-					tokenEnv: 'CUSTOM_TOKEN',
-					tokenFile: ' /run/agenix/github-token ',
-					allowedRepos: ['Owner/Repo', 'owner/repo'],
-				},
-			}),
+			await Effect.runPromise(
+				normalizeGitHubPluginConfig({
+					github: {
+						enable: true,
+						tokenEnv: 'CUSTOM_TOKEN',
+						tokenFile: ' /run/agenix/github-token ',
+						allowedRepos: ['Owner/Repo', 'owner/repo'],
+					},
+				}),
+			),
 		).toEqual({
 			enabled: true,
 			config: {
@@ -182,40 +187,71 @@ describe('GitHub configuration and naming', () => {
 		})
 	})
 
-	test('is disabled without warnings when config is absent', () => {
+	test('is disabled without warnings when config is absent', async () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-		expect(normalizeGitHubPluginConfig(undefined).enabled).toBe(false)
+		expect((await Effect.runPromise(normalizeGitHubPluginConfig(undefined))).enabled).toBe(false)
 		expect(warn).not.toHaveBeenCalled()
 		warn.mockRestore()
 	})
 
-	test('disables malformed config and warns once', () => {
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-		expect(
-			normalizeGitHubPluginConfig({ github: { enable: true, allowedRepos: ['owner/repo', 42] } })
-				.enabled,
-		).toBe(false)
+	test('returns a typed config failure and recovers with one warning at initialization', async () => {
+		const malformed = { github: { enable: true, allowedRepos: ['owner/repo', 42] } }
+		const error = await Effect.runPromise(normalizeGitHubPluginConfig(malformed).pipe(Effect.flip))
+		expect(error._tag).toBe('GitHubConfigError')
+
+		const warn = vi.spyOn(console, 'log').mockImplementation(() => {})
+		expect((await Effect.runPromise(resolveGitHubConfig(malformed))).enabled).toBe(false)
 		expect(warn).toHaveBeenCalledTimes(1)
 		warn.mockRestore()
 	})
 
-	test('validates repositories and allowlists', () => {
-		expect(normalizeRepo('Owner/Repo')).toBe('owner/repo')
-		expect(assertAllowedRepo('Owner/Repo', ['owner/repo'])).toBe('owner/repo')
-		expect(() => normalizeRepo('../owner/repo')).toThrow(/Invalid GitHub repository/u)
-		expect(() => assertAllowedRepo('other/repo', ['owner/repo'])).toThrow(/allowlist/u)
+	test('validates repositories and allowlists', async () => {
+		expect(await Effect.runPromise(normalizeRepo('Owner/Repo'))).toBe('owner/repo')
+		expect(await Effect.runPromise(assertAllowedRepo('Owner/Repo', ['owner/repo']))).toBe(
+			'owner/repo',
+		)
+		await expect(Effect.runPromise(normalizeRepo('../owner/repo'))).rejects.toThrow(
+			/Invalid GitHub repository/u,
+		)
+		await expect(
+			Effect.runPromise(assertAllowedRepo('other/repo', ['owner/repo'])),
+		).rejects.toThrow(/allowlist/u)
 	})
 
-	test('uses provider-prefixed default paths and collision-resistant ref paths', () => {
-		expect(cloneDirectoryName('Owner/Repo')).toBe('github-owner-repo')
-		const branch = cloneDirectoryName('Owner/Repo', 'feature/source-search')
+	test('uses provider-prefixed default paths and collision-resistant ref paths', async () => {
+		expect(await Effect.runPromise(cloneDirectoryName('Owner/Repo'))).toBe('github-owner-repo')
+		const branch = await Effect.runPromise(
+			cloneDirectoryName('Owner/Repo', 'feature/source-search'),
+		)
 		expect(branch).toMatch(/^github-owner-repo-feature-source-search-[0-9a-f]{12}$/u)
-		expect(branch).toBe(cloneDirectoryName('owner/repo', 'feature/source-search'))
-		expect(branch).not.toBe(cloneDirectoryName('owner/repo', 'feature/source_search'))
+		expect(branch).toBe(
+			await Effect.runPromise(cloneDirectoryName('owner/repo', 'feature/source-search')),
+		)
+		expect(branch).not.toBe(
+			await Effect.runPromise(cloneDirectoryName('owner/repo', 'feature/source_search')),
+		)
 	})
 })
 
 describe('GitHub clone lifecycle', () => {
+	test('redacts absolute worktree paths from storage failures', async () => {
+		const root = await testRoot()
+		const worktree = await createWorktree(root)
+		await mkdir(path.join(worktree, '.limitless'))
+		await writeFile(path.join(worktree, '.limitless', 'repos'), 'collision')
+
+		const result = await githubClone(
+			unrestrictedConfig,
+			{ repo: 'owner/repo' },
+			toolContext(worktree),
+		)
+
+		expect(result.ok).toBe(false)
+		if (result.ok) throw new Error('Expected managed storage failure')
+		expect(result.error.code).toBe('UNSAFE_STORAGE_PATH')
+		expect(result.error.message).not.toContain(worktree)
+	})
+
 	test('creates a shallow default-branch checkout and refreshes it', async () => {
 		const root = await testRoot()
 		const fixture = await initializeRepository(root, 'owner/repo')
@@ -434,19 +470,25 @@ describe('GitHub clone lifecycle', () => {
 })
 
 describe('GitHub submodules', () => {
-	test('normalizes accepted GitHub URL forms and rejects other hosts', () => {
-		expect(resolveGitHubSubmoduleUrl('../shared.git', 'owner/parent')).toBe(
-			'https://github.com/owner/shared.git',
-		)
-		expect(resolveGitHubSubmoduleUrl('git@github.com:Owner/Repo.git', 'ignored/parent')).toBe(
-			'https://github.com/owner/repo.git',
-		)
-		expect(resolveGitHubSubmoduleUrl('ssh://git@github.com/Owner/Repo.git', 'ignored/parent')).toBe(
-			'https://github.com/owner/repo.git',
-		)
-		expect(() =>
-			resolveGitHubSubmoduleUrl('https://gitlab.com/owner/repo.git', 'owner/parent'),
-		).toThrow(/github\.com/u)
+	test('normalizes accepted GitHub URL forms and rejects other hosts', async () => {
+		expect(
+			await Effect.runPromise(resolveGitHubSubmoduleUrl('../shared.git', 'owner/parent')),
+		).toBe('https://github.com/owner/shared.git')
+		expect(
+			await Effect.runPromise(
+				resolveGitHubSubmoduleUrl('git@github.com:Owner/Repo.git', 'ignored/parent'),
+			),
+		).toBe('https://github.com/owner/repo.git')
+		expect(
+			await Effect.runPromise(
+				resolveGitHubSubmoduleUrl('ssh://git@github.com/Owner/Repo.git', 'ignored/parent'),
+			),
+		).toBe('https://github.com/owner/repo.git')
+		await expect(
+			Effect.runPromise(
+				resolveGitHubSubmoduleUrl('https://gitlab.com/owner/repo.git', 'owner/parent'),
+			),
+		).rejects.toThrow(/github\.com/u)
 	})
 
 	test('enforces the allowlist before recursively initializing transitive submodules', async () => {

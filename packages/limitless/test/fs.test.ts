@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { copyDirectoryContents } from '../fs'
+import { copyDirectoryContents, writeJsonFile } from '../tools/artifacts/filesystem'
 
 async function withWorkspace<T>(body: (workspace: string) => Promise<T>): Promise<T> {
 	const workspace = await mkdtemp(join(tmpdir(), 'limitless-fs-'))
@@ -31,6 +31,16 @@ describe('copyDirectoryContents', () => {
 			expect((await stat(destinationFile)).mode & 0o200).toBe(0o200)
 			await writeFile(destinationFile, 'edited')
 			await expect(readFile(destinationFile, 'utf8')).resolves.toBe('edited')
+		})
+	})
+})
+
+describe('writeJsonFile', () => {
+	test('rejects values that are not valid JSON', async () => {
+		await withWorkspace(async (workspace) => {
+			await expect(
+				Effect.runPromise(writeJsonFile(join(workspace, 'invalid.json'), undefined, 'test')),
+			).rejects.toMatchObject({ _tag: 'ToolOperationError' })
 		})
 	})
 })

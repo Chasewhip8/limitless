@@ -13,6 +13,7 @@
 		"noUncheckedIndexedAccess": true,
 		"incremental": true,
 		"sourceMap": true,
+		"plugins": [{ "name": "@effect/language-service" }],
 		"noEmit": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
@@ -23,8 +24,11 @@
 		"src/**/*",
 		"packages/*/src/**/*",
 		"packages/*/index.ts",
-		"packages/*/test/**/*",
-		"test/**/*"
+		"packages/limitless/core/**/*.ts",
+		"packages/limitless/lib/**/*.ts",
+		"packages/limitless/tools/**/*.ts",
+		"packages/limitless/integrations/**/*.ts",
+		"packages/*/test/**/*"
 	],
 	"exclude": ["node_modules"]
 }
