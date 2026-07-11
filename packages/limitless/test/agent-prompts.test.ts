@@ -163,10 +163,16 @@ describe('agent prompt frontmatter', () => {
 		}
 	})
 
-	test('research denies edit/bash', () => {
+	test('research denies edit and inherits bash access', () => {
 		const permission = permissionFor('research')
 		expect(permission.edit).toBe('deny')
-		expect(permission.bash).toBe('deny')
+		expect(permission.bash).toBeUndefined()
+	})
+
+	test('all enabled agents inherit bash access', () => {
+		for (const agentName of enabledAgentNames()) {
+			expect(permissionFor(agentName).bash, agentName).not.toBe('deny')
+		}
 	})
 
 	test('research denies mutating custom tools', () => {
@@ -271,7 +277,7 @@ describe('research prompt', () => {
 
 		expect(frontmatter.mode).toBe('subagent')
 		expect(permission.edit).toBe('deny')
-		expect(permission.bash).toBe('deny')
+		expect(permission.bash).toBeUndefined()
 		expect(permission.webfetch).toBe('allow')
 		expect(permission.github_clone).toBeUndefined()
 		expect(readAgentContent('research')).toContain('call `github_clone` first')
