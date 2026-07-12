@@ -31,5 +31,8 @@
 		"typescript": "^5.4.0",
 		"vitest": "^3.0.0"
 	},
-	"dependencies": {}
+	"dependencies": {},
+	"patchedDependencies": {
+		"vscode-jsonrpc@9.0.1": "patches/vscode-jsonrpc@9.0.1.patch"
+	}
 }

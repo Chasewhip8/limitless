@@ -9,6 +9,8 @@ const workspaceRoot = fileURLToPath(new URL('../../..', import.meta.url))
 const rootIndex = path.join(productionDirectory, 'index.ts')
 const toolBoundary = path.join(productionDirectory, 'core', 'tool-boundary.ts')
 const exampleDocsScript = path.join(workspaceRoot, 'scripts', 'generate-example-docs.ts')
+const limitlessPackage = path.join(productionDirectory, 'package.json')
+const lspDirectory = path.join(productionDirectory, 'tools', 'lsp')
 
 const allowedLayout = new Map<string, ReadonlySet<string>>([
 	['.', new Set(['index.ts'])],
@@ -59,10 +61,15 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 	[
 		'tools/lsp',
 		new Set([
+			'call-hierarchy.ts',
 			'config.ts',
 			'connection.ts',
+			'definition.ts',
 			'errors.ts',
+			'hover.ts',
+			'implementation.ts',
 			'index.ts',
+			'locations.ts',
 			'references.ts',
 			'rename.ts',
 			'runtime.ts',
@@ -81,10 +88,7 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 const operationalTypes = new Map([
 	['core/command.ts', new Set(['RunOptions'])],
 	['tools/github/runtime.ts', new Set(['GitRuntime', 'GitHubCloneRuntime'])],
-	[
-		'tools/lsp/runtime.ts',
-		new Set(['LspPendingRequest', 'LspRuntimeState', 'LspRuntimeEvent', 'LspConnectionRuntime']),
-	],
+	['tools/lsp/runtime.ts', new Set(['LspRuntimeState', 'LspConnectionRuntime'])],
 ])
 
 const operationSchemas = new Map<string, ReadonlySet<string>>([
@@ -137,15 +141,56 @@ const operationSchemas = new Map<string, ReadonlySet<string>>([
 		]),
 	],
 	[
-		'tools/lsp/references.ts',
+		'tools/lsp/locations.ts',
 		new Set([
-			'LspReferencesInput',
-			'LspReferencesResult',
 			'LspLocationLink',
-			'LspReferenceLocation',
-			'LspReferencesParams',
-			'LspReferencesResponse',
+			'LspLocationResult',
+			'LspLocationArrayResponse',
+			'LspLocationResponse',
 			'NormalizedLocation',
+		]),
+	],
+	['tools/lsp/references.ts', new Set(['LspReferencesInput', 'LspReferencesResult'])],
+	[
+		'tools/lsp/definition.ts',
+		new Set([
+			'LspDefinitionRelationship',
+			'LspDefinitionLocation',
+			'LspDefinitionRelationshipError',
+			'LspDefinitionInput',
+			'LspDefinitionResult',
+		]),
+	],
+	[
+		'tools/lsp/hover.ts',
+		new Set([
+			'LspMarkupContent',
+			'LspMarkedCode',
+			'LspMarkedString',
+			'LspHoverResponse',
+			'LspHoverContent',
+			'NormalizedHover',
+			'LspHoverInput',
+			'LspHoverResult',
+		]),
+	],
+	['tools/lsp/implementation.ts', new Set(['LspImplementationInput', 'LspImplementationResult'])],
+	[
+		'tools/lsp/call-hierarchy.ts',
+		new Set([
+			'LspCallHierarchyItem',
+			'LspCallHierarchyPrepareResponse',
+			'LspCallHierarchyIncomingCall',
+			'LspCallHierarchyOutgoingCall',
+			'LspCallHierarchyIncomingResponse',
+			'LspCallHierarchyOutgoingResponse',
+			'NormalizedCallHierarchyItem',
+			'LspIncomingCall',
+			'LspOutgoingCall',
+			'LspCallHierarchyDirectionError',
+			'LspPreparedCallHierarchy',
+			'LspCallHierarchyInput',
+			'LspCallHierarchyResult',
 		]),
 	],
 	[
@@ -158,8 +203,6 @@ const operationSchemas = new Map<string, ReadonlySet<string>>([
 			'LspSymbolsResult',
 			'NormalizedSymbol',
 			'NormalizedSymbolModel',
-			'LspDocumentSymbolParams',
-			'LspWorkspaceSymbolParams',
 			'LspSymbolInformation',
 			'LspDocumentSymbol',
 			'LspDocumentSymbolModel',
@@ -179,7 +222,6 @@ const operationSchemas = new Map<string, ReadonlySet<string>>([
 			'LspRenameResult',
 			'NormalizedEdit',
 			'WorkspaceEditPreview',
-			'LspRenameParams',
 			'LspPrepareRenameResponse',
 			'LspTextEdit',
 			'LspTextDocumentEdit',
@@ -437,6 +479,7 @@ async function productionSources(): Promise<ReadonlyArray<ts.SourceFile>> {
 				(entry) =>
 					entry.isFile() &&
 					entry.name.endsWith('.ts') &&
+					!entry.parentPath.split(path.sep).includes('node_modules') &&
 					!entry.parentPath.includes(`${path.sep}test`),
 			)
 			.map(async (entry) => {
@@ -453,6 +496,61 @@ async function productionSources(): Promise<ReadonlyArray<ts.SourceFile>> {
 }
 
 describe('production architecture', () => {
+	test('uses the official LSP protocol transport and typed methods', async () => {
+		const manifest = JSON.parse(await readFile(limitlessPackage, 'utf8')) as {
+			readonly dependencies: Readonly<Record<string, string>>
+		}
+		expect(manifest.dependencies['vscode-languageserver-protocol']).toBe('3.18.2')
+		expect(manifest.dependencies['vscode-jsonrpc']).toBeUndefined()
+
+		const connection = await readFile(path.join(lspDirectory, 'connection.ts'), 'utf8')
+		const operations = await Promise.all(
+			[
+				'call-hierarchy.ts',
+				'definition.ts',
+				'hover.ts',
+				'implementation.ts',
+				'references.ts',
+				'rename.ts',
+				'symbols.ts',
+			].map((file) => readFile(path.join(lspDirectory, file), 'utf8')),
+		)
+		const implementation = [connection, ...operations].join('\n')
+		expect(connection).toContain('createProtocolConnection(child.stdout, child.stdin)')
+		expect(connection).not.toMatch(
+			/Content-Length|MAX_STDOUT_BUFFER_BYTES|JsonRpc|Queue|Semaphore/u,
+		)
+		for (const protocolType of [
+			'InitializeRequest.type',
+			'InitializedNotification.type',
+			'ShutdownRequest.type',
+			'ExitNotification.type',
+			'DidOpenTextDocumentNotification.type',
+			'DidCloseTextDocumentNotification.type',
+			'DefinitionRequest.type',
+			'DeclarationRequest.type',
+			'TypeDefinitionRequest.type',
+			'HoverRequest.type',
+			'ImplementationRequest.type',
+			'CallHierarchyPrepareRequest.type',
+			'CallHierarchyIncomingCallsRequest.type',
+			'CallHierarchyOutgoingCallsRequest.type',
+			'ReferencesRequest.type',
+			'DocumentSymbolRequest.type',
+			'WorkspaceSymbolRequest.type',
+			'PrepareRenameRequest.type',
+			'RenameRequest.type',
+			'PositionEncodingKind.UTF16',
+			'ConfigurationRequest.type',
+			'RegistrationRequest.type',
+			'UnregistrationRequest.type',
+			'WorkDoneProgressCreateRequest.type',
+			'WorkspaceFoldersRequest.type',
+		]) {
+			expect(implementation).toContain(protocolType)
+		}
+	})
+
 	test('explicitly includes every production subtree in TypeScript coverage', async () => {
 		const config = ts.parseConfigFileTextToJson(
 			path.join(workspaceRoot, 'tsconfig.json'),

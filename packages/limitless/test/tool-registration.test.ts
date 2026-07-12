@@ -10,6 +10,10 @@ import { TypstCompileInput } from '../tools/artifacts/typst'
 import { AstGrepReplaceInput, AstGrepSearchInput } from '../tools/ast-grep'
 import { DiagnosticsInput } from '../tools/diagnostics'
 import { GitHubCloneInput } from '../tools/github/clone-schema'
+import { LspCallHierarchyInput } from '../tools/lsp/call-hierarchy'
+import { LspDefinitionInput } from '../tools/lsp/definition'
+import { LspHoverInput } from '../tools/lsp/hover'
+import { LspImplementationInput } from '../tools/lsp/implementation'
 import { LspReferencesInput } from '../tools/lsp/references'
 import { LspRenameInput } from '../tools/lsp/rename'
 import { LspSymbolsInput } from '../tools/lsp/symbols'
@@ -63,6 +67,65 @@ const contracts = [
 		name: 'lsp_diagnostics',
 		input: DiagnosticsInput,
 		valid: { workspace: '.', filePath: 'src/a.ts', path: 'src/a.ts' },
+	},
+	{
+		name: 'lsp_definition',
+		input: LspDefinitionInput,
+		valid: {
+			workspace: '.',
+			filePath: 'src/a.ts',
+			path: 'src/a.ts',
+			server: 'typescript',
+			timeoutMs: 100,
+			offset: 0,
+			line: 0,
+			character: 0,
+			maxResults: 10,
+		},
+	},
+	{
+		name: 'lsp_hover',
+		input: LspHoverInput,
+		valid: {
+			workspace: '.',
+			filePath: 'src/a.ts',
+			path: 'src/a.ts',
+			server: 'typescript',
+			timeoutMs: 100,
+			offset: 0,
+			line: 0,
+			character: 0,
+		},
+	},
+	{
+		name: 'lsp_implementation',
+		input: LspImplementationInput,
+		valid: {
+			workspace: '.',
+			filePath: 'src/a.ts',
+			path: 'src/a.ts',
+			server: 'typescript',
+			timeoutMs: 100,
+			offset: 0,
+			line: 0,
+			character: 0,
+			maxResults: 10,
+		},
+	},
+	{
+		name: 'lsp_call_hierarchy',
+		input: LspCallHierarchyInput,
+		valid: {
+			workspace: '.',
+			filePath: 'src/a.ts',
+			path: 'src/a.ts',
+			server: 'typescript',
+			timeoutMs: 100,
+			offset: 0,
+			line: 0,
+			character: 0,
+			maxResults: 10,
+		},
 	},
 	{
 		name: 'lsp_references',

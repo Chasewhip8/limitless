@@ -1,0 +1,16 @@
+diff --git a/lib/common/connection.js b/lib/common/connection.js
+index 7ea47c65283314724b776818fe1cfb01b2dc8741..60957f5c8c655c4a6650cef4e216684cbc7d8c2c 100644
+--- a/lib/common/connection.js
++++ b/lib/common/connection.js
+@@ -1143,9 +1143,9 @@ function createMessageConnection(messageReader, messageWriter, _logger, options)
+                      // Writing the message failed. So we need to delete it from the response promises and
+                      // reject it.
+                      responsePromises.delete(id);
+-                    responsePromise.reject(new messages_1.ResponseError(messages_1.ErrorCodes.MessageWriteError, error.message ? error.message : 'Unknown reason'));
++                    // Work around 9.0.1 throwing after MessageWriteError; remove this patch when upgrading.
++                    responsePromise.reject(new messages_1.ResponseError(messages_1.ErrorCodes.MessageWriteError, error && error.message ? error.message : 'Unknown reason'));
+                      logger.error(`Sending request failed.`);
+-                    throw error;
+                  }
+             });
+         },

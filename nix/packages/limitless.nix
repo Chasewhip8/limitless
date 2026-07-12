@@ -1,8 +1,17 @@
 { pkgs, self }:
 let
+  source = pkgs.lib.cleanSourceWith {
+    src = self;
+    filter =
+      path: type:
+      pkgs.lib.cleanSourceFilter path type
+      && builtins.baseNameOf path != "node_modules"
+      && builtins.baseNameOf path != ".limitless";
+  };
+
   bunDeps = pkgs.stdenvNoCC.mkDerivation {
     name = "limitless-bun-deps";
-    src = self;
+    src = source;
 
     nativeBuildInputs = [ pkgs.bun ];
 
@@ -20,7 +29,7 @@ let
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
     '';
 
-    outputHash = "sha256-P6iwXkNKmSLaER9hKonixHDov3UFMdUBQlMbMiOPBuA=";
+    outputHash = "sha256-vkl0BsRnWx21+nHAt1ogr4mrgToRVVUXxGAMosjslAQ=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -29,7 +38,7 @@ pkgs.stdenvNoCC.mkDerivation {
   pname = "limitless";
   version = "1.0.0";
 
-  src = self;
+  src = source;
   nativeBuildInputs = [ pkgs.bun ];
 
   dontConfigure = true;

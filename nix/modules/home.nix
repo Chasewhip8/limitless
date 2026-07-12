@@ -148,11 +148,6 @@ in
         default = {
           "*" = "allow";
           external_directory = "allow";
-          edit = {
-            "*" = "allow";
-            ".limitless/repos" = "deny";
-            ".limitless/repos/**" = "deny";
-          };
           read = {
             "*" = "allow";
             # Private key and credential stores should be deliberate reads.

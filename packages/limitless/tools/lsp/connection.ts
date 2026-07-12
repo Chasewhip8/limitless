@@ -1,8 +1,36 @@
-import { spawn } from 'node:child_process'
+import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { Deferred, Effect, Queue, Ref, Result, Schema, Semaphore } from 'effect'
+import { Deferred, Effect, MutableRef, Ref, Result, Schema } from 'effect'
+import {
+	type CancellationToken,
+	CancellationTokenSource,
+	ConfigurationRequest,
+	createProtocolConnection,
+	DidCloseTextDocumentNotification,
+	DidOpenTextDocumentNotification,
+	type Disposable,
+	ErrorCodes,
+	ExitNotification,
+	InitializedNotification,
+	type InitializeParams,
+	InitializeRequest,
+	MarkupKind,
+	PositionEncodingKind,
+	type ProtocolConnection,
+	type ProtocolNotificationType,
+	type ProtocolNotificationType0,
+	type ProtocolRequestType,
+	type ProtocolRequestType0,
+	RegistrationRequest,
+	type RequestParam,
+	ResponseError,
+	ShutdownRequest,
+	UnregistrationRequest,
+	WorkDoneProgressCreateRequest,
+	WorkspaceFoldersRequest,
+} from 'vscode-languageserver-protocol/node'
 import { workspacePath } from '../../core/paths'
 import { describeUnknown, schemaErrorMessage } from '../../lib/guards'
 import {
@@ -12,33 +40,21 @@ import {
 	pathExtension,
 } from './config'
 import { decodeServerValue, type LspToolError, lspError } from './errors'
-import type { LspConnectionRuntime, LspRuntimeEvent, LspRuntimeState } from './runtime'
+import type { LspConnectionRuntime, LspRuntimeState } from './runtime'
 import {
-	JsonRpcErrorResponse,
-	JsonRpcIncomingMessageFromJson,
-	JsonRpcNotification,
-	JsonRpcOutgoingMessageFromJson,
-	type JsonRpcParams,
-	JsonRpcRequest,
-	JsonRpcSuccessResponse,
 	type LspCapabilityName,
-	LspDidCloseParams,
-	LspDidOpenParams,
 	LspDocument,
 	type LspDocument as LspDocumentType,
 	type LspFileInput,
-	LspInitializeParams,
 	LspInitializeResult,
 	type LspPosition,
 	type LspPositionInput,
 	type LspRange,
 	LspServerCapabilities,
-	LspTextDocumentPositionParams,
 	LspWorkspaceConfigurationParams,
 } from './schema'
 
 const SHUTDOWN_TIMEOUT_MS = 1_000
-const MAX_STDOUT_BUFFER_BYTES = 1024 * 1024 * 16
 
 function cancellation(tool: string, signal: AbortSignal) {
 	return Effect.callback<never, LspToolError>((resume) => {
@@ -63,7 +79,25 @@ export function withCancellation<A, R>(
 	return Effect.raceFirst(effect, cancellation(tool, signal))
 }
 
-function hasCapability(
+export function withOperationDeadline<A, R>(
+	tool: string,
+	connection: LspConnectionRuntime,
+	operation: string,
+	timeoutMs: number,
+	effect: Effect.Effect<A, LspToolError, R>,
+) {
+	return effect.pipe(
+		Effect.timeoutOrElse({
+			duration: timeoutMs,
+			orElse: () =>
+				Effect.fail(
+					lspError(tool, `${operation} timed out after ${timeoutMs}ms.`, connection.config.id),
+				),
+		}),
+	)
+}
+
+export function supportsCapability(
 	capabilities: typeof LspServerCapabilities.Type,
 	key: LspCapabilityName,
 ): boolean {
@@ -78,6 +112,10 @@ export function hasPrepareRename(capabilities: typeof LspServerCapabilities.Type
 
 function fileUri(filePath: string): string {
 	return pathToFileURL(filePath).href
+}
+
+function workspaceFolder(workspace: string) {
+	return { uri: fileUri(workspace), name: path.basename(workspace) }
 }
 
 export function uriToFilePath(tool: string, server: string, uri: string) {
@@ -149,10 +187,7 @@ export const resolvePosition = Effect.fn(function* resolvePosition(
 	if (input.line === undefined || input.character === undefined) {
 		return yield* lspError(tool, 'Provide either offset or both zero-based line and character.')
 	}
-	const position = LspTextDocumentPositionParams.fields.position.make({
-		line: input.line,
-		character: input.character,
-	})
+	const position = { line: input.line, character: input.character }
 	if (offsetAtPosition(content, position) === undefined) {
 		return yield* lspError(tool, `Position ${input.line}:${input.character} is outside the file.`)
 	}
@@ -178,138 +213,111 @@ export function readRangeText(tool: string, server: string, filePath: string, ra
 	}).pipe(Effect.map((content) => textForRange(content, range)))
 }
 
-function requestErrorMessage(
-	method: string,
-	error: (typeof JsonRpcErrorResponse.Type)['error'],
-): string {
-	return `${method}: ${error.message}`
+function updateRuntimeState(
+	state: Ref.Ref<LspRuntimeState>,
+	update: (current: LspRuntimeState) => LspRuntimeState,
+): void {
+	MutableRef.update(state.ref, update)
 }
 
-function removePending(connection: LspConnectionRuntime, id: number) {
-	return Ref.update(connection.state, (state) => {
-		if (!state.pending.has(id)) return state
-		const pending = new Map(state.pending)
-		pending.delete(id)
-		return { ...state, pending }
-	})
+function connectionDetail(connection: LspConnectionRuntime, fallback: string): string {
+	const state = Ref.getUnsafe(connection.state)
+	const message = state.failure ?? fallback
+	const stderr = state.stderr.trim()
+	return stderr.length === 0 ? message : `${message}\n${stderr}`
 }
 
-const closePending = Effect.fn(function* closePending(
-	connection: LspConnectionRuntime,
+function signalTransportFailure(
+	state: Ref.Ref<LspRuntimeState>,
+	transportFailed: Deferred.Deferred<void>,
 	message: string,
-) {
-	const closed = yield* Ref.modify(connection.state, (state) => [
-		{ pending: [...state.pending.values()], stderr: state.stderr },
-		{ ...state, closed: true, pending: new Map() },
-	])
-	const stderr = closed.stderr.trim()
-	const detail = stderr.length === 0 ? message : `${message}\n${stderr}`
-	yield* Effect.forEach(closed.pending, (pending) =>
-		Deferred.fail(
-			pending.deferred,
-			lspError(pending.tool, `${pending.method}: ${detail}`, connection.config.id),
-		),
-	)
-})
-
-function killProcess(connection: LspConnectionRuntime, signal: NodeJS.Signals = 'SIGTERM') {
-	if (connection.process.exitCode !== null || connection.process.signalCode !== null) {
-		return Effect.void
-	}
-	return Effect.try({
-		try: () => {
-			connection.process.kill(signal)
-		},
-		catch: (error) =>
-			lspError(
-				'lsp_process',
-				`Unable to send ${signal} to LSP server: ${describeUnknown(error)}`,
-				connection.config.id,
-			),
-	})
+): void {
+	updateRuntimeState(state, (current) => ({
+		...current,
+		closed: true,
+		failure: current.failure ?? message,
+	}))
+	Deferred.doneUnsafe(transportFailed, Effect.void)
 }
 
-const abortConnection = Effect.fn(function* abortConnection(
-	connection: LspConnectionRuntime,
-	error: LspToolError,
-) {
-	yield* closePending(connection, error.message)
-	yield* bestEffortFinalizer(killProcess(connection))
-	if (!(yield* awaitProcessClose(connection, SHUTDOWN_TIMEOUT_MS))) {
-		yield* bestEffortFinalizer(killProcess(connection, 'SIGKILL'))
-		if (!(yield* awaitProcessClose(connection, SHUTDOWN_TIMEOUT_MS))) return
-	}
-	yield* Deferred.succeed(connection.eventsDrained, undefined)
-})
-
-function send(
-	connection: LspConnectionRuntime,
+function transportFailure(
 	tool: string,
-	message:
-		| typeof JsonRpcRequest.Type
-		| typeof JsonRpcNotification.Type
-		| typeof JsonRpcSuccessResponse.Type
-		| typeof JsonRpcErrorResponse.Type,
-) {
-	return Schema.encodeUnknownEffect(JsonRpcOutgoingMessageFromJson)(message).pipe(
-		Effect.mapError((error) =>
-			lspError(
-				tool,
-				`Unable to encode LSP message: ${schemaErrorMessage(error)}`,
-				connection.config.id,
-			),
-		),
-		Effect.flatMap((body) => {
-			const frame = `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`
-			return connection.writes.withPermit(
-				Effect.callback<void, LspToolError>((resume) => {
-					if (!connection.process.stdin.writable) {
-						resume(Effect.fail(lspError(tool, 'LSP server stdin is closed.', connection.config.id)))
-						return
-					}
-					try {
-						connection.process.stdin.write(frame, (error) => {
-							resume(
-								error === undefined || error === null
-									? Effect.void
-									: Effect.fail(lspError(tool, describeUnknown(error), connection.config.id)),
-							)
-						})
-					} catch (error) {
-						resume(Effect.fail(lspError(tool, describeUnknown(error), connection.config.id)))
-					}
-				}),
+	connection: LspConnectionRuntime,
+	method: string | undefined,
+): Effect.Effect<never, LspToolError> {
+	return Deferred.await(connection.transportFailed).pipe(
+		Effect.flatMap(() => {
+			const detail = connectionDetail(connection, 'LSP connection closed.')
+			return Effect.fail(
+				lspError(
+					tool,
+					method === undefined ? detail : `${method}: ${detail}`,
+					connection.config.id,
+				),
 			)
 		}),
 	)
 }
 
-export const request = Effect.fn(function* request(
+function requestFailure(
 	tool: string,
 	connection: LspConnectionRuntime,
 	method: string,
-	params: JsonRpcParams | undefined,
-	timeoutMs: number,
-) {
-	const deferred = yield* Deferred.make<unknown, LspToolError>()
-	const id = yield* Ref.modify(connection.state, (state) => {
-		if (state.closed || !Number.isSafeInteger(state.nextId)) return [undefined, state]
-		const pending = new Map(state.pending)
-		pending.set(state.nextId, { tool, method, deferred })
-		return [state.nextId, { ...state, nextId: state.nextId + 1, pending }]
-	})
-	if (id === undefined) {
-		return yield* lspError(tool, 'LSP connection is closed.', connection.config.id)
-	}
+	error: unknown,
+): LspToolError {
+	const state = Ref.getUnsafe(connection.state)
+	const detail =
+		state.failure === undefined
+			? describeUnknown(error)
+			: connectionDetail(connection, describeUnknown(error))
+	return lspError(tool, `${method}: ${detail}`, connection.config.id)
+}
 
-	const message = JsonRpcRequest.make({
-		jsonrpc: '2.0',
-		id,
-		method,
-		...(params === undefined ? {} : { params }),
+function awaitProtocolRequest<R>(
+	tool: string,
+	connection: LspConnectionRuntime,
+	method: string,
+	timeoutMs: number,
+	dispatch: (token: CancellationToken) => Promise<R>,
+): Effect.Effect<R, LspToolError> {
+	const sendRequest = Effect.suspend(() => {
+		const state = Ref.getUnsafe(connection.state)
+		if (state.closed) {
+			return Effect.fail(
+				lspError(
+					tool,
+					`${method}: ${connectionDetail(connection, 'LSP connection is closed.')}`,
+					connection.config.id,
+				),
+			)
+		}
+
+		const cancellationSource = new CancellationTokenSource()
+		let settled = false
+		return Effect.tryPromise({
+			try: () =>
+				dispatch(cancellationSource.token).then(
+					(value) => {
+						settled = true
+						return value
+					},
+					(error: unknown) => {
+						settled = true
+						throw error
+					},
+				),
+			catch: (error) => requestFailure(tool, connection, method, error),
+		}).pipe(
+			Effect.onInterrupt(() =>
+				Effect.sync(() => {
+					if (!settled && !Ref.getUnsafe(connection.state).closed) cancellationSource.cancel()
+				}),
+			),
+			Effect.ensuring(Effect.sync(() => cancellationSource.dispose())),
+		)
 	})
-	return yield* send(connection, tool, message).pipe(
-		Effect.andThen(Deferred.await(deferred)),
+
+	return Effect.raceFirst(sendRequest, transportFailure(tool, connection, method)).pipe(
 		Effect.timeoutOrElse({
 			duration: timeoutMs,
 			orElse: () =>
@@ -317,307 +325,307 @@ export const request = Effect.fn(function* request(
 					lspError(tool, `${method} timed out after ${timeoutMs}ms.`, connection.config.id),
 				),
 		}),
-		Effect.ensuring(removePending(connection, id)),
-	)
-})
-
-function notify(
-	tool: string,
-	connection: LspConnectionRuntime,
-	method: string,
-	params: JsonRpcParams | undefined,
-) {
-	return Ref.get(connection.state).pipe(
-		Effect.flatMap((state) =>
-			state.closed
-				? Effect.fail(lspError(tool, 'LSP connection is closed.', connection.config.id))
-				: send(
-						connection,
-						tool,
-						JsonRpcNotification.make({
-							jsonrpc: '2.0',
-							method,
-							...(params === undefined ? {} : { params }),
-						}),
-					),
-		),
 	)
 }
 
-const completeResponse = Effect.fn(function* completeResponse(
+export function request<P, R, PR, E, RO>(
+	tool: string,
 	connection: LspConnectionRuntime,
-	message: typeof JsonRpcSuccessResponse.Type | typeof JsonRpcErrorResponse.Type,
-) {
-	if (message.id === null) return
-	const id = message.id
-	const pending = yield* Ref.modify(connection.state, (state) => {
-		const request = state.pending.get(id)
-		if (request === undefined) return [undefined, state]
-		const remaining = new Map(state.pending)
-		remaining.delete(id)
-		return [request, { ...state, pending: remaining }]
-	})
-	if (pending === undefined) return
-	if ('error' in message) {
-		yield* Deferred.fail(
-			pending.deferred,
-			lspError(
-				pending.method,
-				requestErrorMessage(pending.method, message.error),
-				connection.config.id,
-			),
-		)
-		return
-	}
-	yield* Deferred.succeed(pending.deferred, message.result)
-})
+	requestType: ProtocolRequestType<P, R, PR, E, RO>,
+	params: RequestParam<P>,
+	timeoutMs: number,
+): Effect.Effect<R, LspToolError> {
+	return awaitProtocolRequest(tool, connection, requestType.method, timeoutMs, (token) =>
+		connection.protocol.sendRequest(requestType, params, token),
+	)
+}
 
-function sendServerError(
+function requestWithoutParams<R, PR, E, RO>(
+	tool: string,
 	connection: LspConnectionRuntime,
-	id: (typeof JsonRpcRequest.Type)['id'],
-	code: number,
-	message: string,
-) {
-	return send(
-		connection,
-		'lsp_client_response',
-		JsonRpcErrorResponse.make({
-			jsonrpc: '2.0',
-			id,
-			error: { code, message },
+	requestType: ProtocolRequestType0<R, PR, E, RO>,
+	timeoutMs: number,
+): Effect.Effect<R, LspToolError> {
+	return awaitProtocolRequest(tool, connection, requestType.method, timeoutMs, (token) =>
+		connection.protocol.sendRequest(requestType, token),
+	)
+}
+
+function awaitProtocolNotification(
+	tool: string,
+	connection: LspConnectionRuntime,
+	method: string,
+	timeoutMs: number,
+	dispatch: () => Promise<void>,
+): Effect.Effect<void, LspToolError> {
+	const sendNotification = Effect.suspend(() => {
+		const state = Ref.getUnsafe(connection.state)
+		if (state.closed) {
+			return Effect.fail(
+				lspError(
+					tool,
+					`${method}: ${connectionDetail(connection, 'LSP connection is closed.')}`,
+					connection.config.id,
+				),
+			)
+		}
+		return Effect.tryPromise({
+			try: dispatch,
+			catch: (error) => requestFailure(tool, connection, method, error),
+		})
+	})
+
+	return Effect.raceFirst(sendNotification, transportFailure(tool, connection, method)).pipe(
+		Effect.timeoutOrElse({
+			duration: timeoutMs,
+			orElse: () =>
+				Effect.fail(
+					lspError(tool, `${method} timed out after ${timeoutMs}ms.`, connection.config.id),
+				),
 		}),
 	)
 }
 
-const handleServerRequest = Effect.fn(function* handleServerRequest(
+function notify<P, RO>(
+	tool: string,
 	connection: LspConnectionRuntime,
-	message: typeof JsonRpcRequest.Type,
+	notificationType: ProtocolNotificationType<P, RO>,
+	params: RequestParam<P>,
+	timeoutMs: number,
 ) {
-	if (message.method === 'workspace/configuration') {
-		const decoded = yield* Effect.result(
-			decodeServerValue(
-				'lsp_client_response',
-				connection.config.id,
-				'Invalid workspace/configuration parameters',
-				LspWorkspaceConfigurationParams,
-				message.params,
-			),
-		)
-		if (Result.isFailure(decoded)) {
-			yield* sendServerError(connection, message.id, -32602, decoded.failure.message)
-			return
-		}
-		yield* send(
-			connection,
-			'lsp_client_response',
-			JsonRpcSuccessResponse.make({
-				jsonrpc: '2.0',
-				id: message.id,
-				result: decoded.success.items.map(() => null),
-			}),
-		)
-		return
-	}
-	if (
-		message.method === 'client/registerCapability' ||
-		message.method === 'client/unregisterCapability' ||
-		message.method === 'window/workDoneProgress/create'
-	) {
-		yield* send(
-			connection,
-			'lsp_client_response',
-			JsonRpcSuccessResponse.make({ jsonrpc: '2.0', id: message.id, result: null }),
-		)
-		return
-	}
-	yield* sendServerError(
-		connection,
-		message.id,
-		-32601,
-		`Unsupported client request: ${message.method}`,
+	return awaitProtocolNotification(tool, connection, notificationType.method, timeoutMs, () =>
+		connection.protocol.sendNotification(notificationType, params),
 	)
-})
+}
 
-const handleMessage = Effect.fn(function* handleMessage(
+function notifyWithoutParams<RO>(
+	tool: string,
 	connection: LspConnectionRuntime,
-	body: string,
+	notificationType: ProtocolNotificationType0<RO>,
+	timeoutMs: number,
 ) {
-	const message = yield* Schema.decodeUnknownEffect(JsonRpcIncomingMessageFromJson)(body).pipe(
-		Effect.mapError((error) =>
-			lspError(
-				'lsp_transport',
-				`Server sent malformed JSON-RPC: ${schemaErrorMessage(error)}`,
-				connection.config.id,
-			),
-		),
+	return awaitProtocolNotification(tool, connection, notificationType.method, timeoutMs, () =>
+		connection.protocol.sendNotification(notificationType),
 	)
-	if ('method' in message) {
-		if ('id' in message) yield* handleServerRequest(connection, message)
-		return
-	}
-	yield* completeResponse(connection, message)
-})
+}
 
-const consumeConnectionEvents = Effect.fn(function* consumeConnectionEvents(
-	connection: LspConnectionRuntime,
-) {
-	let stdout = Buffer.alloc(0)
-	while (true) {
-		const event = yield* Queue.take(connection.events)
-		if (event._tag === 'stderr') {
-			yield* Ref.update(connection.state, (state) => ({
-				...state,
-				stderr: `${state.stderr}${event.chunk.toString('utf8')}`.slice(-16_384),
-			}))
-			continue
-		}
-		if (event._tag === 'close') {
-			const detail = `LSP server closed${event.code === null ? '' : ` with code ${event.code}`}${event.signal === null ? '' : ` (${event.signal})`}.`
-			yield* closePending(connection, detail)
-			yield* Deferred.succeed(connection.eventsDrained, undefined)
-			return
-		}
-		if (event._tag === 'error') {
-			return yield* lspError(
-				'lsp_transport',
-				`LSP ${event.source} error: ${describeUnknown(event.error)}`,
-				connection.config.id,
-			)
-		}
-
-		stdout = Buffer.concat([stdout, event.chunk])
-		if (stdout.length > MAX_STDOUT_BUFFER_BYTES) {
-			return yield* lspError(
-				'lsp_transport',
-				'LSP server emitted too much unframed stdout.',
-				connection.config.id,
-			)
-		}
-		while (true) {
-			const headerEnd = stdout.indexOf('\r\n\r\n')
-			if (headerEnd === -1) break
-			const header = stdout.subarray(0, headerEnd).toString('ascii')
-			const lengthMatch = /^Content-Length:\s*(\d+)$/imu.exec(header)
-			const rawLength = lengthMatch?.[1]
-			if (rawLength === undefined) {
-				return yield* lspError(
-					'lsp_transport',
-					'LSP server sent a frame without a valid Content-Length header.',
-					connection.config.id,
+function installProtocolHandlers(
+	protocol: ProtocolConnection,
+	workspace: string,
+	failTransport: (message: string) => void,
+): ReadonlyArray<Disposable> {
+	return [
+		protocol.onRequest(ConfigurationRequest.type, (params) => {
+			const decoded = Schema.decodeUnknownResult(LspWorkspaceConfigurationParams)(params)
+			if (Result.isFailure(decoded)) {
+				return new ResponseError<void>(
+					ErrorCodes.InvalidParams,
+					`Invalid workspace/configuration parameters: ${schemaErrorMessage(decoded.failure)}`,
 				)
 			}
-			const length = Number(rawLength)
-			if (!Number.isSafeInteger(length) || length < 0 || length > MAX_STDOUT_BUFFER_BYTES) {
-				return yield* lspError(
-					'lsp_transport',
-					`LSP server sent invalid Content-Length ${rawLength}.`,
-					connection.config.id,
-				)
-			}
-			const bodyStart = headerEnd + 4
-			const bodyEnd = bodyStart + length
-			if (stdout.length < bodyEnd) break
-			const body = stdout.subarray(bodyStart, bodyEnd).toString('utf8')
-			stdout = stdout.subarray(bodyEnd)
-			yield* handleMessage(connection, body)
+			return decoded.success.items.map(() => null)
+		}),
+		protocol.onRequest(RegistrationRequest.type, () => undefined),
+		protocol.onRequest(UnregistrationRequest.type, () => undefined),
+		protocol.onRequest(WorkDoneProgressCreateRequest.type, () => undefined),
+		protocol.onRequest(WorkspaceFoldersRequest.type, () => [workspaceFolder(workspace)]),
+		protocol.onUnhandledNotification(() => undefined),
+		protocol.onError(([error]) => failTransport(`LSP transport error: ${describeUnknown(error)}`)),
+		protocol.onClose(() => failTransport('LSP connection closed.')),
+	]
+}
+
+function disposeDisposables(disposables: ReadonlyArray<Disposable>): Array<string> {
+	const errors: Array<string> = []
+	for (const disposable of disposables) {
+		try {
+			disposable.dispose()
+		} catch (error) {
+			errors.push(describeUnknown(error))
 		}
 	}
-})
+	return errors
+}
+
+function cleanupProtocolSetup(
+	protocol: ProtocolConnection,
+	disposables: ReadonlyArray<Disposable>,
+): Array<string> {
+	const errors = disposeDisposables(disposables)
+	try {
+		protocol.dispose()
+	} catch (error) {
+		errors.push(describeUnknown(error))
+	}
+	return errors
+}
 
 const acquireConnection = Effect.fn(function* acquireConnection(
 	tool: string,
 	config: LspServerConfigType,
 	workspace: string,
+	child: ChildProcessWithoutNullStreams,
 ) {
 	const state = yield* Ref.make<LspRuntimeState>({
 		closed: false,
-		nextId: 1,
-		pending: new Map(),
 		stderr: '',
+		failure: undefined,
 	})
 	const capabilities = yield* Ref.make(LspServerCapabilities.make({}))
-	const events = yield* Queue.unbounded<LspRuntimeEvent>()
+	const transportFailed = yield* Deferred.make<void>()
 	const processClosed = yield* Deferred.make<void>()
-	const eventsDrained = yield* Deferred.make<void>()
-	const writes = yield* Semaphore.make(1)
-	const command = config.command[0]
-	const args = config.command.slice(1)
-	const child = yield* Effect.try({
-		try: () =>
-			spawn(command, args, {
-				cwd: workspace,
-				env: { ...process.env, ...config.env },
-				stdio: 'pipe',
-			}),
-		catch: (error) =>
-			lspError(tool, `Unable to start LSP server: ${describeUnknown(error)}`, config.id),
-	})
-	const onStdout = (chunk: Buffer) => {
-		Queue.offerUnsafe(events, { _tag: 'stdout', chunk })
-	}
+	const failTransport = (message: string) => signalTransportFailure(state, transportFailed, message)
 	const onStderr = (chunk: Buffer) => {
-		Queue.offerUnsafe(events, { _tag: 'stderr', chunk })
+		updateRuntimeState(state, (current) => ({
+			...current,
+			stderr: `${current.stderr}${chunk.toString('utf8')}`.slice(-16_384),
+		}))
 	}
-	const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
-		Queue.offerUnsafe(events, { _tag: 'close', code, signal })
+	const onProcessClose = (code: number | null, signal: NodeJS.Signals | null) => {
+		const detail = `LSP server closed${code === null ? '' : ` with code ${code}`}${signal === null ? '' : ` (${signal})`}.`
+		updateRuntimeState(state, (current) => ({
+			...current,
+			closed: true,
+			failure:
+				current.failure === undefined || current.failure === 'LSP connection closed.'
+					? detail
+					: current.failure,
+		}))
 		Deferred.doneUnsafe(processClosed, Effect.void)
+		Deferred.doneUnsafe(transportFailed, Effect.void)
 	}
-	const onProcessError = (error: Error) => {
-		Queue.offerUnsafe(events, { _tag: 'error', source: 'process', error })
-	}
-	const onStdinError = (error: Error) => {
-		Queue.offerUnsafe(events, { _tag: 'error', source: 'stdin', error })
-	}
-	const onStdoutError = (error: Error) => {
-		Queue.offerUnsafe(events, { _tag: 'error', source: 'stdout', error })
-	}
-	const onStderrError = (error: Error) => {
-		Queue.offerUnsafe(events, { _tag: 'error', source: 'stderr', error })
-	}
-	child.stdout.on('data', onStdout)
+	const onProcessError = (error: Error) =>
+		failTransport(`LSP process error: ${describeUnknown(error)}`)
+	const onStderrError = (error: Error) =>
+		failTransport(`LSP stderr error: ${describeUnknown(error)}`)
 	child.stderr.on('data', onStderr)
-	child.stdin.on('error', onStdinError)
-	child.stdout.on('error', onStdoutError)
-	child.stderr.on('error', onStderrError)
-	child.on('close', onClose)
+	child.on('close', onProcessClose)
 	child.on('error', onProcessError)
-	const connection = {
+	child.stderr.on('error', onStderrError)
+
+	const protocolResult = yield* Effect.result(
+		Effect.try({
+			try: () => createProtocolConnection(child.stdout, child.stdin),
+			catch: (error) =>
+				lspError(tool, `Unable to create LSP connection: ${describeUnknown(error)}`, config.id),
+		}),
+	)
+	if (Result.isFailure(protocolResult)) {
+		child.stderr.off('data', onStderr)
+		child.off('close', onProcessClose)
+		child.off('error', onProcessError)
+		child.stderr.off('error', onStderrError)
+		return yield* protocolResult.failure
+	}
+	const protocol = protocolResult.success
+	const protocolDisposables: Array<Disposable> = []
+	const listenResult = yield* Effect.result(
+		Effect.try({
+			try: () => {
+				protocolDisposables.push(...installProtocolHandlers(protocol, workspace, failTransport))
+				protocol.listen()
+			},
+			catch: (error) =>
+				lspError(tool, `Unable to listen to LSP connection: ${describeUnknown(error)}`, config.id),
+		}),
+	)
+	if (Result.isFailure(listenResult)) {
+		const cleanupErrors = cleanupProtocolSetup(protocol, protocolDisposables)
+		child.stderr.off('data', onStderr)
+		child.off('close', onProcessClose)
+		child.off('error', onProcessError)
+		child.stderr.off('error', onStderrError)
+		const suffix = cleanupErrors.length === 0 ? '' : ` Cleanup failed: ${cleanupErrors.join('; ')}`
+		return yield* lspError(tool, `${listenResult.failure.message}${suffix}`, config.id)
+	}
+
+	return {
 		config,
 		workspace,
 		process: child,
+		protocol,
 		state,
 		capabilities,
-		events,
+		transportFailed,
 		processClosed,
-		eventsDrained,
-		writes,
-		onStdout,
+		protocolDisposables,
 		onStderr,
-		onClose,
+		onProcessClose,
 		onProcessError,
-		onStdinError,
-		onStdoutError,
 		onStderrError,
 	} satisfies LspConnectionRuntime
-	yield* consumeConnectionEvents(connection).pipe(
-		Effect.catch((error) => abortConnection(connection, error)),
-		Effect.forkChild({ startImmediately: true }),
-	)
-	return connection
 })
 
+function processIsRunning(child: ChildProcessWithoutNullStreams): boolean {
+	return child.exitCode === null && child.signalCode === null
+}
+
+function processHasClosed(child: ChildProcessWithoutNullStreams): boolean {
+	return (
+		!processIsRunning(child) && child.stdin.closed && child.stdout.closed && child.stderr.closed
+	)
+}
+
+function killChild(
+	child: ChildProcessWithoutNullStreams,
+	server: string,
+	signal: NodeJS.Signals = 'SIGTERM',
+) {
+	if (!processIsRunning(child)) return Effect.void
+	return Effect.try({
+		try: () => {
+			child.kill(signal)
+		},
+		catch: (error) =>
+			lspError(
+				'lsp_process',
+				`Unable to send ${signal} to LSP server: ${describeUnknown(error)}`,
+				server,
+			),
+	})
+}
+
+function awaitChildClose(child: ChildProcessWithoutNullStreams, timeoutMs: number) {
+	if (processHasClosed(child)) return Effect.succeed(true)
+	return Effect.callback<void>((resume) => {
+		const onClose = () => resume(Effect.void)
+		child.once('close', onClose)
+		if (processHasClosed(child)) onClose()
+		return Effect.sync(() => child.off('close', onClose))
+	}).pipe(
+		Effect.as(true),
+		Effect.timeoutOrElse({ duration: timeoutMs, orElse: () => Effect.succeed(false) }),
+	)
+}
+
 function awaitProcessClose(connection: LspConnectionRuntime, timeoutMs: number) {
+	if (processHasClosed(connection.process)) return Effect.succeed(true)
 	return Deferred.await(connection.processClosed).pipe(
 		Effect.as(true),
 		Effect.timeoutOrElse({ duration: timeoutMs, orElse: () => Effect.succeed(false) }),
 	)
 }
 
-function awaitEventDrain(connection: LspConnectionRuntime, timeoutMs: number) {
-	return Deferred.await(connection.eventsDrained).pipe(
-		Effect.as(true),
-		Effect.timeoutOrElse({ duration: timeoutMs, orElse: () => Effect.succeed(false) }),
-	)
+function destroyChildStreams(child: ChildProcessWithoutNullStreams, server: string) {
+	return Effect.try({
+		try: () => {
+			const errors: Array<string> = []
+			for (const stream of [child.stdin, child.stdout, child.stderr]) {
+				try {
+					stream.destroy()
+				} catch (error) {
+					errors.push(describeUnknown(error))
+				}
+			}
+			if (errors.length > 0) throw new Error(errors.join('; '))
+		},
+		catch: (error) =>
+			lspError(
+				'lsp_process',
+				`Unable to close LSP server streams: ${describeUnknown(error)}`,
+				server,
+			),
+	})
 }
 
 function bestEffortFinalizer(effect: Effect.Effect<unknown, LspToolError>) {
@@ -631,37 +639,105 @@ function bestEffortFinalizer(effect: Effect.Effect<unknown, LspToolError>) {
 	)
 }
 
+const ensureProcessStopped = Effect.fn(function* ensureProcessStopped(
+	config: LspServerConfigType,
+	child: ChildProcessWithoutNullStreams,
+) {
+	if (processHasClosed(child)) return
+	yield* bestEffortFinalizer(
+		processIsRunning(child) ? killChild(child, config.id) : destroyChildStreams(child, config.id),
+	)
+	if (yield* awaitChildClose(child, SHUTDOWN_TIMEOUT_MS)) return
+	yield* bestEffortFinalizer(
+		processIsRunning(child)
+			? killChild(child, config.id, 'SIGKILL')
+			: destroyChildStreams(child, config.id),
+	)
+	if (!(yield* awaitChildClose(child, SHUTDOWN_TIMEOUT_MS))) {
+		yield* Effect.logError(`[limitless] LSP server ${config.id} did not terminate after SIGKILL.`)
+	}
+})
+
+function closeProtocol(connection: LspConnectionRuntime) {
+	return Effect.try({
+		try: () => {
+			const errors: Array<string> = []
+			try {
+				connection.protocol.end()
+			} catch (error) {
+				errors.push(`end: ${describeUnknown(error)}`)
+			}
+			try {
+				connection.protocol.dispose()
+			} catch (error) {
+				errors.push(`dispose: ${describeUnknown(error)}`)
+			}
+			errors.push(...disposeDisposables(connection.protocolDisposables))
+			if (errors.length > 0) throw new Error(errors.join('; '))
+		},
+		catch: (error) =>
+			lspError(
+				'lsp_shutdown',
+				`Unable to close LSP protocol connection: ${describeUnknown(error)}`,
+				connection.config.id,
+			),
+	})
+}
+
 const releaseConnection = Effect.fn(function* releaseConnection(connection: LspConnectionRuntime) {
 	const state = yield* Ref.get(connection.state)
-	if (
-		!state.closed &&
-		connection.process.exitCode === null &&
-		connection.process.signalCode === null
-	) {
+	if (!state.closed && processIsRunning(connection.process)) {
 		yield* bestEffortFinalizer(
-			request('lsp_shutdown', connection, 'shutdown', undefined, SHUTDOWN_TIMEOUT_MS),
+			requestWithoutParams('lsp_shutdown', connection, ShutdownRequest.type, SHUTDOWN_TIMEOUT_MS),
 		)
-		yield* bestEffortFinalizer(notify('lsp_shutdown', connection, 'exit', undefined))
+		yield* bestEffortFinalizer(
+			notifyWithoutParams('lsp_shutdown', connection, ExitNotification.type, SHUTDOWN_TIMEOUT_MS),
+		)
 	}
-	if (!(yield* awaitEventDrain(connection, SHUTDOWN_TIMEOUT_MS))) {
-		yield* bestEffortFinalizer(killProcess(connection))
-		if (!(yield* awaitEventDrain(connection, SHUTDOWN_TIMEOUT_MS))) {
-			yield* bestEffortFinalizer(killProcess(connection, 'SIGKILL'))
-			if (!(yield* awaitEventDrain(connection, SHUTDOWN_TIMEOUT_MS))) {
+	yield* Ref.update(connection.state, (current) => ({ ...current, closed: true }))
+	yield* bestEffortFinalizer(closeProtocol(connection))
+	if (!(yield* awaitProcessClose(connection, SHUTDOWN_TIMEOUT_MS))) {
+		yield* bestEffortFinalizer(
+			processIsRunning(connection.process)
+				? killChild(connection.process, connection.config.id)
+				: destroyChildStreams(connection.process, connection.config.id),
+		)
+		if (!(yield* awaitProcessClose(connection, SHUTDOWN_TIMEOUT_MS))) {
+			yield* bestEffortFinalizer(
+				processIsRunning(connection.process)
+					? killChild(connection.process, connection.config.id, 'SIGKILL')
+					: destroyChildStreams(connection.process, connection.config.id),
+			)
+			if (!(yield* awaitProcessClose(connection, SHUTDOWN_TIMEOUT_MS))) {
 				yield* Effect.logError(
 					`[limitless] LSP server ${connection.config.id} did not terminate after SIGKILL.`,
 				)
 			}
 		}
 	}
-	yield* closePending(connection, 'LSP connection disposed.')
-	connection.process.stdout.off('data', connection.onStdout)
 	connection.process.stderr.off('data', connection.onStderr)
-	connection.process.stdin.off('error', connection.onStdinError)
-	connection.process.stdout.off('error', connection.onStdoutError)
-	connection.process.stderr.off('error', connection.onStderrError)
-	connection.process.off('close', connection.onClose)
+	connection.process.off('close', connection.onProcessClose)
 	connection.process.off('error', connection.onProcessError)
+	connection.process.stderr.off('error', connection.onStderrError)
+})
+
+const spawnServer = Effect.fn(function* spawnServer(
+	tool: string,
+	config: LspServerConfigType,
+	workspace: string,
+) {
+	const command = config.command[0]
+	const args = config.command.slice(1)
+	return yield* Effect.try({
+		try: () =>
+			spawn(command, args, {
+				cwd: workspace,
+				env: { ...process.env, ...config.env },
+				stdio: 'pipe',
+			}),
+		catch: (error) =>
+			lspError(tool, `Unable to start LSP server: ${describeUnknown(error)}`, config.id),
+	})
 })
 
 const initializeConnection = Effect.fn(function* initializeConnection(
@@ -669,28 +745,32 @@ const initializeConnection = Effect.fn(function* initializeConnection(
 	connection: LspConnectionRuntime,
 	timeoutMs: number,
 ) {
-	const params = LspInitializeParams.make({
+	const params: InitializeParams = {
 		processId: process.pid,
 		rootPath: connection.workspace,
 		rootUri: fileUri(connection.workspace),
-		workspaceFolders: [
-			{ uri: fileUri(connection.workspace), name: path.basename(connection.workspace) },
-		],
+		workspaceFolders: [workspaceFolder(connection.workspace)],
 		capabilities: {
-			general: { positionEncodings: ['utf-16'] },
+			general: { positionEncodings: [PositionEncodingKind.UTF16] },
 			workspace: { workspaceFolders: true, symbol: {} },
 			textDocument: {
+				callHierarchy: {},
+				declaration: { linkSupport: true },
+				definition: { linkSupport: true },
 				documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+				hover: { contentFormat: [MarkupKind.Markdown, MarkupKind.PlainText] },
+				implementation: { linkSupport: true },
 				references: {},
 				rename: { prepareSupport: true },
 				synchronization: { didSave: true },
+				typeDefinition: { linkSupport: true },
 			},
 		},
 		...(connection.config.initialization === undefined
 			? {}
 			: { initializationOptions: connection.config.initialization }),
-	})
-	const raw = yield* request(tool, connection, 'initialize', params, timeoutMs)
+	}
+	const raw = yield* request(tool, connection, InitializeRequest.type, params, timeoutMs)
 	const initialized = yield* decodeServerValue(
 		tool,
 		connection.config.id,
@@ -699,7 +779,7 @@ const initializeConnection = Effect.fn(function* initializeConnection(
 		raw,
 	)
 	yield* Ref.set(connection.capabilities, initialized.capabilities)
-	yield* notify(tool, connection, 'initialized', {})
+	yield* notify(tool, connection, InitializedNotification.type, {}, timeoutMs)
 })
 
 export function connectionResource(
@@ -709,8 +789,11 @@ export function connectionResource(
 	timeoutMs: number,
 ) {
 	return Effect.gen(function* () {
+		const child = yield* Effect.acquireRelease(spawnServer(tool, config, workspace), (process) =>
+			ensureProcessStopped(config, process),
+		)
 		const connection = yield* Effect.acquireRelease(
-			acquireConnection(tool, config, workspace),
+			acquireConnection(tool, config, workspace, child),
 			releaseConnection,
 		)
 		yield* initializeConnection(tool, connection, timeoutMs)
@@ -722,6 +805,7 @@ const openDocument = Effect.fn(function* openDocument(
 	tool: string,
 	connection: LspConnectionRuntime,
 	filePath: string,
+	timeoutMs: number,
 ) {
 	const content = yield* Effect.tryPromise({
 		try: () => readFile(filePath, 'utf8'),
@@ -736,15 +820,16 @@ const openDocument = Effect.fn(function* openDocument(
 	yield* notify(
 		tool,
 		connection,
-		'textDocument/didOpen',
-		LspDidOpenParams.make({
+		DidOpenTextDocumentNotification.type,
+		{
 			textDocument: {
 				uri: document.uri,
 				languageId: languageId(filePath, connection.config),
 				version: 1,
 				text: document.content,
 			},
-		}),
+		},
+		timeoutMs,
 	)
 	return document
 })
@@ -753,13 +838,21 @@ function closeDocument(tool: string, connection: LspConnectionRuntime, document:
 	return notify(
 		tool,
 		connection,
-		'textDocument/didClose',
-		LspDidCloseParams.make({ textDocument: { uri: document.uri } }),
+		DidCloseTextDocumentNotification.type,
+		{
+			textDocument: { uri: document.uri },
+		},
+		SHUTDOWN_TIMEOUT_MS,
 	)
 }
 
-function documentResource(tool: string, connection: LspConnectionRuntime, filePath: string) {
-	return Effect.acquireRelease(openDocument(tool, connection, filePath), (document) =>
+function documentResource(
+	tool: string,
+	connection: LspConnectionRuntime,
+	filePath: string,
+	timeoutMs: number,
+) {
+	return Effect.acquireRelease(openDocument(tool, connection, filePath, timeoutMs), (document) =>
 		bestEffortFinalizer(closeDocument(tool, connection, document)),
 	)
 }
@@ -768,11 +861,12 @@ export function withDocument<T>(
 	tool: string,
 	connection: LspConnectionRuntime,
 	filePath: string,
+	timeoutMs: number,
 	use: (document: LspDocumentType) => Effect.Effect<T, LspToolError>,
 ) {
 	return Effect.scoped(
 		Effect.gen(function* () {
-			const document = yield* documentResource(tool, connection, filePath)
+			const document = yield* documentResource(tool, connection, filePath, timeoutMs)
 			return yield* use(document)
 		}),
 	)
@@ -794,7 +888,7 @@ export function runOnCapableServer<T>(
 					Effect.gen(function* () {
 						const connection = yield* connectionResource(tool, config, workspace, timeoutMs)
 						const capabilities = yield* Ref.get(connection.capabilities)
-						if (!hasCapability(capabilities, capability)) {
+						if (!supportsCapability(capabilities, capability)) {
 							return yield* lspError(
 								tool,
 								`Server ${config.id} does not support ${capability}.`,
@@ -811,6 +905,7 @@ export function runOnCapableServer<T>(
 		return yield* lspError(
 			tool,
 			`No matching LSP server completed ${capability}. ${errors.join('; ') || 'No candidates.'}`,
+			servers.length === 1 ? servers[0]?.id : undefined,
 		)
 	})
 }

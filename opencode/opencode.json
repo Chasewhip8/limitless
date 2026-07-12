@@ -1,6 +1,13 @@
 {
 	"$schema": "https://opencode.ai/config.json",
 	"default_agent": "limitless",
+	"permission": {
+		"edit": {
+			"*": "allow",
+			".limitless/repos": "deny",
+			".limitless/repos/**": "deny"
+		}
+	},
 	"provider": {
 		"openai": {
 			"models": {

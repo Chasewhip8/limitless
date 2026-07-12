@@ -1,5 +1,6 @@
 import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
 import { Effect, Option, Ref, Schema } from 'effect'
+import { PrepareRenameRequest, RenameRequest } from 'vscode-languageserver-protocol/node'
 import { DEFAULT_TIMEOUT_MS } from '../../core/command'
 import { workspaceRelative, workspaceRoot } from '../../core/paths'
 import { loadServerConfigs } from './config'
@@ -15,14 +16,7 @@ import {
 	withDocument,
 } from './connection'
 import { decodeServerValue, lspError } from './errors'
-import {
-	LspPosition,
-	LspRange,
-	LspTextDocumentIdentifier,
-	LspTextDocumentPositionParams,
-	NonNegativeInteger,
-	PositiveInteger,
-} from './schema'
+import { LspPosition, LspRange, NonNegativeInteger, PositiveInteger } from './schema'
 
 const NormalizedEdit = Schema.Struct({
 	filePath: Schema.String,
@@ -32,11 +26,6 @@ const NormalizedEdit = Schema.Struct({
 const WorkspaceEditPreview = Schema.Struct({
 	edits: Schema.Array(NormalizedEdit),
 	unsupportedChanges: Schema.Array(Schema.Unknown),
-})
-const LspRenameParams = Schema.Struct({
-	textDocument: LspTextDocumentIdentifier,
-	position: LspPosition,
-	newName: Schema.String,
 })
 const LspPrepareRenameResponse = Schema.NullOr(
 	Schema.Union([
@@ -156,7 +145,7 @@ const lspRenameOperation = Effect.fn(function* lspRenameOperation(
 		'renameProvider',
 		timeoutMs,
 		(connection) =>
-			withDocument(tool, connection, filePath, (document) =>
+			withDocument(tool, connection, filePath, timeoutMs, (document) =>
 				Effect.gen(function* () {
 					const position = yield* resolvePosition(tool, document.content, input)
 					const capabilities = yield* Ref.get(connection.capabilities)
@@ -164,8 +153,8 @@ const lspRenameOperation = Effect.fn(function* lspRenameOperation(
 						const raw = yield* request(
 							tool,
 							connection,
-							'textDocument/prepareRename',
-							LspTextDocumentPositionParams.make({ textDocument: { uri: document.uri }, position }),
+							PrepareRenameRequest.type,
+							{ textDocument: { uri: document.uri }, position },
 							timeoutMs,
 						)
 						const prepare = yield* decodeServerValue(
@@ -185,12 +174,12 @@ const lspRenameOperation = Effect.fn(function* lspRenameOperation(
 					const raw = yield* request(
 						tool,
 						connection,
-						'textDocument/rename',
-						LspRenameParams.make({
+						RenameRequest.type,
+						{
 							textDocument: { uri: document.uri },
 							position,
 							newName: input.newName,
-						}),
+						},
 						timeoutMs,
 					)
 					const workspaceEdit = yield* decodeServerValue(

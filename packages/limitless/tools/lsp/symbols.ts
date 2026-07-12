@@ -1,5 +1,6 @@
 import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
 import { Effect, Result, Schema } from 'effect'
+import { DocumentSymbolRequest, WorkspaceSymbolRequest } from 'vscode-languageserver-protocol/node'
 import { DEFAULT_TIMEOUT_MS } from '../../core/command'
 import { workspacePath, workspaceRelative, workspaceRoot } from '../../core/paths'
 import { loadServerConfigs } from './config'
@@ -13,13 +14,7 @@ import {
 	withDocument,
 } from './connection'
 import { decodeServerValue, lspError } from './errors'
-import {
-	LspLocation,
-	LspRange,
-	LspTextDocumentIdentifier,
-	NonNegativeInteger,
-	PositiveInteger,
-} from './schema'
+import { LspLocation, LspRange, NonNegativeInteger, PositiveInteger } from './schema'
 
 class NormalizedSymbolModel extends Schema.Class<NormalizedSymbolModel>('NormalizedSymbol')({
 	name: Schema.String,
@@ -34,8 +29,6 @@ class NormalizedSymbolModel extends Schema.Class<NormalizedSymbolModel>('Normali
 }) {}
 const NormalizedSymbol = NormalizedSymbolModel
 
-const LspDocumentSymbolParams = Schema.Struct({ textDocument: LspTextDocumentIdentifier })
-const LspWorkspaceSymbolParams = Schema.Struct({ query: Schema.String })
 const LspSymbolInformation = Schema.Struct({
 	name: Schema.String,
 	kind: NonNegativeInteger,
@@ -179,8 +172,8 @@ const lspSymbolsOperation = Effect.fn(function* lspSymbolsOperation(
 						request(
 							tool,
 							connection,
-							'workspace/symbol',
-							LspWorkspaceSymbolParams.make({ query: input.query ?? '' }),
+							WorkspaceSymbolRequest.type,
+							{ query: input.query ?? '' },
 							timeoutMs,
 						).pipe(
 							Effect.flatMap((raw) =>
@@ -231,13 +224,13 @@ const lspSymbolsOperation = Effect.fn(function* lspSymbolsOperation(
 		'documentSymbolProvider',
 		timeoutMs,
 		(connection) =>
-			withDocument(tool, connection, filePath, (document) =>
+			withDocument(tool, connection, filePath, timeoutMs, (document) =>
 				Effect.gen(function* () {
 					const raw = yield* request(
 						tool,
 						connection,
-						'textDocument/documentSymbol',
-						LspDocumentSymbolParams.make({ textDocument: { uri: document.uri } }),
+						DocumentSymbolRequest.type,
+						{ textDocument: { uri: document.uri } },
 						timeoutMs,
 					)
 					const decoded = yield* decodeServerValue(

@@ -1,7 +1,15 @@
 import type { PluginInput } from '@opencode-ai/plugin'
 import { tool } from '@opencode-ai/plugin'
 import { executeTool } from '../../core/tool-boundary'
+import { LspCallHierarchyInput, LspCallHierarchyResult, lspCallHierarchy } from './call-hierarchy'
+import { LspDefinitionInput, LspDefinitionResult, lspDefinition } from './definition'
 import { lspToolFailureEncoder } from './errors'
+import { LspHoverInput, LspHoverResult, lspHover } from './hover'
+import {
+	LspImplementationInput,
+	LspImplementationResult,
+	lspImplementation,
+} from './implementation'
 import { LspReferencesInput, LspReferencesResult, lspReferences } from './references'
 import { LspRenameInput, LspRenameResult, lspRename } from './rename'
 import { LspSymbolsInput, LspSymbolsResult, lspSymbols } from './symbols'
@@ -23,6 +31,64 @@ const positionArgs = {
 
 export function lspTools(pluginInput: PluginInput) {
 	return {
+		lsp_definition: tool({
+			description:
+				'Find definitions, declarations, and type definitions supported by the configured language server.',
+			args: { ...positionArgs, maxResults: tool.schema.number().optional() },
+			execute: (args, context) =>
+				executeTool(
+					'lsp_definition',
+					LspDefinitionInput,
+					LspDefinitionResult,
+					args,
+					context,
+					(input) => lspDefinition(pluginInput, input, context),
+					lspToolFailureEncoder,
+				),
+		}),
+		lsp_hover: tool({
+			description: 'Show normalized hover information at a zero-based file position.',
+			args: positionArgs,
+			execute: (args, context) =>
+				executeTool(
+					'lsp_hover',
+					LspHoverInput,
+					LspHoverResult,
+					args,
+					context,
+					(input) => lspHover(pluginInput, input, context),
+					lspToolFailureEncoder,
+				),
+		}),
+		lsp_implementation: tool({
+			description: 'Find implementations through the configured language server.',
+			args: { ...positionArgs, maxResults: tool.schema.number().optional() },
+			execute: (args, context) =>
+				executeTool(
+					'lsp_implementation',
+					LspImplementationInput,
+					LspImplementationResult,
+					args,
+					context,
+					(input) => lspImplementation(pluginInput, input, context),
+					lspToolFailureEncoder,
+				),
+		}),
+		lsp_call_hierarchy: tool({
+			description:
+				'Find incoming and outgoing calls for every prepared call hierarchy item at a file position.',
+			args: { ...positionArgs, maxResults: tool.schema.number().optional() },
+			execute: (args, context) =>
+				executeTool(
+					'lsp_call_hierarchy',
+					LspCallHierarchyInput,
+					LspCallHierarchyResult,
+					args,
+					context,
+					(input) => lspCallHierarchy(pluginInput, input, context),
+					lspToolFailureEncoder,
+				),
+		}),
 		lsp_references: tool({
 			description:
 				'Find references through the configured language server for a zero-based file position.',
