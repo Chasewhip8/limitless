@@ -765,7 +765,17 @@ in
       })
       (lib.mkIf (enabledOpencodeService && pkgs.stdenv.isLinux) {
         systemd.user.services.opencode = {
-          Unit.Description = "OpenCode server";
+          Unit = {
+            Description = "OpenCode server";
+            X-Restart-Triggers = [
+              config.home.file."${opencodeDir}/opencode.json".source
+              config.home.file."${opencodeDir}/AGENTS.md".source
+              config.home.file."${opencodeDir}/agents".source
+              config.home.file."${opencodePluginDir}/limitless.js".source
+            ]
+            ++ lib.optional enabledSkills config.home.file."${skillsDirectory}".source
+            ++ lib.optional enabledLinear config.home.file."${opencodePluginDir}/linear-mcp.js".source;
+          };
 
           Service = {
             Environment = "OPENCODE_EXPERIMENTAL_WEBSOCKETS=true";
