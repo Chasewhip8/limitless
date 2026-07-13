@@ -1,15 +1,10 @@
 {
   description = "abilities - skills and tools for AI agents";
 
-  nixConfig = {
-    extra-substituters = [ "https://cache.numtide.com" ];
-    extra-trusted-public-keys = [ "niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=" ];
-  };
-
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    llm-agents.url = "github:numtide/llm-agents.nix";
+    opencode.url = "github:anomalyco/opencode/v1.17.19";
   };
 
   outputs =
@@ -17,7 +12,7 @@
       self,
       nixpkgs,
       flake-utils,
-      llm-agents,
+      opencode,
     }:
     let
       eachSystem = flake-utils.lib.eachDefaultSystem (
@@ -35,6 +30,9 @@
           };
           agentBrowserPackage = import ./nix/packages/agent-browser.nix {
             inherit pkgs self system;
+          };
+          opencodePackage = import ./nix/packages/opencode.nix {
+            inherit opencode system;
           };
 
           skillsPackage = pkgs.runCommand "abilities-skills" { } ''
@@ -60,6 +58,7 @@
             limitless = limitlessPackage;
             "agent-browser" = agentBrowserPackage;
             "opencode-agents" = opencodeAgentsPackage;
+            opencode = opencodePackage;
           };
 
           devShells.default = pkgs.mkShell {
@@ -84,7 +83,7 @@
     in
     eachSystem
     // {
-      homeModules.default = import ./nix/modules/home.nix { inherit self llm-agents; };
+      homeModules.default = import ./nix/modules/home.nix { inherit self; };
       overlays.default = final: _prev: {
         abilities-skills = self.packages.${final.stdenv.hostPlatform.system}.skills;
         abilities-opencode-agents = self.packages.${final.stdenv.hostPlatform.system}."opencode-agents";
