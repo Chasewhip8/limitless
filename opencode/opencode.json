@@ -16,11 +16,6 @@
 						"context": 400000,
 						"input": 272000,
 						"output": 128000
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-luna-fast": {
@@ -28,42 +23,27 @@
 						"context": 400000,
 						"input": 272000,
 						"output": 128000
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-luna-fast-long": {
 					"id": "gpt-5.6-luna",
 					"name": "GPT-5.6 Luna Fast Long",
 					"limit": {
-						"context": 1050000,
-						"input": 922000,
+						"context": 500000,
+						"input": 372000,
 						"output": 128000
 					},
 					"options": {
 						"serviceTier": "priority"
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-luna-long": {
 					"id": "gpt-5.6-luna",
 					"name": "GPT-5.6 Luna Long",
 					"limit": {
-						"context": 1050000,
-						"input": 922000,
+						"context": 500000,
+						"input": 372000,
 						"output": 128000
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-sol": {
@@ -71,11 +51,6 @@
 						"context": 400000,
 						"input": 272000,
 						"output": 128000
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-sol-fast": {
@@ -83,42 +58,27 @@
 						"context": 400000,
 						"input": 272000,
 						"output": 128000
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-sol-fast-long": {
 					"id": "gpt-5.6-sol",
 					"name": "GPT-5.6 Sol Fast Long",
 					"limit": {
-						"context": 1050000,
-						"input": 922000,
+						"context": 500000,
+						"input": 372000,
 						"output": 128000
 					},
 					"options": {
 						"serviceTier": "priority"
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-sol-long": {
 					"id": "gpt-5.6-sol",
 					"name": "GPT-5.6 Sol Long",
 					"limit": {
-						"context": 1050000,
-						"input": 922000,
+						"context": 500000,
+						"input": 372000,
 						"output": 128000
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-terra": {
@@ -126,11 +86,6 @@
 						"context": 400000,
 						"input": 272000,
 						"output": 128000
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-terra-fast": {
@@ -138,42 +93,27 @@
 						"context": 400000,
 						"input": 272000,
 						"output": 128000
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-terra-fast-long": {
 					"id": "gpt-5.6-terra",
 					"name": "GPT-5.6 Terra Fast Long",
 					"limit": {
-						"context": 1050000,
-						"input": 922000,
+						"context": 500000,
+						"input": 372000,
 						"output": 128000
 					},
 					"options": {
 						"serviceTier": "priority"
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				},
 				"gpt-5.6-terra-long": {
 					"id": "gpt-5.6-terra",
 					"name": "GPT-5.6 Terra Long",
 					"limit": {
-						"context": 1050000,
-						"input": 922000,
+						"context": 500000,
+						"input": 372000,
 						"output": 128000
-					},
-					"variants": {
-						"max": {
-							"reasoningEffort": "max"
-						}
 					}
 				}
 			}
