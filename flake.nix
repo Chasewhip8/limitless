@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    opencode.url = "github:anomalyco/opencode/v1.17.19";
+    opencode.url = "github:anomalyco/opencode/v1.17.20";
   };
 
   outputs =

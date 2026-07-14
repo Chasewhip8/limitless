@@ -109,7 +109,9 @@ programs.limitless = {
 
 The checked-in `opencode/opencode.json` is the base OpenCode configuration. Limitless deep-merges generated permissions and enabled language servers over that base, then deep-merges `opencode.settings` last. The `limitless` default agent remains enforced.
 
-The packaged GPT-5.6 Luna, Sol, and Terra models use the 400k short-context limits by default. Separate `-long` and `-fast-long` aliases expose the full 1.05M window. OpenAI does not officially support long context with Priority processing, so a Fast Long request may be downgraded to the default service tier.
+The packaged GPT-5.6 Luna, Sol, and Terra models use the 400k short-context limits by default. Separate `-long` and `-fast-long` aliases advertise a conservative 500k context limit to OpenCode so compaction starts before the provider's full 1.05M window is exhausted. OpenAI does not officially support long context with Priority processing, so a Fast Long request may be downgraded to the default service tier.
+
+Limitless raises OpenCode's OpenAI response-header timeout from 10 seconds to 60 seconds. Large auto-compaction requests can take longer than the upstream default to be accepted; timing them out leaves a pending compaction that is only retried when the session runs again. Override `provider.openai.options.headerTimeout` through `opencode.settings` if a different bound is needed.
 
 ## Research and remote source code
 

@@ -1,6 +1,5 @@
 import type { Plugin, PluginOptions } from '@opencode-ai/plugin'
 import { Effect } from 'effect'
-import { applyCodexIdentityHeaders } from './integrations/identity/index'
 import {
 	createNotificationRunner,
 	DISABLED_NOTIFICATION_CONFIG,
@@ -68,9 +67,6 @@ export function createLimitless(): Plugin {
 			resolvePluginConfigs(options),
 		)
 		return {
-			'chat.headers': async (input, output) => {
-				applyCodexIdentityHeaders(input.model.providerID, output.headers)
-			},
 			event: ({ event }) => runNotificationHook('event', notifications.handleEvent(event)),
 			'tool.execute.before': (input) =>
 				runNotificationHook(

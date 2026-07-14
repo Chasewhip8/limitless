@@ -1,1 +1,0 @@
-export { applyCodexIdentityHeaders } from './headers'
