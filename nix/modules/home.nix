@@ -140,7 +140,7 @@ in
       package = lib.mkOption {
         type = lib.types.package;
         default = self.packages.${system}.opencode;
-        description = "OpenCode package to install. Defaults to the official OpenCode GitHub release.";
+        description = "OpenCode package to install. Defaults to the Numtide llm-agents.nix OpenCode package.";
       };
 
       permission = lib.mkOption {

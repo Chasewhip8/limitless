@@ -1,10 +1,15 @@
 {
   description = "abilities - skills and tools for AI agents";
 
+  nixConfig = {
+    extra-substituters = [ "https://cache.numtide.com" ];
+    extra-trusted-public-keys = [ "niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=" ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    opencode.url = "github:anomalyco/opencode/v1.17.20";
+    llm-agents.url = "github:numtide/llm-agents.nix";
   };
 
   outputs =
@@ -12,7 +17,7 @@
       self,
       nixpkgs,
       flake-utils,
-      opencode,
+      llm-agents,
     }:
     let
       eachSystem = flake-utils.lib.eachDefaultSystem (
@@ -31,9 +36,7 @@
           agentBrowserPackage = import ./nix/packages/agent-browser.nix {
             inherit pkgs self system;
           };
-          opencodePackage = import ./nix/packages/opencode.nix {
-            inherit opencode system;
-          };
+          opencodePackage = llm-agents.packages.${system}.opencode;
 
           skillsPackage = pkgs.runCommand "abilities-skills" { } ''
             mkdir -p $out

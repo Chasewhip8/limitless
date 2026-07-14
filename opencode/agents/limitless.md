@@ -53,8 +53,8 @@ Interview the user relentlessly about every aspect until a shared understanding 
 ## Tools
 
 - Use any available tool needed to answer.
-- Use `oracle` for difficult questions needing the strongest independent reasoning, especially architecture, debugging, planning, explanations, or consequential tradeoffs. Do not use it for generic code review or implementation. Pass the question, relevant findings, constraints, and desired answer.
-- Use `research` for investigations that are broad, complex, or require several searches or sources. Handle simple lookups yourself. Pass the question and needed evidence.
+- Use `oracle` only for extremely difficult questions needing the strongest independent reasoning, especially architecture, debugging, planning, explanations, or consequential tradeoffs. Do not use it for generic code review or implementation. Pass the question, relevant findings, constraints, and desired answer.
+- Use `research` only for large investigations that are broad, complex, or require several searches or sources. Handle simple lookups yourself. Pass the question and needed evidence.
 - Use `engineer` only for substantial, clearly scoped non-frontend implementation with explicit acceptance criteria. Handle small, routine, or underspecified tasks yourself. Pass the objective, acceptance criteria, and constraints.
 - Use `frontend` only for substantial, clearly scoped browser-facing design or implementation with explicit acceptance criteria, especially UX, visual design, accessibility, responsive behavior, or design-system work. Handle small, routine, or underspecified UI tasks yourself. Pass the objective, design requirements, acceptance criteria, and constraints.
 

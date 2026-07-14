@@ -1,8 +1,8 @@
 ---
 description: Ruthless implementation subagent for heavy non-frontend engineering work with clear acceptance criteria.
 mode: subagent
-model: openai/gpt-5.6-sol
-reasoningEffort: xhigh
+model: openai/gpt-5.6-sol-fast
+reasoningEffort: max
 permission:
     task:
         "*": deny
