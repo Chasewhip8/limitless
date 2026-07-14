@@ -1,8 +1,8 @@
 ---
 description: Ruthless frontend subagent for substantial browser-facing design, UX, accessibility, responsive, and design-system work.
 mode: subagent
-model: anthropic/claude-fable-5
-reasoningEffort: max
+model: openai/gpt-5.6-sol-fast
+reasoningEffort: xhigh
 permission:
     task:
         "*": deny
