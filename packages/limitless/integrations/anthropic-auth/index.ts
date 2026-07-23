@@ -11,7 +11,7 @@ export {
 	anthropicOAuthMethod,
 } from './oauth'
 export {
-	ANTHROPIC_PROVIDER_PACKAGE,
+	ANTHROPIC_OAUTH_PROVIDER_PACKAGE,
 	isLimitlessAnthropicOAuthCredential,
 	registerAnthropicOAuthMethod,
 	registerAnthropicSubscriptionAuth,

@@ -1,12 +1,15 @@
+import type { createAnthropic } from '@ai-sdk/anthropic'
 import type { Plugin } from '@opencode-ai/plugin/v2/effect'
+import type { AISDKHooks } from '@opencode-ai/plugin/v2/effect/aisdk'
 import type { CatalogDraft } from '@opencode-ai/plugin/v2/effect/catalog'
 import type { IntegrationDraft } from '@opencode-ai/plugin/v2/effect/integration'
 import { Effect, Stream } from 'effect'
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { resolvePluginConfigs } from '../index'
 import {
 	ANTHROPIC_INTEGRATION_ID,
 	ANTHROPIC_OAUTH_METHOD_ID,
+	ANTHROPIC_OAUTH_PROVIDER_PACKAGE,
 	anthropicOAuthMethod,
 	isLimitlessAnthropicOAuthCredential,
 	normalizeAnthropicSubscriptionAuthConfig,
@@ -14,21 +17,24 @@ import {
 	registerAnthropicSubscriptionAuth,
 	transformAnthropicOAuthCatalog,
 } from '../integrations/anthropic-auth/index'
-import { makeAnthropicOAuthFetch } from '../integrations/anthropic-auth/provider-boundary'
-import {
-	CLAUDE_CODE_IDENTITY,
-	CLAUDE_CODE_USER_AGENT,
-	REQUIRED_ANTHROPIC_OAUTH_BETAS,
-	rewriteAnthropicRequestBody,
-	rewriteAnthropicUrl,
-	transformAnthropicResponse,
-} from '../integrations/anthropic-auth/transform'
+
+const validCredential = (access = 'oauth-access', refresh = 'oauth-refresh') => ({
+	type: 'oauth' as const,
+	methodID: ANTHROPIC_OAUTH_METHOD_ID,
+	refresh,
+	access,
+	expires: Date.now() + 3_600_000,
+})
 
 const tokenResponse = (access: string, refresh: string) =>
 	new Response(
 		JSON.stringify({ access_token: access, refresh_token: refresh, expires_in: 3_600 }),
 		{ status: 200, headers: { 'content-type': 'application/json' } },
 	)
+
+afterEach(() => {
+	vi.restoreAllMocks()
+})
 
 describe('native Anthropic subscription OAuth', () => {
 	test('defaults on, propagates plugin options, and supports an opt-out without a connection', async () => {
@@ -131,10 +137,7 @@ describe('native Anthropic subscription OAuth', () => {
 		if (registration.refresh === undefined) throw new Error('Expected refresh callback')
 		const refreshed = await Effect.runPromise(
 			registration.refresh({
-				type: 'oauth',
-				methodID: ANTHROPIC_OAUTH_METHOD_ID,
-				refresh: 'refresh-1',
-				access: 'access-1',
+				...validCredential('access-1', 'refresh-1'),
 				expires: 1,
 				metadata: { connection: 'kept' },
 			}),
@@ -174,13 +177,7 @@ describe('native Anthropic subscription OAuth', () => {
 			return tokenResponse('shared-access', 'rotated-refresh')
 		})
 		if (registration.refresh === undefined) throw new Error('Expected refresh callback')
-		const current = {
-			type: 'oauth' as const,
-			methodID: ANTHROPIC_OAUTH_METHOD_ID,
-			refresh: 'shared-refresh',
-			access: 'expired',
-			expires: 1,
-		}
+		const current = { ...validCredential('expired', 'shared-refresh'), expires: 1 }
 
 		const results = Promise.all([
 			Effect.runPromise(registration.refresh(current)),
@@ -230,15 +227,7 @@ describe('native Anthropic subscription OAuth', () => {
 		const refresh = registration.refresh
 		const results = Promise.all(
 			['refresh-a', 'refresh-b'].map((token) =>
-				Effect.runPromise(
-					refresh({
-						type: 'oauth',
-						methodID: ANTHROPIC_OAUTH_METHOD_ID,
-						refresh: token,
-						access: 'expired',
-						expires: 1,
-					}),
-				),
+				Effect.runPromise(refresh({ ...validCredential('expired', token), expires: 1 })),
 			),
 		)
 
@@ -269,13 +258,7 @@ describe('native Anthropic subscription OAuth', () => {
 			return tokenResponse('recovered-access', 'recovered-refresh')
 		})
 		if (registration.refresh === undefined) throw new Error('Expected refresh callback')
-		const current = {
-			type: 'oauth' as const,
-			methodID: ANTHROPIC_OAUTH_METHOD_ID,
-			refresh: 'failed-refresh',
-			access: 'expired',
-			expires: 1,
-		}
+		const current = { ...validCredential('expired', 'failed-refresh'), expires: 1 }
 		const sharedFailure = Promise.allSettled([
 			Effect.runPromise(registration.refresh(current)),
 			Effect.runPromise(registration.refresh(current)),
@@ -309,158 +292,55 @@ describe('native Anthropic subscription OAuth', () => {
 	})
 })
 
-describe('Anthropic OAuth request compatibility', () => {
-	test('rewrites headers, URL, prompt, tools, and leaves provider fields intact', async () => {
-		const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = []
-		const upstream: typeof fetch = async (input, init) => {
-			requests.push({
-				url: input.toString(),
-				headers: new Headers(init?.headers),
-				body: JSON.parse(String(init?.body)) as Record<string, unknown>,
-			})
-			return new Response(
-				'data: {"type":"content_block_start","content_block":{"name":"mcp_Bash"}}\n\n',
-				{ headers: { 'content-type': 'text/event-stream' } },
-			)
-		}
-		const oauthFetch = makeAnthropicOAuthFetch('oauth-access', upstream)
-		const response = await oauthFetch('https://api.anthropic.com/v1/messages', {
-			method: 'POST',
-			headers: {
-				'x-api-key': 'must-be-removed',
-				'anthropic-beta': 'custom-beta',
+function catalogDraft() {
+	const anthropicProvider = {
+		id: 'anthropic',
+		name: 'Anthropic',
+		package: 'aisdk:@ai-sdk/anthropic',
+		disabled: false,
+	}
+	const openaiProvider = {
+		id: 'openai',
+		name: 'OpenAI',
+		package: 'aisdk:@ai-sdk/openai',
+		disabled: false,
+	}
+	const anthropicModel = {
+		id: 'claude-test',
+		package: undefined as string | undefined,
+		cost: [{ input: 1, output: 1 }],
+	}
+	const openaiModel = { id: 'gpt-test', package: undefined, cost: [{ input: 1, output: 1 }] }
+	const providers = new Map([
+		[
+			'anthropic',
+			{ provider: anthropicProvider, models: new Map([['claude-test', anthropicModel]]) },
+		],
+		['openai', { provider: openaiProvider, models: new Map([['gpt-test', openaiModel]]) }],
+	])
+	const draft = {
+		provider: {
+			get: (id: string) => providers.get(id),
+			update: (id: string, update: (provider: typeof anthropicProvider) => void) => {
+				const provider = providers.get(id)?.provider
+				if (provider !== undefined) update(provider)
 			},
-			body: JSON.stringify({
-				model: 'claude-test',
-				max_tokens: 1_024,
-				temperature: 0.2,
-				top_p: 0.9,
-				thinking: { type: 'enabled', budget_tokens: 256 },
-				output_config: { effort: 'high' },
-				system:
-					'You are OpenCode, the best coding agent.\n\nKeep this instruction.\n\nHere is some useful information about the environment you are running in:',
-				tools: [{ name: 'bash', description: 'Run a command', input_schema: {} }],
-				messages: [
-					{ role: 'user', content: 'hello world' },
-					{ role: 'assistant', content: [{ type: 'tool_use', name: 'bash', input: {} }] },
-				],
-			}),
-		})
-
-		expect(requests[0]?.url).toBe('https://api.anthropic.com/v1/messages?beta=true')
-		expect(requests[0]?.headers.get('authorization')).toBe('Bearer oauth-access')
-		expect(requests[0]?.headers.get('x-api-key')).toBeNull()
-		expect(requests[0]?.headers.get('user-agent')).toBe(CLAUDE_CODE_USER_AGENT)
-		for (const beta of [...REQUIRED_ANTHROPIC_OAUTH_BETAS, 'custom-beta']) {
-			expect(requests[0]?.headers.get('anthropic-beta')).toContain(beta)
-		}
-		const body = requests[0]?.body
-		expect(body).toEqual(
-			expect.objectContaining({
-				model: 'claude-test',
-				max_tokens: 1_024,
-				temperature: 0.2,
-				top_p: 0.9,
-				thinking: { type: 'enabled', budget_tokens: 256 },
-				output_config: { effort: 'high' },
-			}),
-		)
-		expect(body?.tools).toEqual([
-			{ name: 'mcp_Bash', description: 'Run a command', input_schema: {} },
-		])
-		expect(body?.messages).toEqual([
-			{ role: 'user', content: 'hello world' },
-			{ role: 'assistant', content: [{ type: 'tool_use', name: 'mcp_Bash', input: {} }] },
-		])
-		const system = body?.system as Array<{ text: string }>
-		expect(system[0]?.text).toMatch(/^x-anthropic-billing-header:/u)
-		expect(system[1]?.text).toBe(CLAUDE_CODE_IDENTITY)
-		expect(system[2]?.text).toContain('Keep this instruction.')
-		expect(system[2]?.text).toContain('Environment context you are running in:')
-		expect(system.map((block) => block.text).join('\n')).not.toContain('You are OpenCode')
-		expect(await response.text()).toContain('"name": "bash"')
-	})
-
-	test('handles tool names split across response chunks without buffering later events', async () => {
-		const encoder = new TextEncoder()
-		const source = new ReadableStream<Uint8Array>({
-			start(controller) {
-				controller.enqueue(encoder.encode('data: {"name":"mcp_'))
-				controller.enqueue(encoder.encode('Read_file"}\n'))
-				controller.enqueue(encoder.encode('data: {"name":"mcp_StructuredOutput"}\n'))
-				controller.close()
+		},
+		model: {
+			update: (
+				providerID: string,
+				modelID: string,
+				update: (model: typeof anthropicModel) => void,
+			) => {
+				const model = providers.get(providerID)?.models.get(modelID)
+				if (model !== undefined) update(model)
 			},
-		})
-		const response = transformAnthropicResponse(
-			new Response(source, { status: 202, headers: { 'x-test': 'kept' } }),
-		)
-
-		expect(response.status).toBe(202)
-		expect(response.headers.get('x-test')).toBe('kept')
-		expect(await response.text()).toBe(
-			'data: {"name": "read_file"}\ndata: {"name": "StructuredOutput"}\n',
-		)
-	})
-
-	test('leaves invalid JSON and existing beta query values unchanged', () => {
-		expect(rewriteAnthropicRequestBody('not-json')).toBe('not-json')
-		expect(rewriteAnthropicUrl('https://api.anthropic.com/v1/messages?beta=false').toString()).toBe(
-			'https://api.anthropic.com/v1/messages?beta=false',
-		)
-	})
-})
+		},
+	} as unknown as CatalogDraft
+	return { draft, anthropicProvider, openaiProvider, anthropicModel, openaiModel }
+}
 
 describe('Anthropic provider isolation', () => {
-	function catalogDraft() {
-		const anthropicProvider = {
-			id: 'anthropic',
-			name: 'Anthropic',
-			package: 'aisdk:@ai-sdk/anthropic',
-			headers: undefined as Record<string, string> | undefined,
-			disabled: false,
-		}
-		const openaiProvider = {
-			id: 'openai',
-			name: 'OpenAI',
-			package: 'aisdk:@ai-sdk/openai',
-			headers: undefined as Record<string, string> | undefined,
-			disabled: false,
-		}
-		const anthropicModel = {
-			id: 'claude-test',
-			package: undefined as string | undefined,
-			cost: [{ input: 1, output: 1 }],
-		}
-		const openaiModel = { id: 'gpt-test', package: undefined, cost: [{ input: 1, output: 1 }] }
-		const providers = new Map([
-			[
-				'anthropic',
-				{ provider: anthropicProvider, models: new Map([['claude-test', anthropicModel]]) },
-			],
-			['openai', { provider: openaiProvider, models: new Map([['gpt-test', openaiModel]]) }],
-		])
-		const draft = {
-			provider: {
-				get: (id: string) => providers.get(id),
-				update: (id: string, update: (provider: typeof anthropicProvider) => void) => {
-					const provider = providers.get(id)?.provider
-					if (provider !== undefined) update(provider)
-				},
-			},
-			model: {
-				update: (
-					providerID: string,
-					modelID: string,
-					update: (model: typeof anthropicModel) => void,
-				) => {
-					const model = providers.get(providerID)?.models.get(modelID)
-					if (model !== undefined) update(model)
-				},
-			},
-		} as unknown as CatalogDraft
-		return { draft, anthropicProvider, openaiProvider, anthropicModel, openaiModel }
-	}
-
 	test('does not alter API-key or non-Anthropic provider behavior', () => {
 		const values = catalogDraft()
 		transformAnthropicOAuthCatalog(values.draft, false)
@@ -471,20 +351,20 @@ describe('Anthropic provider isolation', () => {
 		expect(isLimitlessAnthropicOAuthCredential({ type: 'key', key: 'sk-ant-api' })).toBe(false)
 	})
 
-	test('adapts only the Anthropic catalog after this OAuth method connects', () => {
+	test('moves every connected subscription model to the unique synthetic package', () => {
 		const values = catalogDraft()
 		transformAnthropicOAuthCatalog(values.draft, true)
-		expect(values.anthropicProvider.package).toBe('@opencode-ai/ai/providers/anthropic')
-		expect(values.anthropicProvider.headers?.['anthropic-beta']).toContain('oauth-2025-04-20')
+		expect(values.anthropicProvider.package).toBe(ANTHROPIC_OAUTH_PROVIDER_PACKAGE)
 		expect(values.anthropicModel.cost).toEqual([])
 		expect(values.openaiProvider.package).toBe('aisdk:@ai-sdk/openai')
 		expect(values.openaiModel.cost).toEqual([{ input: 1, output: 1 }])
+		expect(isLimitlessAnthropicOAuthCredential(validCredential())).toBe(true)
 		expect(
 			isLimitlessAnthropicOAuthCredential({
 				type: 'oauth',
 				methodID: ANTHROPIC_OAUTH_METHOD_ID,
 			}),
-		).toBe(true)
+		).toBe(false)
 	})
 
 	test('blocks only Anthropic while credential state is unsafe', () => {
@@ -501,7 +381,7 @@ describe('Anthropic provider isolation', () => {
 			integration: {
 				connection: {
 					active: () => Effect.succeed({ id: 'connection' }),
-					resolve: () => Effect.succeed({ type: 'oauth', methodID: ANTHROPIC_OAUTH_METHOD_ID }),
+					resolve: () => Effect.succeed(validCredential()),
 				},
 			},
 			catalog: {
@@ -525,7 +405,36 @@ describe('Anthropic provider isolation', () => {
 		expect(reloads).toBe(1)
 	})
 
-	test('fails closed on startup resolution errors and retries on a connection event', async () => {
+	test('fails closed for malformed or unknown OAuth credentials', async () => {
+		let catalogTransform: ((draft: CatalogDraft) => void) | undefined
+		const context = {
+			integration: {
+				transform: () => Effect.void,
+				connection: {
+					active: () => Effect.succeed({ id: 'connection' }),
+					resolve: () =>
+						Effect.succeed({ type: 'oauth', methodID: 'unknown-method', access: 'token' }),
+				},
+			},
+			catalog: {
+				transform: (transform: (draft: CatalogDraft) => void) =>
+					Effect.sync(() => {
+						catalogTransform = transform
+					}),
+				reload: () => Effect.void,
+			},
+			aisdk: { hook: () => Effect.void },
+			event: { subscribe: () => Stream.never },
+		} as unknown as Plugin.Context
+
+		await Effect.runPromise(Effect.scoped(registerAnthropicSubscriptionAuth(context)))
+		const values = catalogDraft()
+		catalogTransform?.(values.draft)
+		expect(values.anthropicProvider.disabled).toBe(true)
+		expect(values.openaiProvider.disabled).toBe(false)
+	})
+
+	test('fails closed on resolution errors and retries on a connection event', async () => {
 		let catalogTransform: ((draft: CatalogDraft) => void) | undefined
 		let resolutionWorks = false
 		let reloads = 0
@@ -547,10 +456,7 @@ describe('Anthropic provider isolation', () => {
 					active: () => Effect.succeed({ id: 'connection' }),
 					resolve: () =>
 						resolutionWorks
-							? Effect.succeed({
-									type: 'oauth',
-									methodID: ANTHROPIC_OAUTH_METHOD_ID,
-								})
+							? Effect.succeed(validCredential())
 							: Effect.fail('credential store unavailable'),
 				},
 			},
@@ -565,7 +471,7 @@ describe('Anthropic provider isolation', () => {
 						if (reloads === 2) markReloaded?.()
 					}),
 			},
-			session: { hook: () => Effect.void },
+			aisdk: { hook: () => Effect.void },
 			event: {
 				subscribe: () =>
 					Stream.fromEffect(Effect.promise(() => connectionUpdate)).pipe(
@@ -592,7 +498,225 @@ describe('Anthropic provider isolation', () => {
 					const connected = catalogDraft()
 					catalogTransform?.(connected.draft)
 					expect(connected.anthropicProvider.disabled).toBe(false)
-					expect(connected.anthropicProvider.package).toBe('@opencode-ai/ai/providers/anthropic')
+					expect(connected.anthropicProvider.package).toBe(ANTHROPIC_OAUTH_PROVIDER_PACKAGE)
+				}),
+			),
+		)
+	})
+})
+
+const responseSse = [
+	'data: {"type":"message_start","message":{"id":"msg_1","model":"claude-test","role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":5}}}',
+	'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"mcp_Bash","input":{}}}',
+	'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}',
+	'data: {"type":"content_block_stop","index":0}',
+	'data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":1}}',
+	'data: {"type":"message_stop"}',
+	'',
+].join('\n\n')
+
+describe('published Anthropic loader and AI SDK integration', () => {
+	test('initializes the synthetic package and applies the complete OAuth wire adapter', async () => {
+		let catalogTransform: ((draft: CatalogDraft) => void) | undefined
+		let sdkHook: ((event: AISDKHooks['sdk']) => Effect.Effect<void>) | undefined
+		let credentialResolutions = 0
+		const credential = validCredential()
+		const context = {
+			integration: {
+				transform: (transform: (draft: IntegrationDraft) => void) =>
+					Effect.sync(() => {
+						transform({ method: { update: () => undefined } } as unknown as IntegrationDraft)
+					}),
+				connection: {
+					active: () => Effect.succeed({ id: 'connection' }),
+					resolve: () =>
+						Effect.sync(() => {
+							credentialResolutions += 1
+							return credential
+						}),
+				},
+			},
+			catalog: {
+				transform: (transform: (draft: CatalogDraft) => void) =>
+					Effect.sync(() => {
+						catalogTransform = transform
+					}),
+				reload: () => Effect.void,
+			},
+			aisdk: {
+				hook: (_name: string, hook: (event: AISDKHooks['sdk']) => Effect.Effect<void>) =>
+					Effect.sync(() => {
+						sdkHook = hook
+					}),
+			},
+			event: { subscribe: () => Stream.never },
+		} as unknown as Plugin.Context
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					yield* registerAnthropicSubscriptionAuth(context)
+					const catalog = catalogDraft()
+					catalogTransform?.(catalog.draft)
+					expect(catalog.anthropicProvider.package).toBe('aisdk:@limitless/anthropic-subscription')
+
+					const networkRequests: Array<{
+						url: string
+						headers: Headers
+						body: Record<string, unknown>
+					}> = []
+					vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+						networkRequests.push({
+							url: input instanceof Request ? input.url : input.toString(),
+							headers: new Headers(init?.headers),
+							body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+						})
+						return new Response(responseSse, {
+							status: 200,
+							headers: { 'content-type': 'text/event-stream' },
+						})
+					})
+
+					const event: AISDKHooks['sdk'] = {
+						model: {} as AISDKHooks['sdk']['model'],
+						package: '@limitless/anthropic-subscription',
+						options: { apiKey: credential.access },
+					}
+					if (sdkHook === undefined) throw new Error('SDK hook was not registered')
+					yield* sdkHook(event)
+					expect(event.options.apiKey).toBeUndefined()
+					expect(event.sdk).toBeDefined()
+
+					const sdk = event.sdk as ReturnType<typeof createAnthropic>
+					const language = sdk.languageModel('claude-test')
+					const result = yield* Effect.promise(() =>
+						Promise.resolve(
+							language.doStream({
+								prompt: [
+									{
+										role: 'system',
+										content: 'You are OpenCode, the best coding agent.\n\nKeep this instruction.',
+									},
+									{
+										role: 'user',
+										content: [{ type: 'text', text: 'hello world test message' }],
+									},
+									{
+										role: 'assistant',
+										content: [
+											{
+												type: 'tool-call',
+												toolCallId: 'prior_call',
+												toolName: 'bash',
+												input: { command: 'pwd' },
+											},
+										],
+									},
+								],
+								maxOutputTokens: 128,
+								tools: [
+									{
+										type: 'function',
+										name: 'bash',
+										description: 'Run a command',
+										inputSchema: {
+											type: 'object',
+											properties: { command: { type: 'string' } },
+											required: ['command'],
+											additionalProperties: false,
+										},
+									},
+								],
+							}),
+						),
+					)
+
+					const parts: Array<unknown> = []
+					yield* Effect.promise(async () => {
+						const reader = result.stream.getReader()
+						for (;;) {
+							const next = await reader.read()
+							if (next.done) return
+							parts.push(next.value)
+						}
+					})
+
+					expect(networkRequests).toHaveLength(1)
+					const request = networkRequests[0]
+					expect(request?.url).toBe('https://api.anthropic.com/v1/messages?beta=true')
+					expect(request?.headers.get('authorization')).toBe('Bearer oauth-access')
+					expect(request?.headers.get('x-api-key')).toBeNull()
+					expect(request?.headers.get('anthropic-beta')).toContain('oauth-2025-04-20')
+					expect(request?.headers.get('anthropic-beta')).toContain(
+						'interleaved-thinking-2025-05-14',
+					)
+
+					const tools = request?.body.tools as Array<{
+						name: string
+						input_schema: Record<string, unknown>
+					}>
+					expect(tools[0]?.name).toBe('mcp_Bash')
+					expect(tools[0]?.input_schema).toEqual(
+						expect.objectContaining({
+							type: 'object',
+							properties: { command: { type: 'string' } },
+						}),
+					)
+					const messages = request?.body.messages as Array<{
+						content: Array<Record<string, unknown>>
+					}>
+					expect(messages[1]?.content[0]).toEqual(
+						expect.objectContaining({ type: 'tool_use', name: 'mcp_Bash' }),
+					)
+
+					const system = request?.body.system as Array<{ text: string }>
+					expect(system[0]?.text).toMatch(/^x-anthropic-billing-header:/u)
+					expect(system[1]?.text).toBe(
+						"You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+					)
+					expect(system.map((block) => block.text).join('\n')).toContain('Keep this instruction.')
+					expect(system.map((block) => block.text).join('\n')).not.toContain('You are OpenCode')
+					expect(parts).toContainEqual(
+						expect.objectContaining({ type: 'tool-input-start', toolName: 'bash' }),
+					)
+					expect(credentialResolutions).toBeGreaterThanOrEqual(3)
+				}),
+			),
+		)
+	})
+
+	test('leaves the native API-key Anthropic SDK package untouched', async () => {
+		let sdkHook: ((event: AISDKHooks['sdk']) => Effect.Effect<void>) | undefined
+		const context = {
+			integration: {
+				transform: () => Effect.void,
+				connection: { active: () => Effect.void },
+			},
+			catalog: { transform: () => Effect.void, reload: () => Effect.void },
+			aisdk: {
+				hook: (_name: string, hook: (event: AISDKHooks['sdk']) => Effect.Effect<void>) =>
+					Effect.sync(() => {
+						sdkHook = hook
+					}),
+			},
+			event: { subscribe: () => Stream.never },
+		} as unknown as Plugin.Context
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					yield* registerAnthropicSubscriptionAuth(context)
+					const options = { apiKey: 'sk-ant-api-key' }
+					const event: AISDKHooks['sdk'] = {
+						model: {} as AISDKHooks['sdk']['model'],
+						package: '@ai-sdk/anthropic',
+						options,
+					}
+					if (sdkHook === undefined) throw new Error('SDK hook was not registered')
+					yield* sdkHook(event)
+					expect(event.options).toBe(options)
+					expect(event.options).toEqual({ apiKey: 'sk-ant-api-key' })
+					expect(event.sdk).toBeUndefined()
 				}),
 			),
 		)

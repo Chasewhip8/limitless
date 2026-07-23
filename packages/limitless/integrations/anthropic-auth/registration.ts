@@ -1,29 +1,34 @@
+import { createAnthropic } from '@ai-sdk/anthropic'
 import type { Plugin } from '@opencode-ai/plugin/v2/effect'
+import type { AISDKHooks } from '@opencode-ai/plugin/v2/effect/aisdk'
 import type { CatalogDraft } from '@opencode-ai/plugin/v2/effect/catalog'
 import type { IntegrationDraft } from '@opencode-ai/plugin/v2/effect/integration'
 import { Cause, Effect, Semaphore, Stream } from 'effect'
 import { DEFAULT_ANTHROPIC_SUBSCRIPTION_AUTH_CONFIG } from './config'
 import { ANTHROPIC_INTEGRATION_ID, ANTHROPIC_OAUTH_METHOD_ID, anthropicOAuthMethod } from './oauth'
 import {
-	CLAUDE_CODE_USER_AGENT,
-	prepareAnthropicOAuthSystem,
-	REQUIRED_ANTHROPIC_OAUTH_BETAS,
-} from './transform'
+	type AnthropicV1AuthLoader,
+	anthropicV1ProviderFacade,
+	loadAnthropicV1AuthLoader,
+	runAnthropicV1Auth,
+} from './provider-boundary'
 
-export const ANTHROPIC_PROVIDER_PACKAGE = '@opencode-ai/ai/providers/anthropic'
-const anthropicAISDKPackage = 'aisdk:@ai-sdk/anthropic'
+export const ANTHROPIC_OAUTH_PROVIDER_PACKAGE = 'aisdk:@limitless/anthropic-subscription'
 
-function mergeAnthropicOAuthBetas(current: string | undefined): string {
-	return [
-		...new Set([
-			...REQUIRED_ANTHROPIC_OAUTH_BETAS,
-			...(current ?? '')
-				.split(',')
-				.map((value) => value.trim())
-				.filter(Boolean),
-		]),
-	].join(',')
+type AnthropicOAuthCredential = {
+	readonly type: 'oauth'
+	readonly methodID: string
+	readonly refresh: string
+	readonly access: string
+	readonly expires: number
 }
+
+type AnthropicCredentialState =
+	| { readonly kind: 'native' }
+	| { readonly kind: 'subscription'; readonly credential: AnthropicOAuthCredential }
+	| { readonly kind: 'unsafe' }
+
+type ResolveAnthropicCredential = () => Effect.Effect<unknown>
 
 export function registerAnthropicOAuthMethod(
 	draft: IntegrationDraft,
@@ -49,34 +54,105 @@ export function transformAnthropicOAuthCatalog(
 	}
 	if (!subscriptionConnected) return
 	draft.provider.update(ANTHROPIC_INTEGRATION_ID, (provider) => {
-		// OpenCode handles this native package before AI SDK hooks and maps OAuth credentials to Bearer auth.
-		if (provider.package === anthropicAISDKPackage) provider.package = ANTHROPIC_PROVIDER_PACKAGE
-		provider.headers = {
-			...provider.headers,
-			accept: 'application/json',
-			'anthropic-beta': mergeAnthropicOAuthBetas(provider.headers?.['anthropic-beta']),
-			'anthropic-dangerous-direct-browser-access': 'true',
-			'user-agent': CLAUDE_CODE_USER_AGENT,
-			'x-app': 'cli',
-		}
+		provider.package = ANTHROPIC_OAUTH_PROVIDER_PACKAGE
 	})
 	for (const model of anthropic.models.values()) {
 		draft.model.update(ANTHROPIC_INTEGRATION_ID, model.id, (updated) => {
 			updated.cost = []
-			if (updated.package === anthropicAISDKPackage) updated.package = ANTHROPIC_PROVIDER_PACKAGE
+			if (updated.package !== undefined) updated.package = ANTHROPIC_OAUTH_PROVIDER_PACKAGE
 		})
 	}
 }
 
-export function isLimitlessAnthropicOAuthCredential(credential: unknown): boolean {
+export function isLimitlessAnthropicOAuthCredential(
+	credential: unknown,
+): credential is AnthropicOAuthCredential {
 	return (
 		typeof credential === 'object' &&
 		credential !== null &&
 		'type' in credential &&
 		credential.type === 'oauth' &&
 		'methodID' in credential &&
-		credential.methodID === ANTHROPIC_OAUTH_METHOD_ID
+		credential.methodID === ANTHROPIC_OAUTH_METHOD_ID &&
+		'refresh' in credential &&
+		typeof credential.refresh === 'string' &&
+		credential.refresh.length > 0 &&
+		'access' in credential &&
+		typeof credential.access === 'string' &&
+		credential.access.length > 0 &&
+		'expires' in credential &&
+		typeof credential.expires === 'number' &&
+		Number.isSafeInteger(credential.expires) &&
+		credential.expires > Date.now() + 60_000
 	)
+}
+
+function classifyAnthropicCredential(credential: unknown): AnthropicCredentialState {
+	if (credential === undefined) return { kind: 'native' }
+	if (
+		typeof credential === 'object' &&
+		credential !== null &&
+		'type' in credential &&
+		credential.type === 'key' &&
+		'key' in credential &&
+		typeof credential.key === 'string' &&
+		credential.key.length > 0
+	) {
+		return { kind: 'native' }
+	}
+	if (isLimitlessAnthropicOAuthCredential(credential)) {
+		return { kind: 'subscription', credential }
+	}
+	return { kind: 'unsafe' }
+}
+
+function resolveSubscriptionCredential(resolveCredential: ResolveAnthropicCredential) {
+	return resolveCredential().pipe(
+		Effect.flatMap((credential) => {
+			const state = classifyAnthropicCredential(credential)
+			return state.kind === 'subscription'
+				? Effect.succeed(state.credential)
+				: Effect.die(new Error('Anthropic subscription credential is unavailable or unsafe.'))
+		}),
+	)
+}
+
+function configureAnthropicSubscriptionSdk(
+	event: AISDKHooks['sdk'],
+	loader: AnthropicV1AuthLoader,
+	resolveCredential: ResolveAnthropicCredential,
+) {
+	if (event.package !== ANTHROPIC_OAUTH_PROVIDER_PACKAGE.slice('aisdk:'.length)) {
+		return Effect.void
+	}
+
+	return Effect.gen(function* () {
+		const credential = yield* resolveSubscriptionCredential(resolveCredential)
+		const loaded = yield* Effect.tryPromise(() =>
+			loader(
+				() =>
+					runAnthropicV1Auth(resolveSubscriptionCredential(resolveCredential)).then((current) => ({
+						type: current.type,
+						access: current.access,
+						refresh: current.refresh,
+						expires: current.expires,
+					})),
+				anthropicV1ProviderFacade(),
+			),
+		)
+		if (typeof loaded.fetch !== 'function') {
+			return yield* Effect.die(
+				new Error('@ex-machina/opencode-anthropic-auth did not return its OAuth fetch.'),
+			)
+		}
+
+		delete event.options.apiKey
+		// AI SDK requires one auth setting before it invokes custom fetch. The dependency's fetch
+		// re-resolves the V2-owned credential and overwrites this header on every request.
+		event.options.authToken = credential.access
+		event.options.fetch = loaded.fetch
+		event.sdk = createAnthropic(event.options)
+	}).pipe(Effect.orDie)
 }
 
 export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSubscriptionAuth')(
@@ -88,7 +164,7 @@ export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSub
 			const blocked = yield* ctx.integration.connection.resolve(connection).pipe(
 				Effect.map((credential) => {
 					lingeringSubscription = isLimitlessAnthropicOAuthCredential(credential)
-					return lingeringSubscription
+					return classifyAnthropicCredential(credential).kind !== 'native'
 				}),
 				Effect.catchCause((cause) =>
 					Effect.logError(
@@ -112,6 +188,12 @@ export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSub
 
 		let subscriptionConnected = false
 		let blocked = true
+		const loader = yield* Effect.tryPromise(loadAnthropicV1AuthLoader).pipe(Effect.orDie)
+		const resolveCredential: ResolveAnthropicCredential = () =>
+			Effect.gen(function* () {
+				const connection = yield* ctx.integration.connection.active(ANTHROPIC_INTEGRATION_ID)
+				return connection ? yield* ctx.integration.connection.resolve(connection) : undefined
+			}).pipe(Effect.orDie)
 
 		yield* ctx.integration.transform((draft) => {
 			registerAnthropicOAuthMethod(draft, config, anthropicOAuthMethod(fetch, Date.now))
@@ -119,24 +201,23 @@ export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSub
 		yield* ctx.catalog.transform((draft) => {
 			transformAnthropicOAuthCatalog(draft, subscriptionConnected, blocked)
 		})
-		yield* ctx.session.hook(
-			'context',
-			Effect.fn('configureAnthropicSubscriptionContext')((event) =>
-				Effect.sync(() => {
-					if (!subscriptionConnected || event.model.providerID !== ANTHROPIC_INTEGRATION_ID) return
-					event.system = prepareAnthropicOAuthSystem(event.system, event.messages)
-				}),
+		yield* ctx.aisdk.hook(
+			'sdk',
+			Effect.fn('configureAnthropicSubscriptionSdk')((event) =>
+				configureAnthropicSubscriptionSdk(event, loader, resolveCredential),
 			),
 		)
 
 		const loading = yield* Semaphore.make(1)
 		const load = Effect.fn('loadAnthropicSubscriptionConnection')(function* () {
-			const connection = yield* ctx.integration.connection.active(ANTHROPIC_INTEGRATION_ID)
-			const credential = connection
-				? yield* ctx.integration.connection.resolve(connection)
-				: undefined
-			subscriptionConnected = isLimitlessAnthropicOAuthCredential(credential)
-			blocked = false
+			const state = classifyAnthropicCredential(yield* resolveCredential())
+			subscriptionConnected = state.kind === 'subscription'
+			blocked = state.kind === 'unsafe'
+			if (blocked) {
+				yield* Effect.logError(
+					'[limitless] the active Anthropic credential is not a valid Limitless Claude Pro/Max credential; Anthropic models are blocked',
+				)
+			}
 		})
 		const reload = Effect.fn('reloadAnthropicSubscriptionConnection')(function* (trigger: string) {
 			yield* loading.withPermit(

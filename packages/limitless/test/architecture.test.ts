@@ -80,14 +80,7 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 	],
 	[
 		'integrations/anthropic-auth',
-		new Set([
-			'config.ts',
-			'index.ts',
-			'oauth.ts',
-			'provider-boundary.ts',
-			'registration.ts',
-			'transform.ts',
-		]),
+		new Set(['config.ts', 'index.ts', 'oauth.ts', 'provider-boundary.ts', 'registration.ts']),
 	],
 	[
 		'integrations/notifications',
@@ -117,6 +110,14 @@ const operationalTypes = new Map([
 	[
 		'integrations/anthropic-auth/oauth.ts',
 		new Set(['CredentialOAuth', 'RefreshDeferred', 'RefreshFlight']),
+	],
+	[
+		'integrations/anthropic-auth/provider-boundary.ts',
+		new Set(['AnthropicV1AuthLoader', 'AnthropicV1ClientFacade']),
+	],
+	[
+		'integrations/anthropic-auth/registration.ts',
+		new Set(['AnthropicOAuthCredential', 'AnthropicCredentialState', 'ResolveAnthropicCredential']),
 	],
 	['integrations/notifications/runner.ts', new Set(['NotificationSessionLookup'])],
 	[
@@ -308,7 +309,7 @@ const barrelSurfaces = new Map<string, ReadonlySet<string>>([
 		new Set([
 			'ANTHROPIC_INTEGRATION_ID',
 			'ANTHROPIC_OAUTH_METHOD_ID',
-			'ANTHROPIC_PROVIDER_PACKAGE',
+			'ANTHROPIC_OAUTH_PROVIDER_PACKAGE',
 			'AnthropicOAuthError',
 			'AnthropicSubscriptionAuthConfig',
 			'AnthropicSubscriptionAuthConfigError',
