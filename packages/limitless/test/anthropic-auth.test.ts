@@ -5,7 +5,7 @@ import type { CatalogDraft } from '@opencode-ai/plugin/v2/effect/catalog'
 import type { IntegrationDraft } from '@opencode-ai/plugin/v2/effect/integration'
 import { Effect, Stream } from 'effect'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { resolvePluginConfigs } from '../index'
+import { createLimitlessAnthropicBootstrap, resolvePluginConfigs } from '../index'
 import {
 	ANTHROPIC_INTEGRATION_ID,
 	ANTHROPIC_OAUTH_METHOD_ID,
@@ -517,6 +517,7 @@ const responseSse = [
 
 describe('published Anthropic loader and AI SDK integration', () => {
 	test('initializes the synthetic package and applies the complete OAuth wire adapter', async () => {
+		const providerPackage = 'aisdk:file:///nix/store/limitless-test/limitless.js'
 		let catalogTransform: ((draft: CatalogDraft) => void) | undefined
 		let sdkHook: ((event: AISDKHooks['sdk']) => Effect.Effect<void>) | undefined
 		let credentialResolutions = 0
@@ -555,10 +556,10 @@ describe('published Anthropic loader and AI SDK integration', () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					yield* registerAnthropicSubscriptionAuth(context)
+					yield* registerAnthropicSubscriptionAuth(context, undefined, providerPackage)
 					const catalog = catalogDraft()
 					catalogTransform?.(catalog.draft)
-					expect(catalog.anthropicProvider.package).toBe('aisdk:@limitless/anthropic-subscription')
+					expect(catalog.anthropicProvider.package).toBe(providerPackage)
 
 					const networkRequests: Array<{
 						url: string
@@ -579,7 +580,7 @@ describe('published Anthropic loader and AI SDK integration', () => {
 
 					const event: AISDKHooks['sdk'] = {
 						model: {} as AISDKHooks['sdk']['model'],
-						package: 'aisdk:@limitless/anthropic-subscription',
+						package: providerPackage,
 						options: { apiKey: credential.access },
 					}
 					if (sdkHook === undefined) throw new Error('SDK hook was not registered')
@@ -683,6 +684,11 @@ describe('published Anthropic loader and AI SDK integration', () => {
 				}),
 			),
 		)
+	})
+
+	test('exports the synchronous factory required by OpenCode dynamic provider loading', () => {
+		const sdk = createLimitlessAnthropicBootstrap({ apiKey: 'bootstrap-only' })
+		expect(sdk.languageModel('claude-test')).toBeDefined()
 	})
 
 	test('leaves the native API-key Anthropic SDK package untouched', async () => {

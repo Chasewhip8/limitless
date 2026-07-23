@@ -43,6 +43,7 @@ export function transformAnthropicOAuthCatalog(
 	draft: CatalogDraft,
 	subscriptionConnected: boolean,
 	blocked = false,
+	providerPackage = ANTHROPIC_OAUTH_PROVIDER_PACKAGE,
 ): void {
 	const anthropic = draft.provider.get(ANTHROPIC_INTEGRATION_ID)
 	if (anthropic === undefined) return
@@ -54,12 +55,12 @@ export function transformAnthropicOAuthCatalog(
 	}
 	if (!subscriptionConnected) return
 	draft.provider.update(ANTHROPIC_INTEGRATION_ID, (provider) => {
-		provider.package = ANTHROPIC_OAUTH_PROVIDER_PACKAGE
+		provider.package = providerPackage
 	})
 	for (const model of anthropic.models.values()) {
 		draft.model.update(ANTHROPIC_INTEGRATION_ID, model.id, (updated) => {
 			updated.cost = []
-			if (updated.package !== undefined) updated.package = ANTHROPIC_OAUTH_PROVIDER_PACKAGE
+			if (updated.package !== undefined) updated.package = providerPackage
 		})
 	}
 }
@@ -121,10 +122,11 @@ function configureAnthropicSubscriptionSdk(
 	event: AISDKHooks['sdk'],
 	loader: AnthropicV1AuthLoader,
 	resolveCredential: ResolveAnthropicCredential,
+	providerPackage: string,
 ) {
 	if (
-		event.package !== ANTHROPIC_OAUTH_PROVIDER_PACKAGE &&
-		event.package !== ANTHROPIC_OAUTH_PROVIDER_PACKAGE.slice('aisdk:'.length)
+		event.package !== providerPackage &&
+		event.package !== providerPackage.slice('aisdk:'.length)
 	) {
 		return Effect.void
 	}
@@ -168,7 +170,11 @@ function configureAnthropicSubscriptionSdk(
 }
 
 export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSubscriptionAuth')(
-	function* (ctx: Plugin.Context, config = DEFAULT_ANTHROPIC_SUBSCRIPTION_AUTH_CONFIG) {
+	function* (
+		ctx: Plugin.Context,
+		config = DEFAULT_ANTHROPIC_SUBSCRIPTION_AUTH_CONFIG,
+		providerPackage = ANTHROPIC_OAUTH_PROVIDER_PACKAGE,
+	) {
 		if (!config.enabled) {
 			const connection = yield* ctx.integration.connection.active(ANTHROPIC_INTEGRATION_ID)
 			if (connection === undefined) return
@@ -192,7 +198,7 @@ export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSub
 				)
 			}
 			yield* ctx.catalog.transform((draft) => {
-				transformAnthropicOAuthCatalog(draft, false, true)
+				transformAnthropicOAuthCatalog(draft, false, true, providerPackage)
 			})
 			yield* ctx.catalog.reload()
 			return
@@ -211,12 +217,12 @@ export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSub
 			registerAnthropicOAuthMethod(draft, config, anthropicOAuthMethod(fetch, Date.now))
 		})
 		yield* ctx.catalog.transform((draft) => {
-			transformAnthropicOAuthCatalog(draft, subscriptionConnected, blocked)
+			transformAnthropicOAuthCatalog(draft, subscriptionConnected, blocked, providerPackage)
 		})
 		yield* ctx.aisdk.hook(
 			'sdk',
 			Effect.fn('configureAnthropicSubscriptionSdk')((event) =>
-				configureAnthropicSubscriptionSdk(event, loader, resolveCredential),
+				configureAnthropicSubscriptionSdk(event, loader, resolveCredential, providerPackage),
 			),
 		)
 
