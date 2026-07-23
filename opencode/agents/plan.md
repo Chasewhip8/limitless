@@ -1,7 +1,7 @@
 ---
 description: Disabled built-in OpenCode plan agent.
 mode: primary
-disable: true
+disabled: true
 ---
 
 # Plan Disabled

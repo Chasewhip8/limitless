@@ -1,7 +1,7 @@
-import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
 import { Effect, Option, Ref, Schema } from 'effect'
 import { PrepareRenameRequest, RenameRequest } from 'vscode-languageserver-protocol/node'
 import { DEFAULT_TIMEOUT_MS } from '../../core/command'
+import { ToolExecutionContext } from '../../core/execution'
 import { workspaceRelative, workspaceRoot } from '../../core/paths'
 import { loadServerConfigs } from './config'
 import {
@@ -12,7 +12,6 @@ import {
 	resolvePosition,
 	runOnCapableServer,
 	uriToFilePath,
-	withCancellation,
 	withDocument,
 } from './connection'
 import { decodeServerValue, lspError } from './errors'
@@ -127,16 +126,13 @@ const collectWorkspaceEdits = Effect.fn(function* collectWorkspaceEdits(
 	return WorkspaceEditPreview.make({ edits, unsupportedChanges })
 })
 
-const lspRenameOperation = Effect.fn(function* lspRenameOperation(
-	pluginInput: PluginInput,
-	input: LspRenameInput,
-	context: ToolContext,
-) {
+const lspRenameOperation = Effect.fn(function* lspRenameOperation(input: LspRenameInput) {
+	const context = yield* ToolExecutionContext
 	const tool = 'lsp_rename' as const
-	const workspace = workspaceRoot(input, context)
+	const workspace = workspaceRoot(input, context.projectRoot)
 	const filePath = yield* resolveFile(tool, workspace, input)
 	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const configs = yield* loadServerConfigs(tool)
 	const candidates = yield* requireCandidates(tool, configs, filePath, input.server)
 	return yield* runOnCapableServer(
 		tool,
@@ -218,14 +214,6 @@ const lspRenameOperation = Effect.fn(function* lspRenameOperation(
 	)
 })
 
-export const lspRename = Effect.fn(function* lspRename(
-	pluginInput: PluginInput,
-	input: LspRenameInput,
-	context: ToolContext,
-) {
-	return yield* withCancellation(
-		'lsp_rename',
-		context.abort,
-		lspRenameOperation(pluginInput, input, context),
-	)
+export const lspRename = Effect.fn(function* lspRename(input: LspRenameInput) {
+	return yield* lspRenameOperation(input)
 })

@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises'
-import type { ToolContext } from '@opencode-ai/plugin'
 import { Effect, PartitionedSemaphore, Schema } from 'effect'
 import { objectProperty } from '../../lib/guards'
 import { type GitConfigEntry, GitHubCloneOptions } from './clone-schema'
@@ -13,7 +12,6 @@ export const DEFAULT_GIT_TIMEOUT_MS = 120_000
 export type GitRuntime = {
 	readonly gitBin: string
 	readonly timeoutMs: number
-	readonly signal: AbortSignal
 	readonly env: Readonly<Record<string, string | undefined>>
 	readonly secrets: ReadonlyArray<string>
 }
@@ -27,21 +25,16 @@ export const makeGitHubCloneRuntime = Effect.fn('makeGitHubCloneRuntime')(functi
 	return { targetSemaphore } satisfies GitHubCloneRuntime
 })
 
-const configuredToken = Effect.fn('configuredToken')(function* (
-	config: GitHubConfig,
-	signal: AbortSignal,
-) {
+const configuredToken = Effect.fn('configuredToken')(function* (config: GitHubConfig) {
 	if (config.tokenFile !== undefined) {
 		const tokenFile = config.tokenFile
 		const token = yield* Effect.tryPromise({
-			try: () => readFile(tokenFile, { encoding: 'utf8', signal }),
+			try: (signal) => readFile(tokenFile, { encoding: 'utf8', signal }),
 			catch: (error) => {
 				const code = objectProperty(error, 'code')
 				return cloneFailure(
-					signal.aborted ? 'ABORTED' : 'TOKEN_READ_FAILED',
-					signal.aborted
-						? 'GitHub clone was aborted.'
-						: `Failed to read configured GitHub token file${typeof code === 'string' ? ` (${code})` : ''}.`,
+					'TOKEN_READ_FAILED',
+					`Failed to read configured GitHub token file${typeof code === 'string' ? ` (${code})` : ''}.`,
 				)
 			},
 		})
@@ -93,7 +86,6 @@ const gitEnvironment = Effect.fn('gitEnvironment')(function* (
 
 export const makeGitRuntime = Effect.fn('makeGitRuntime')(function* (
 	config: GitHubConfig,
-	context: ToolContext,
 	options: GitHubCloneOptions,
 ) {
 	const decodedOptions = yield* Schema.decodeUnknownEffect(GitHubCloneOptions)(options).pipe(
@@ -101,13 +93,12 @@ export const makeGitRuntime = Effect.fn('makeGitRuntime')(function* (
 			cloneFailure('GITHUB_CLONE_FAILED', `Invalid clone options: ${error}`),
 		),
 	)
-	const auth = yield* configuredToken(config, context.abort).pipe(
+	const auth = yield* configuredToken(config).pipe(
 		Effect.flatMap((token) => gitEnvironment(token, decodedOptions.gitConfig ?? [])),
 	)
 	return {
 		gitBin: decodedOptions.gitBin ?? GIT_BIN,
 		timeoutMs: decodedOptions.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
-		signal: context.abort,
 		env: { ...auth.env, [config.tokenEnv]: undefined },
 		secrets: auth.secrets,
 	} satisfies GitRuntime

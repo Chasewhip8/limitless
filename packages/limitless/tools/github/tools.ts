@@ -1,20 +1,29 @@
-import { tool } from '@opencode-ai/plugin'
-import { executeTool } from '../../core/tool-boundary'
+import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
+import { encodeNoError, type ToolExecutor, toolModelOutput } from '../../plugin/tool-boundary'
 import { githubClone } from './clone'
 import { GitHubCloneInput, GitHubCloneResult } from './clone-schema'
 import type { GitHubPluginConfig } from './config'
 import type { GitHubCloneRuntime } from './runtime'
 
-export function githubTools(github: GitHubPluginConfig, runtime: GitHubCloneRuntime) {
-	if (!github.enabled) return {}
+export function githubTools(
+	executeTool: ToolExecutor,
+	github: GitHubPluginConfig,
+	runtime: GitHubCloneRuntime,
+) {
 	return {
-		github_clone: tool({
+		github_clone: Tool.make({
 			description:
 				'Create or refresh a read-only shallow GitHub checkout under .limitless/repos, including allowed transitive submodules. Git LFS objects are not materialized.',
-			args: { repo: tool.schema.string(), ref: tool.schema.string().optional() },
+			input: GitHubCloneInput,
+			output: GitHubCloneResult,
+			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
-				executeTool('github_clone', GitHubCloneInput, GitHubCloneResult, args, context, (input) =>
-					githubClone(github.config, input, context, runtime),
+				executeTool(
+					'github_clone',
+					args,
+					context,
+					(input) => githubClone(github.config, input, runtime),
+					encodeNoError,
 				),
 		}),
 	}

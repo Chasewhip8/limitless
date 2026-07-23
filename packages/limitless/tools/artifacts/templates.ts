@@ -200,7 +200,7 @@ const readTemplateFileBuffer = Effect.fn(function* readTemplateFileBuffer(
 	)
 	if (info === undefined || !info.isFile()) return undefined
 	return yield* Effect.tryPromise({
-		try: () => readFile(filePath),
+		try: (signal) => readFile(filePath, { signal }),
 		catch: (error) => toolOperationError(toolName, 'Could not read template file', error),
 	})
 })

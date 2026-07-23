@@ -8,14 +8,11 @@ const execFileAsync = promisify(execFile)
 export const DEFAULT_TIMEOUT_MS = 30_000
 export const DEFAULT_MAX_BUFFER = 1024 * 1024 * 8
 
-// Command execution options carry AbortSignal and process environment state, so this is the
-// sole nonserializable operational type owned by core rather than a Schema model.
 export type RunOptions = {
 	readonly cwd?: string
 	readonly timeout?: number
 	readonly maxBuffer?: number
 	readonly env?: Readonly<Record<string, string | undefined>>
-	readonly signal?: AbortSignal
 }
 
 export const TrimmedString = Schema.String.pipe(
@@ -69,10 +66,8 @@ export const runCommand = Effect.fn(function* runCommand(
 		maxBuffer: options.maxBuffer ?? DEFAULT_MAX_BUFFER,
 	}
 	if (options.cwd !== undefined) execOptions.cwd = options.cwd
-	if (options.signal !== undefined) execOptions.signal = options.signal
-
 	return yield* Effect.tryPromise({
-		try: () => execFileAsync(command, [...args], execOptions),
+		try: (signal) => execFileAsync(command, [...args], { ...execOptions, signal }),
 		catch: commandFailure,
 	}).pipe(
 		Effect.match({

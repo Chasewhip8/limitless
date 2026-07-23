@@ -26,6 +26,7 @@
 		"packages/*/index.ts",
 		"packages/limitless/core/**/*.ts",
 		"packages/limitless/lib/**/*.ts",
+		"packages/limitless/plugin/**/*.ts",
 		"packages/limitless/tools/**/*.ts",
 		"packages/limitless/integrations/**/*.ts",
 		"packages/*/test/**/*"

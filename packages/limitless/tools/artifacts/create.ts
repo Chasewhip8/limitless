@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
-import type { ToolContext } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
 import { isAlreadyExists, toolInputError, toolOperationError } from '../../core/errors'
+import { ToolExecutionContext } from '../../core/execution'
 import { optionalField } from '../../lib/type-utils'
 import { copyDirectoryContents, writeJsonFile } from './filesystem'
 import { artifactManifestRelativePath, artifactRelativePath, ensureArtifactsRoot } from './paths'
@@ -115,8 +115,8 @@ const createManifest = Effect.fn(function* createManifest(
 	slug: ArtifactSlugType,
 	title: typeof ArtifactTitle.Type | undefined,
 	template: ArtifactTemplateName | undefined,
-	context: ToolContext,
 ) {
+	const context = yield* ToolExecutionContext
 	const timestamp = yield* Effect.try({
 		try: () => new Date().toISOString(),
 		catch: (error) =>
@@ -133,23 +133,21 @@ const createManifest = Effect.fn(function* createManifest(
 		...optionalField('title', title),
 		...optionalField('template', template),
 		createdBy: {
-			sessionID: context.sessionID,
+			sessionID: context.sessionId,
 			agent: context.agent,
 		},
 	})
 })
 
-export const artifactCreate = Effect.fn(function* artifactCreate(
-	input: ArtifactCreateInput,
-	context: ToolContext,
-) {
+export const artifactCreate = Effect.fn(function* artifactCreate(input: ArtifactCreateInput) {
+	const context = yield* ToolExecutionContext
 	const title = yield* normalizeTitle(input.title)
 	const templateName = input.template
 	const template =
 		templateName !== undefined
 			? yield* resolveArtifactTemplate(templateName, 'artifact_create')
 			: undefined
-	const root = yield* ensureArtifactsRoot(context.worktree, true, 'artifact_create')
+	const root = yield* ensureArtifactsRoot(context.projectRoot, true, 'artifact_create')
 	if (root === undefined) {
 		return yield* toolInputError('artifact_create', 'Could not create artifacts root')
 	}
@@ -167,7 +165,7 @@ export const artifactCreate = Effect.fn(function* artifactCreate(
 	}
 
 	const directory = path.join(root, slug)
-	const manifest = yield* createManifest(slug, title, template?.manifest.name, context)
+	const manifest = yield* createManifest(slug, title, template?.manifest.name)
 	yield* writeJsonFile(path.join(directory, 'manifest.json'), manifest, 'artifact_create')
 	if (template !== undefined) {
 		if (template.frameworkDirectory !== undefined) {

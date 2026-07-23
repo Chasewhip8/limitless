@@ -1,25 +1,21 @@
 import path from 'node:path'
-import type { PluginInput } from '@opencode-ai/plugin'
-import { Effect, Option, Schema } from 'effect'
+import { Context, Effect, Option, Schema } from 'effect'
 import { TrimmedNonEmptyString } from '../../core/command'
-import { describeUnknown, schemaErrorMessage } from '../../lib/guards'
-import { decodeServerValue, lspError } from './errors'
+import { schemaErrorMessage } from '../../lib/guards'
+import { lspError } from './errors'
 import { LspStringRecord } from './schema'
 
-export const OpenCodeLspConfig = Schema.Struct({
-	lsp: Schema.optional(
-		Schema.Union([Schema.Boolean, Schema.Record(Schema.String, Schema.Unknown)]),
-	),
-})
 export const DisabledLspServerConfig = Schema.Struct({ disabled: Schema.Literal(true) })
 export const ConfiguredLspServer = Schema.Struct({
-	command: Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
-	args: Schema.optional(Schema.Array(Schema.String)),
+	command: Schema.NonEmptyArray(TrimmedNonEmptyString),
 	extensions: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 	env: Schema.optional(LspStringRecord),
 	initialization: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 	languageIds: Schema.optional(LspStringRecord),
 	disabled: Schema.optional(Schema.Boolean),
+})
+export const LimitlessLspPluginOptions = Schema.Struct({
+	lsp: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 })
 export const LspServerConfig = Schema.Struct({
 	id: TrimmedNonEmptyString,
@@ -30,7 +26,16 @@ export const LspServerConfig = Schema.Struct({
 	languageIds: LspStringRecord,
 })
 export type LspServerConfig = typeof LspServerConfig.Type
-type LspServerConfigType = typeof LspServerConfig.Type
+
+export class LspConfigError extends Schema.TaggedErrorClass<LspConfigError>()('LspConfigError', {
+	message: Schema.String,
+}) {}
+
+export type LspConfig = {
+	readonly servers: ReadonlyArray<LspServerConfig>
+}
+
+export const LspConfig = Context.Service<LspConfig>('@limitless/lsp/LspConfig')
 
 const builtInLanguageIds = LspStringRecord.make({
 	'.cjs': 'javascript',
@@ -72,70 +77,57 @@ function normalizeExtension(extension: string): string {
 	return extension.startsWith('.') ? extension.toLowerCase() : `.${extension.toLowerCase()}`
 }
 
-const normalizeServerConfig = Effect.fn(function* normalizeServerConfig(
-	tool: string,
+const normalizeServerConfig = Effect.fn('normalizeServerConfig')(function* (
 	id: string,
 	raw: unknown,
 ) {
 	if (Option.isSome(Schema.decodeUnknownOption(DisabledLspServerConfig)(raw))) return undefined
-	const configured = yield* decodeServerValue(
-		tool,
-		id,
-		`Invalid OpenCode LSP configuration for server ${id}`,
-		ConfiguredLspServer,
-		raw,
-	)
-	if (configured.disabled === true) return undefined
-	const command =
-		typeof configured.command === 'string'
-			? [configured.command, ...(configured.args ?? [])]
-			: configured.command
-	return yield* decodeServerValue(
-		tool,
-		id,
-		`Invalid normalized LSP configuration for server ${id}`,
-		LspServerConfig,
-		{
-			id,
-			command,
-			extensions: (configured.extensions ?? []).map(normalizeExtension),
-			env: configured.env ?? {},
-			...(configured.initialization === undefined
-				? {}
-				: { initialization: configured.initialization }),
-			languageIds: Object.fromEntries(
-				Object.entries(configured.languageIds ?? {}).map(([extension, language]) => [
-					normalizeExtension(extension),
-					language,
-				]),
-			),
-		},
-	)
-})
-
-export const loadServerConfigs = Effect.fn(function* loadServerConfigs(
-	input: PluginInput,
-	tool: string,
-	workspace: string,
-) {
-	const result = yield* Effect.tryPromise({
-		try: () => input.client.config.get({ query: { directory: workspace } }),
-		catch: (error) => lspError(tool, `Unable to read OpenCode config: ${describeUnknown(error)}`),
-	})
-	const config = yield* Schema.decodeUnknownEffect(OpenCodeLspConfig)(result.data).pipe(
-		Effect.mapError((error) =>
-			lspError(tool, `Invalid OpenCode LSP config: ${schemaErrorMessage(error)}`),
+	const configured = yield* Schema.decodeUnknownEffect(ConfiguredLspServer)(raw).pipe(
+		Effect.mapError(
+			(error) =>
+				new LspConfigError({
+					message: `Invalid Limitless LSP plugin option for ${id}: ${schemaErrorMessage(error)}`,
+				}),
 		),
 	)
-	const servers: Array<LspServerConfigType> = []
-	const configuredServers = typeof config.lsp === 'object' && config.lsp !== null ? config.lsp : {}
-	for (const [id, raw] of Object.entries(configuredServers)) {
-		const server = yield* normalizeServerConfig(tool, id, raw)
-		if (server !== undefined) servers.push(server)
-	}
-	if (servers.length === 0)
-		return yield* lspError(tool, 'No LSP servers are configured in OpenCode config.')
-	return servers
+	if (configured.disabled === true) return undefined
+	return LspServerConfig.make({
+		id,
+		command: configured.command,
+		extensions: (configured.extensions ?? []).map(normalizeExtension),
+		env: configured.env ?? {},
+		...(configured.initialization === undefined
+			? {}
+			: { initialization: configured.initialization }),
+		languageIds: Object.fromEntries(
+			Object.entries(configured.languageIds ?? {}).map(([extension, language]) => [
+				normalizeExtension(extension),
+				language,
+			]),
+		),
+	})
+})
+
+export const decodeLspConfig = Effect.fn('decodeLspConfig')(function* (options: unknown) {
+	const decoded = yield* Schema.decodeUnknownEffect(LimitlessLspPluginOptions)(options).pipe(
+		Effect.mapError(
+			(error) =>
+				new LspConfigError({
+					message: `Invalid Limitless plugin options: ${schemaErrorMessage(error)}`,
+				}),
+		),
+	)
+	const servers = yield* Effect.forEach(Object.entries(decoded.lsp ?? {}), ([id, raw]) =>
+		normalizeServerConfig(id, raw),
+	)
+	return LspConfig.of({ servers: servers.filter((server) => server !== undefined) })
+})
+
+export const loadServerConfigs = Effect.fn('loadServerConfigs')(function* (tool: string) {
+	const config = yield* LspConfig
+	if (config.servers.length === 0)
+		return yield* lspError(tool, 'No LSP servers are configured in Limitless plugin options.')
+	return config.servers
 })
 
 export function pathExtension(filePath: string): string {
@@ -144,17 +136,17 @@ export function pathExtension(filePath: string): string {
 }
 
 export function matchingServers(
-	servers: ReadonlyArray<LspServerConfigType>,
+	servers: ReadonlyArray<LspServerConfig>,
 	filePath: string | undefined,
 	serverId: string | undefined,
-): ReadonlyArray<LspServerConfigType> {
+): ReadonlyArray<LspServerConfig> {
 	if (serverId !== undefined) return servers.filter((server) => server.id === serverId)
 	if (filePath === undefined) return []
 	const extension = pathExtension(filePath)
 	return servers.filter((server) => server.extensions.includes(extension))
 }
 
-export function languageId(filePath: string, config: LspServerConfigType): string {
+export function languageId(filePath: string, config: LspServerConfig): string {
 	const extension = pathExtension(filePath)
 	return (
 		(config.languageIds[extension] ?? builtInLanguageIds[extension] ?? extension.slice(1)) ||

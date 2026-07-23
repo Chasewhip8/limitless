@@ -1,3 +1,4 @@
+import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Effect, Schema } from 'effect'
 import { schemaErrorMessage } from '../../lib/guards'
 
@@ -25,13 +26,8 @@ function lspToolFailurePayload(error: LspToolError): typeof LspToolFailurePayloa
 	})
 }
 
-export const lspToolFailureEncoder = {
-	is: (error: unknown): error is LspToolError => error instanceof LspToolError,
-	encode: (error: LspToolError): Effect.Effect<unknown> =>
-		Schema.encodeUnknownEffect(LspToolFailurePayload)(lspToolFailurePayload(error)).pipe(
-			Effect.orDie,
-		),
-}
+export const encodeLspToolFailure = (error: LspToolError) =>
+	new Tool.Failure({ message: error.message, metadata: lspToolFailurePayload(error) })
 
 export function lspError(tool: string, message: string, server?: string) {
 	return new LspToolError(server === undefined ? { tool, message } : { tool, message, server })

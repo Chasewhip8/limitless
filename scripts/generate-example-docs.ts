@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url'
 import { Effect } from 'effect'
 import { toolOperationError } from '../packages/limitless/core/errors'
 import {
+	ToolExecutionContext,
+	type ToolExecutionContext as ToolExecutionContextType,
+} from '../packages/limitless/core/execution'
+import {
 	type ArtifactCreateInput,
 	type ArtifactSlug,
 	ArtifactTemplatesListInput,
@@ -20,17 +24,10 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const worktree = path.resolve(scriptDirectory, '..')
 const artifactsDirectory = artifactsRoot(worktree)
 
-const context: Parameters<typeof artifactCreate>[1] = {
-	sessionID: 'generate-example-docs',
-	messageID: 'generate-example-docs',
+const context: ToolExecutionContextType = {
+	sessionId: 'generate-example-docs',
 	agent: 'limitless',
-	directory: worktree,
-	worktree,
-	abort: new AbortController().signal,
-	metadata: () => undefined,
-	ask: () => {
-		throw new Error('generate-example-docs does not ask interactive questions')
-	},
+	projectRoot: worktree,
 }
 
 function describeError(error: unknown): string {
@@ -74,11 +71,11 @@ const listTemplates = Effect.fn(function* listTemplates() {
 })
 
 const createDocument = Effect.fn(function* createDocument(input: typeof ArtifactCreateInput.Type) {
-	return yield* artifactCreate(input, context)
+	return yield* artifactCreate(input)
 })
 
 const compileDocument = Effect.fn(function* compileDocument(slug: ArtifactSlug, typstBin: string) {
-	return yield* typstCompile({ artifact: slug, timeoutMs: 120_000 }, context, { typstBin })
+	return yield* typstCompile({ artifact: slug, timeoutMs: 120_000 }, { typstBin })
 })
 
 const main = Effect.fn(function* main() {
@@ -119,7 +116,7 @@ const main = Effect.fn(function* main() {
 	return generatedLines
 })
 
-Effect.runPromise(main()).then(
+Effect.runPromise(main().pipe(Effect.provideService(ToolExecutionContext, context))).then(
 	(generatedLines) => {
 		console.log('Generated example documents:')
 		for (const line of generatedLines) console.log(line)

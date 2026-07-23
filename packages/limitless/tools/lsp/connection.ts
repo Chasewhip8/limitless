@@ -56,29 +56,6 @@ import {
 
 const SHUTDOWN_TIMEOUT_MS = 1_000
 
-function cancellation(tool: string, signal: AbortSignal) {
-	return Effect.callback<never, LspToolError>((resume) => {
-		const onAbort = () => {
-			resume(Effect.fail(lspError(tool, 'LSP operation was cancelled.')))
-		}
-		if (signal.aborted) {
-			onAbort()
-			return
-		}
-		signal.addEventListener('abort', onAbort, { once: true })
-		return Effect.sync(() => signal.removeEventListener('abort', onAbort))
-	})
-}
-
-export function withCancellation<A, R>(
-	tool: string,
-	signal: AbortSignal,
-	effect: Effect.Effect<A, LspToolError, R>,
-) {
-	if (signal.aborted) return Effect.fail(lspError(tool, 'LSP operation was cancelled.'))
-	return Effect.raceFirst(effect, cancellation(tool, signal))
-}
-
 export function withOperationDeadline<A, R>(
 	tool: string,
 	connection: LspConnectionRuntime,
@@ -203,7 +180,7 @@ function textForRange(content: string, range: LspRange): string | undefined {
 
 export function readRangeText(tool: string, server: string, filePath: string, range: LspRange) {
 	return Effect.tryPromise({
-		try: () => readFile(filePath, 'utf8'),
+		try: (signal) => readFile(filePath, { encoding: 'utf8', signal }),
 		catch: (error) =>
 			lspError(
 				tool,
@@ -808,7 +785,7 @@ const openDocument = Effect.fn(function* openDocument(
 	timeoutMs: number,
 ) {
 	const content = yield* Effect.tryPromise({
-		try: () => readFile(filePath, 'utf8'),
+		try: (signal) => readFile(filePath, { encoding: 'utf8', signal }),
 		catch: (error) =>
 			lspError(
 				tool,

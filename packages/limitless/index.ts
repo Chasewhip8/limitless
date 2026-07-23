@@ -1,118 +1,108 @@
-import type { Plugin, PluginOptions } from '@opencode-ai/plugin'
-import { Effect } from 'effect'
+import { Plugin } from '@opencode-ai/plugin/v2/effect'
+import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
+import { Session } from '@opencode-ai/schema/session'
+import { Effect, Schema, Stream } from 'effect'
 import {
 	createNotificationRunner,
-	DISABLED_NOTIFICATION_CONFIG,
+	NotificationSessionLookupError,
 	normalizeNotificationConfig,
 } from './integrations/notifications/index'
-import { createSlackRunner, normalizeSlackConfig, slackTools } from './integrations/slack/index'
+import { makeToolExecutor, type ToolExecutor } from './plugin/tool-boundary'
 import { artifactTools } from './tools/artifacts/index'
 import { astGrepTools } from './tools/ast-grep'
 import { diagnosticsTools } from './tools/diagnostics'
 import {
-	DISABLED_GITHUB_CONFIG,
 	githubTools,
 	makeGitHubCloneRuntime,
 	normalizeGitHubPluginConfig,
 } from './tools/github/index'
-import { lspTools } from './tools/lsp/index'
+import { decodeLspConfig, lspTools } from './tools/lsp/index'
 
-export const resolveNotificationConfig = Effect.fn('resolveNotificationConfig')(function* (
-	options: PluginOptions | undefined,
-) {
-	return yield* normalizeNotificationConfig(options).pipe(
-		Effect.catchTag('NotificationConfigError', (error) =>
-			Effect.logWarning(`[limitless] invalid notifications config: ${error.message}`).pipe(
-				Effect.as(DISABLED_NOTIFICATION_CONFIG),
-			),
-		),
-	)
-})
+export const resolveNotificationConfig = normalizeNotificationConfig
+export const resolveGitHubConfig = normalizeGitHubPluginConfig
 
-export const resolveGitHubConfig = Effect.fn('resolveGitHubConfig')(function* (
-	options: PluginOptions | undefined,
-) {
-	return yield* normalizeGitHubPluginConfig(options).pipe(
-		Effect.catchTag('GitHubConfigError', (error) =>
-			Effect.logWarning(`[limitless] invalid github config: ${error.message}`).pipe(
-				Effect.as(DISABLED_GITHUB_CONFIG),
-			),
-		),
-	)
-})
-
-export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* (
-	options: PluginOptions | undefined,
-) {
-	const notificationConfig = yield* resolveNotificationConfig(options)
+export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* (options: unknown) {
+	const notificationConfig = yield* normalizeNotificationConfig(options)
 	const notifications = yield* createNotificationRunner(notificationConfig)
-	const slackConfig = yield* normalizeSlackConfig(options)
-	const githubConfig = yield* resolveGitHubConfig(options)
+	const githubConfig = yield* normalizeGitHubPluginConfig(options)
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
-	return { notifications, slackConfig, githubConfig, githubCloneRuntime }
+	const lspConfig = yield* decodeLspConfig(options)
+	return { notifications, githubConfig, githubCloneRuntime, lspConfig }
 })
 
-function runPluginHook(name: string, effect: Effect.Effect<unknown>) {
-	return Effect.runPromise(
-		effect.pipe(
-			Effect.catchDefect((defect) =>
-				Effect.logError(`[limitless] plugin hook ${name} failed`, defect),
-			),
-			Effect.asVoid,
-		),
-	)
-}
-
-export function createLimitless(): Plugin {
-	return async (pluginInput, options) => {
-		const { githubCloneRuntime, githubConfig, notifications, slackConfig } =
-			await Effect.runPromise(resolvePluginConfigs(options))
-		const slack = await Effect.runPromise(createSlackRunner(slackConfig, pluginInput))
-		const dispatchSlackMention = (input: unknown) => {
-			setImmediate(() => {
-				void runPluginHook('slack.app_mention', slack.handleMention(input))
-			})
-			return Promise.resolve()
-		}
-		let slackStart: Promise<void> | undefined
-		const ensureSlackStarted = () => {
-			slackStart ??= Effect.runPromise(
-				slack
-					.start(dispatchSlackMention)
-					.pipe(
-						Effect.catch((error) =>
-							Effect.logError(`[limitless] ${error.operation}: ${error.message}`),
-						),
-					),
-			)
-			return slackStart
-		}
-		return {
-			dispose: () => runPluginHook('dispose', slack.stop),
-			event: async ({ event }) => {
-				await ensureSlackStarted()
-				return runPluginHook(
-					'event',
-					Effect.all([notifications.handleEvent(event), slack.handleOpenCodeEvent(event)], {
-						discard: true,
-					}),
-				)
-			},
-			'tool.execute.before': (input) =>
-				runPluginHook(
-					'tool.execute.before',
-					input.tool === 'question' ? notifications.notify('question') : Effect.void,
-				),
-			tool: {
-				...artifactTools(),
-				...astGrepTools(),
-				...diagnosticsTools(),
-				...lspTools(pluginInput),
-				...githubTools(githubConfig, githubCloneRuntime),
-				...slackTools(slack),
-			},
-		}
+export function limitlessTools(
+	executeTool: ToolExecutor,
+	githubConfig: Parameters<typeof githubTools>[1],
+	githubCloneRuntime: Parameters<typeof githubTools>[2],
+) {
+	return {
+		...artifactTools(executeTool),
+		...astGrepTools(executeTool),
+		...diagnosticsTools(executeTool),
+		...lspTools(executeTool),
+		...githubTools(executeTool, githubConfig, githubCloneRuntime),
 	}
 }
 
-export default createLimitless()
+export function registerLimitlessTools(
+	draft: Tool.ToolDraft,
+	tools: ReturnType<typeof limitlessTools>,
+): void {
+	for (const [name, definition] of Object.entries(tools)) {
+		draft.add(name, definition, { codemode: false })
+	}
+}
+
+export default Plugin.define({
+	id: 'limitless',
+	effect: Effect.fn('limitless.plugin')(function* (ctx) {
+		const configs = yield* resolvePluginConfigs(ctx.options).pipe(
+			Effect.tapError((error) =>
+				Effect.logError(`[limitless] plugin configuration is invalid: ${error.message}`),
+			),
+			Effect.orDie,
+		)
+		const executeTool = makeToolExecutor(
+			(sessionID) =>
+				ctx.session.get({ sessionID }).pipe(
+					Effect.flatMap(Schema.decodeUnknownEffect(Session.Info)),
+					Effect.map((session) => session.location.directory),
+					Effect.mapError(
+						() =>
+							new Tool.Failure({
+								message: 'Unable to resolve the OpenCode session directory.',
+							}),
+					),
+				),
+			configs.lspConfig,
+		)
+		const tools = limitlessTools(executeTool, configs.githubConfig, configs.githubCloneRuntime)
+
+		yield* ctx.tool.transform((draft) => {
+			registerLimitlessTools(draft, tools)
+		})
+
+		const lookupNotificationSession = (sessionID: string) =>
+			ctx.session.get({ sessionID: Session.ID.make(sessionID) }).pipe(
+				Effect.flatMap(Schema.decodeUnknownEffect(Session.Info)),
+				Effect.map((session) =>
+					session.parentID === undefined ? {} : { parentID: session.parentID },
+				),
+				Effect.mapError(
+					() =>
+						new NotificationSessionLookupError({
+							message: `Unable to resolve session ${sessionID}.`,
+						}),
+				),
+			)
+		yield* ctx.event.subscribe().pipe(
+			Stream.runForEach((event) =>
+				configs.notifications.handleEvent(event, lookupNotificationSession),
+			),
+			Effect.catchCause((cause) =>
+				Effect.logError('[limitless] OpenCode notification event stream stopped', cause),
+			),
+			Effect.forkScoped({ startImmediately: true }),
+		)
+	}),
+})

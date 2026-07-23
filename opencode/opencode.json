@@ -1,126 +1,154 @@
 {
-    "$schema": "https://opencode.ai/config.json",
-    "default_agent": "limitless",
-    "subagent_depth": 2,
-    "permission": {
-        "edit": {
-            "*": "allow",
-            ".limitless/repos": "deny",
-            ".limitless/repos/**": "deny"
-        }
-    },
-    "provider": {
-        "openai": {
-            "options": {
-                "headerTimeout": 300000
-            },
-            "models": {
-                "gpt-5.6-luna": {
-                    "limit": {
-                        "context": 400000,
-                        "input": 272000,
-                        "output": 128000
-                    }
-                },
-                "gpt-5.6-luna-fast": {
-                    "limit": {
-                        "context": 400000,
-                        "input": 272000,
-                        "output": 128000
-                    }
-                },
-                "gpt-5.6-luna-fast-long": {
-                    "id": "gpt-5.6-luna",
-                    "name": "GPT-5.6 Luna Fast Long",
-                    "limit": {
-                        "context": 500000,
-                        "input": 372000,
-                        "output": 128000
-                    },
-                    "options": {
-                        "serviceTier": "priority"
-                    }
-                },
-                "gpt-5.6-luna-long": {
-                    "id": "gpt-5.6-luna",
-                    "name": "GPT-5.6 Luna Long",
-                    "limit": {
-                        "context": 500000,
-                        "input": 372000,
-                        "output": 128000
-                    }
-                },
-                "gpt-5.6-sol": {
-                    "limit": {
-                        "context": 400000,
-                        "input": 272000,
-                        "output": 128000
-                    }
-                },
-                "gpt-5.6-sol-fast": {
-                    "limit": {
-                        "context": 400000,
-                        "input": 272000,
-                        "output": 128000
-                    }
-                },
-                "gpt-5.6-sol-fast-long": {
-                    "id": "gpt-5.6-sol",
-                    "name": "GPT-5.6 Sol Fast Long",
-                    "limit": {
-                        "context": 500000,
-                        "input": 372000,
-                        "output": 128000
-                    },
-                    "options": {
-                        "serviceTier": "priority"
-                    }
-                },
-                "gpt-5.6-sol-long": {
-                    "id": "gpt-5.6-sol",
-                    "name": "GPT-5.6 Sol Long",
-                    "limit": {
-                        "context": 500000,
-                        "input": 372000,
-                        "output": 128000
-                    }
-                },
-                "gpt-5.6-terra": {
-                    "limit": {
-                        "context": 400000,
-                        "input": 272000,
-                        "output": 128000
-                    }
-                },
-                "gpt-5.6-terra-fast": {
-                    "limit": {
-                        "context": 400000,
-                        "input": 272000,
-                        "output": 128000
-                    }
-                },
-                "gpt-5.6-terra-fast-long": {
-                    "id": "gpt-5.6-terra",
-                    "name": "GPT-5.6 Terra Fast Long",
-                    "limit": {
-                        "context": 500000,
-                        "input": 372000,
-                        "output": 128000
-                    },
-                    "options": {
-                        "serviceTier": "priority"
-                    }
-                },
-                "gpt-5.6-terra-long": {
-                    "id": "gpt-5.6-terra",
-                    "name": "GPT-5.6 Terra Long",
-                    "limit": {
-                        "context": 500000,
-                        "input": 372000,
-                        "output": 128000
-                    }
-                }
-            }
-        }
-    }
+	"$schema": "https://opencode.ai/config.json",
+	"default_agent": "limitless",
+	"permissions": [
+		{
+			"action": "edit",
+			"resource": "*",
+			"effect": "allow"
+		},
+		{
+			"action": "edit",
+			"resource": ".limitless/repos",
+			"effect": "deny"
+		},
+		{
+			"action": "edit",
+			"resource": ".limitless/repos/**",
+			"effect": "deny"
+		}
+	],
+	"providers": {
+		"openai": {
+			"models": {
+				"gpt-5.6-luna": {
+					"limit": {
+						"context": 400000,
+						"input": 272000,
+						"output": 128000
+					}
+				},
+				"gpt-5.6-luna-fast": {
+					"limit": {
+						"context": 400000,
+						"input": 272000,
+						"output": 128000
+					}
+				},
+				"gpt-5.6-luna-fast-long": {
+					"modelID": "gpt-5.6-luna",
+					"name": "GPT-5.6 Luna Fast Long",
+					"limit": {
+						"context": 500000,
+						"input": 372000,
+						"output": 128000
+					},
+					"settings": {
+						"serviceTier": "priority"
+					}
+				},
+				"gpt-5.6-luna-long": {
+					"modelID": "gpt-5.6-luna",
+					"name": "GPT-5.6 Luna Long",
+					"limit": {
+						"context": 500000,
+						"input": 372000,
+						"output": 128000
+					}
+				},
+				"gpt-5.6-sol": {
+					"limit": {
+						"context": 400000,
+						"input": 272000,
+						"output": 128000
+					}
+				},
+				"gpt-5.6-sol-fast": {
+					"limit": {
+						"context": 400000,
+						"input": 272000,
+						"output": 128000
+					},
+					"variants": [
+						{
+							"id": "medium",
+							"settings": {
+								"reasoningEffort": "medium"
+							}
+						},
+						{
+							"id": "xhigh",
+							"settings": {
+								"reasoningEffort": "xhigh"
+							}
+						}
+					]
+				},
+				"gpt-5.6-sol-fast-long": {
+					"modelID": "gpt-5.6-sol",
+					"name": "GPT-5.6 Sol Fast Long",
+					"limit": {
+						"context": 500000,
+						"input": 372000,
+						"output": 128000
+					},
+					"settings": {
+						"serviceTier": "priority"
+					},
+					"variants": [
+						{
+							"id": "max",
+							"settings": {
+								"reasoningEffort": "max"
+							}
+						}
+					]
+				},
+				"gpt-5.6-sol-long": {
+					"modelID": "gpt-5.6-sol",
+					"name": "GPT-5.6 Sol Long",
+					"limit": {
+						"context": 500000,
+						"input": 372000,
+						"output": 128000
+					}
+				},
+				"gpt-5.6-terra": {
+					"limit": {
+						"context": 400000,
+						"input": 272000,
+						"output": 128000
+					}
+				},
+				"gpt-5.6-terra-fast": {
+					"limit": {
+						"context": 400000,
+						"input": 272000,
+						"output": 128000
+					}
+				},
+				"gpt-5.6-terra-fast-long": {
+					"modelID": "gpt-5.6-terra",
+					"name": "GPT-5.6 Terra Fast Long",
+					"limit": {
+						"context": 500000,
+						"input": 372000,
+						"output": 128000
+					},
+					"settings": {
+						"serviceTier": "priority"
+					}
+				},
+				"gpt-5.6-terra-long": {
+					"modelID": "gpt-5.6-terra",
+					"name": "GPT-5.6 Terra Long",
+					"limit": {
+						"context": 500000,
+						"input": 372000,
+						"output": 128000
+					}
+				}
+			}
+		}
+	}
 }

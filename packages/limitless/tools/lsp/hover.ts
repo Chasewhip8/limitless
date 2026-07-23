@@ -1,7 +1,7 @@
-import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
 import { HoverRequest } from 'vscode-languageserver-protocol/node'
 import { DEFAULT_TIMEOUT_MS } from '../../core/command'
+import { ToolExecutionContext } from '../../core/execution'
 import { workspaceRelative, workspaceRoot } from '../../core/paths'
 import { loadServerConfigs } from './config'
 import {
@@ -10,7 +10,6 @@ import {
 	resolveFile,
 	resolvePosition,
 	runOnCapableServer,
-	withCancellation,
 	withDocument,
 } from './connection'
 import { decodeServerValue } from './errors'
@@ -92,16 +91,13 @@ function normalizeHover(value: Exclude<typeof LspHoverResponse.Type, null>): Nor
 	})
 }
 
-const lspHoverOperation = Effect.fn(function* lspHoverOperation(
-	pluginInput: PluginInput,
-	input: LspHoverInput,
-	context: ToolContext,
-) {
+const lspHoverOperation = Effect.fn(function* lspHoverOperation(input: LspHoverInput) {
+	const context = yield* ToolExecutionContext
 	const tool = 'lsp_hover' as const
-	const workspace = workspaceRoot(input, context)
+	const workspace = workspaceRoot(input, context.projectRoot)
 	const filePath = yield* resolveFile(tool, workspace, input)
 	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const configs = yield* loadServerConfigs(tool)
 	const candidates = yield* requireCandidates(tool, configs, filePath, input.server)
 	return yield* runOnCapableServer(
 		tool,
@@ -140,14 +136,6 @@ const lspHoverOperation = Effect.fn(function* lspHoverOperation(
 	)
 })
 
-export const lspHover = Effect.fn(function* lspHover(
-	pluginInput: PluginInput,
-	input: LspHoverInput,
-	context: ToolContext,
-) {
-	return yield* withCancellation(
-		'lsp_hover',
-		context.abort,
-		lspHoverOperation(pluginInput, input, context),
-	)
+export const lspHover = Effect.fn(function* lspHover(input: LspHoverInput) {
+	return yield* lspHoverOperation(input)
 })

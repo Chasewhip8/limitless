@@ -6,3 +6,4 @@ export {
 	normalizeNotificationConfig,
 } from './config'
 export { createNotificationRunner } from './runner'
+export { NotificationSessionLookupError } from './schema'

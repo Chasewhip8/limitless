@@ -1,4 +1,3 @@
-import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
 import { Effect, Ref, Result, Schema } from 'effect'
 import {
 	DeclarationRequest,
@@ -6,6 +5,7 @@ import {
 	TypeDefinitionRequest,
 } from 'vscode-languageserver-protocol/node'
 import { DEFAULT_TIMEOUT_MS } from '../../core/command'
+import { ToolExecutionContext } from '../../core/execution'
 import { workspaceRelative, workspaceRoot } from '../../core/paths'
 import { loadServerConfigs } from './config'
 import {
@@ -16,7 +16,6 @@ import {
 	resolveFile,
 	resolvePosition,
 	supportsCapability,
-	withCancellation,
 	withDocument,
 	withOperationDeadline,
 } from './connection'
@@ -99,15 +98,14 @@ function requestRelationship(
 }
 
 const lspDefinitionOperation = Effect.fn(function* lspDefinitionOperation(
-	pluginInput: PluginInput,
 	input: LspDefinitionInput,
-	context: ToolContext,
 ) {
+	const context = yield* ToolExecutionContext
 	const tool = 'lsp_definition' as const
-	const workspace = workspaceRoot(input, context)
+	const workspace = workspaceRoot(input, context.projectRoot)
 	const filePath = yield* resolveFile(tool, workspace, input)
 	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const configs = yield* loadServerConfigs(tool)
 	const candidates = yield* requireCandidates(tool, configs, filePath, input.server)
 	const candidateErrors: Array<string> = []
 	let anySupported = false
@@ -254,14 +252,6 @@ const lspDefinitionOperation = Effect.fn(function* lspDefinitionOperation(
 	)
 })
 
-export const lspDefinition = Effect.fn(function* lspDefinition(
-	pluginInput: PluginInput,
-	input: LspDefinitionInput,
-	context: ToolContext,
-) {
-	return yield* withCancellation(
-		'lsp_definition',
-		context.abort,
-		lspDefinitionOperation(pluginInput, input, context),
-	)
+export const lspDefinition = Effect.fn(function* lspDefinition(input: LspDefinitionInput) {
+	return yield* lspDefinitionOperation(input)
 })

@@ -1,7 +1,7 @@
 ---
 description: Disabled
 mode: subagent
-disable: true
+disabled: true
 ---
 
 # General Disabled

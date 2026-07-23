@@ -2,60 +2,43 @@ import { Schema } from 'effect'
 
 export const NotificationEvent = Schema.Union([
 	Schema.Literal('complete'),
+	Schema.Literal('permission'),
 	Schema.Literal('question'),
 ])
 export type NotificationEvent = typeof NotificationEvent.Type
 
-export const NotificationSessionInfo = Schema.Struct({
-	id: Schema.NonEmptyString,
-	parentID: Schema.optional(Schema.NonEmptyString),
+export const NotificationQuestionAsked = Schema.Struct({
+	type: Schema.Literal('question.v2.asked'),
+	data: Schema.Struct({ sessionID: Schema.NonEmptyString }),
 })
-export type NotificationSessionInfo = typeof NotificationSessionInfo.Type
 
-export const NotificationSessionLifecycleEvent = Schema.Struct({
-	type: Schema.Union([Schema.Literal('session.created'), Schema.Literal('session.updated')]),
-	properties: Schema.Struct({
-		info: NotificationSessionInfo,
-	}),
+export const NotificationPermissionAsked = Schema.Struct({
+	type: Schema.Literal('permission.v2.asked'),
+	data: Schema.Struct({ sessionID: Schema.NonEmptyString }),
 })
-export type NotificationSessionLifecycleEvent = typeof NotificationSessionLifecycleEvent.Type
 
-export const NotificationSessionDeletedEvent = Schema.Struct({
-	type: Schema.Literal('session.deleted'),
-	properties: Schema.Struct({
-		info: NotificationSessionInfo,
-	}),
+export const NotificationExecutionTerminal = Schema.Struct({
+	type: Schema.Union([
+		Schema.Literal('session.execution.succeeded'),
+		Schema.Literal('session.execution.failed'),
+		Schema.Literal('session.execution.interrupted'),
+	]),
+	data: Schema.Struct({ sessionID: Schema.NonEmptyString }),
 })
-export type NotificationSessionDeletedEvent = typeof NotificationSessionDeletedEvent.Type
-
-export const NotificationSessionStatusEvent = Schema.Struct({
-	type: Schema.Literal('session.status'),
-	properties: Schema.Struct({
-		sessionID: Schema.NonEmptyString,
-		status: Schema.Struct({
-			type: Schema.String,
-		}),
-	}),
-})
-export type NotificationSessionStatusEvent = typeof NotificationSessionStatusEvent.Type
-
-export const NotificationSessionIdleEvent = Schema.Struct({
-	type: Schema.Literal('session.idle'),
-	properties: Schema.Struct({
-		sessionID: Schema.NonEmptyString,
-	}),
-})
-export type NotificationSessionIdleEvent = typeof NotificationSessionIdleEvent.Type
 
 export const NotificationOpenCodeEvent = Schema.Union([
-	NotificationSessionLifecycleEvent,
-	NotificationSessionDeletedEvent,
-	NotificationSessionStatusEvent,
-	NotificationSessionIdleEvent,
+	NotificationPermissionAsked,
+	NotificationQuestionAsked,
+	NotificationExecutionTerminal,
 ])
 export type NotificationOpenCodeEvent = typeof NotificationOpenCodeEvent.Type
 
-export const NotificationEventEnvelope = Schema.Struct({
-	type: Schema.String,
-})
-export type NotificationEventEnvelope = typeof NotificationEventEnvelope.Type
+export const NotificationEventEnvelope = Schema.Struct({ type: Schema.String })
+
+export class NotificationSessionLookupError extends Schema.TaggedErrorClass<NotificationSessionLookupError>()(
+	'NotificationSessionLookupError',
+	{ message: Schema.String },
+) {}
+
+export const NotificationSession = Schema.Struct({ parentID: Schema.optional(Schema.String) })
+export type NotificationSession = typeof NotificationSession.Type

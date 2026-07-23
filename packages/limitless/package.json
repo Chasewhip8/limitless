@@ -6,12 +6,9 @@
 	"main": "./index.ts",
 	"types": "./index.ts",
 	"dependencies": {
-		"@opencode-ai/plugin": "1.17.19",
-		"@silvia-odwyer/photon-node": "0.3.4",
-		"@slack/bolt": "5.0.0",
-		"@slack/web-api": "8.0.0",
-		"effect": "4.0.0-beta.83",
-		"image-size": "^2.0.2",
+		"@opencode-ai/plugin": "0.0.0-next-16040",
+		"@opencode-ai/schema": "0.0.0-next-16040",
+		"effect": "4.0.0-beta.98",
 		"vscode-languageserver-protocol": "3.18.2"
 	}
 }

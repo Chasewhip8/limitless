@@ -1,7 +1,6 @@
 import { realpath } from 'node:fs/promises'
 import path from 'node:path'
-import type { ToolContext } from '@opencode-ai/plugin'
-import { tool } from '@opencode-ai/plugin'
+import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Effect, Schema } from 'effect'
 import {
 	CommandResult,
@@ -10,9 +9,10 @@ import {
 	runCommand,
 } from '../core/command'
 import { isMissingPath, toolOperationError } from '../core/errors'
+import { ToolExecutionContext } from '../core/execution'
 import { pathsOverlap, workspaceRoot } from '../core/paths'
 import { managedReposRoot } from '../core/storage'
-import { executeTool } from '../core/tool-boundary'
+import { encodeToolFailure, type ToolExecutor, toolModelOutput } from '../plugin/tool-boundary'
 
 export const AstGrepSearchInput = Schema.Struct({
 	pattern: Schema.NonEmptyString,
@@ -106,11 +106,9 @@ export const astGrepMutationScopeGap = Effect.fn(function* astGrepMutationScopeG
 	return undefined
 })
 
-export const astGrepSearch = Effect.fn(function* astGrepSearch(
-	input: AstGrepSearchInput,
-	context: ToolContext,
-) {
-	const cwd = workspaceRoot(input, context)
+export const astGrepSearch = Effect.fn(function* astGrepSearch(input: AstGrepSearchInput) {
+	const context = yield* ToolExecutionContext
+	const cwd = workspaceRoot(input, context.projectRoot)
 	const args = ['run', '--pattern', input.pattern, '--lang', astGrepLanguage(input)]
 	if (astGrepJson(input)) args.push('--json=pretty')
 	args.push(...relativeTargets(input))
@@ -122,15 +120,13 @@ export const astGrepSearch = Effect.fn(function* astGrepSearch(
 	return AstGrepSearchResult.make(result)
 })
 
-export const astGrepReplace = Effect.fn(function* astGrepReplace(
-	input: AstGrepReplaceInput,
-	context: ToolContext,
-) {
+export const astGrepReplace = Effect.fn(function* astGrepReplace(input: AstGrepReplaceInput) {
+	const context = yield* ToolExecutionContext
 	const dryRun = input.dryRun ?? true
-	const cwd = workspaceRoot(input, context)
+	const cwd = workspaceRoot(input, context.projectRoot)
 	const targets = relativeTargets(input)
 	if (!dryRun) {
-		const gap = yield* astGrepMutationScopeGap(context.worktree, cwd, targets)
+		const gap = yield* astGrepMutationScopeGap(context.projectRoot, cwd, targets)
 		if (gap !== undefined) {
 			return AstGrepMutationBlockedResult.make({ ok: false, error: gap, dryRun })
 		}
@@ -155,50 +151,23 @@ export const astGrepReplace = Effect.fn(function* astGrepReplace(
 	return AstGrepReplaceCommandResult.make({ ...result, dryRun })
 })
 
-export function astGrepTools() {
+export function astGrepTools(executeTool: ToolExecutor) {
 	return {
-		ast_grep_search: tool({
+		ast_grep_search: Tool.make({
 			description: 'Search code with ast-grep using the packaged binary.',
-			args: {
-				pattern: tool.schema.string(),
-				lang: tool.schema.string().optional(),
-				language: tool.schema.string().optional(),
-				paths: tool.schema.array(tool.schema.string()).optional(),
-				workspace: tool.schema.string().optional(),
-				json: tool.schema.boolean().optional(),
-				timeoutMs: tool.schema.number().optional(),
-			},
+			input: AstGrepSearchInput,
+			output: AstGrepSearchResult,
+			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
-				executeTool(
-					'ast_grep_search',
-					AstGrepSearchInput,
-					AstGrepSearchResult,
-					args,
-					context,
-					(input) => astGrepSearch(input, context),
-				),
+				executeTool('ast_grep_search', args, context, astGrepSearch, encodeToolFailure),
 		}),
-		ast_grep_replace: tool({
+		ast_grep_replace: Tool.make({
 			description: 'Rewrite code with ast-grep. Dry-run is enabled by default.',
-			args: {
-				pattern: tool.schema.string(),
-				rewrite: tool.schema.string(),
-				lang: tool.schema.string().optional(),
-				language: tool.schema.string().optional(),
-				paths: tool.schema.array(tool.schema.string()).optional(),
-				workspace: tool.schema.string().optional(),
-				dryRun: tool.schema.boolean().optional(),
-				timeoutMs: tool.schema.number().optional(),
-			},
+			input: AstGrepReplaceInput,
+			output: AstGrepReplaceResult,
+			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
-				executeTool(
-					'ast_grep_replace',
-					AstGrepReplaceInput,
-					AstGrepReplaceResult,
-					args,
-					context,
-					(input) => astGrepReplace(input, context),
-				),
+				executeTool('ast_grep_replace', args, context, astGrepReplace, encodeToolFailure),
 		}),
 	}
 }

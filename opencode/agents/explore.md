@@ -1,7 +1,7 @@
 ---
 description: Disabled; merged into the unified `research` subagent.
 mode: subagent
-disable: true
+disabled: true
 ---
 
 # Explore Disabled

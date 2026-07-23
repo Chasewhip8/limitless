@@ -1,4 +1,3 @@
-import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
 import { Effect, Result, Schema } from 'effect'
 import {
 	CallHierarchyIncomingCallsRequest,
@@ -7,6 +6,7 @@ import {
 	CallHierarchyPrepareRequest,
 } from 'vscode-languageserver-protocol/node'
 import { DEFAULT_TIMEOUT_MS } from '../../core/command'
+import { ToolExecutionContext } from '../../core/execution'
 import { workspaceRelative, workspaceRoot } from '../../core/paths'
 import { loadServerConfigs } from './config'
 import {
@@ -16,7 +16,6 @@ import {
 	resolvePosition,
 	runOnCapableServer,
 	uriToFilePath,
-	withCancellation,
 	withDocument,
 	withOperationDeadline,
 } from './connection'
@@ -190,15 +189,14 @@ const queryOutgoingCalls = Effect.fn(function* queryOutgoingCalls(
 })
 
 const lspCallHierarchyOperation = Effect.fn(function* lspCallHierarchyOperation(
-	pluginInput: PluginInput,
 	input: LspCallHierarchyInput,
-	context: ToolContext,
 ) {
+	const context = yield* ToolExecutionContext
 	const tool = 'lsp_call_hierarchy' as const
-	const workspace = workspaceRoot(input, context)
+	const workspace = workspaceRoot(input, context.projectRoot)
 	const filePath = yield* resolveFile(tool, workspace, input)
 	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const configs = yield* loadServerConfigs(tool)
 	const candidates = yield* requireCandidates(tool, configs, filePath, input.server)
 	return yield* runOnCapableServer(
 		tool,
@@ -320,14 +318,6 @@ const lspCallHierarchyOperation = Effect.fn(function* lspCallHierarchyOperation(
 	)
 })
 
-export const lspCallHierarchy = Effect.fn(function* lspCallHierarchy(
-	pluginInput: PluginInput,
-	input: LspCallHierarchyInput,
-	context: ToolContext,
-) {
-	return yield* withCancellation(
-		'lsp_call_hierarchy',
-		context.abort,
-		lspCallHierarchyOperation(pluginInput, input, context),
-	)
+export const lspCallHierarchy = Effect.fn(function* lspCallHierarchy(input: LspCallHierarchyInput) {
+	return yield* lspCallHierarchyOperation(input)
 })

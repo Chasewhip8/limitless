@@ -1,6 +1,5 @@
 import { lstat } from 'node:fs/promises'
 import path from 'node:path'
-import type { ToolContext } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
 import {
 	CommandResult,
@@ -9,6 +8,7 @@ import {
 	runCommand,
 } from '../../core/command'
 import { isMissingPath, toolInputError, toolOperationError } from '../../core/errors'
+import { ToolExecutionContext } from '../../core/execution'
 import { optionalField } from '../../lib/type-utils'
 import { ensureDirectory, ensureRegularFile } from './filesystem'
 import { artifactDirectoryPath, artifactRelativePath, readArtifactManifest } from './paths'
@@ -102,14 +102,14 @@ const ensureOutputPath = Effect.fn(function* ensureOutputPath(outputPath: string
 
 export const typstCompile = Effect.fn(function* typstCompile(
 	input: TypstCompileInput,
-	context: ToolContext,
 	options: TypstCompileOptions = {},
 ) {
+	const context = yield* ToolExecutionContext
 	const format = input.format ?? TypstFormat.make('pdf')
 	const entry = yield* normalizeEntry(input.entry)
 
-	const manifest = yield* readArtifactManifest(context.worktree, input.artifact, 'typst_compile')
-	const directory = yield* ensureArtifactDirectory(context.worktree, input.artifact)
+	const manifest = yield* readArtifactManifest(context.projectRoot, input.artifact, 'typst_compile')
+	const directory = yield* ensureArtifactDirectory(context.projectRoot, input.artifact)
 	yield* ensureRegularFile(
 		path.join(directory, entry),
 		'Typst entry file does not exist',

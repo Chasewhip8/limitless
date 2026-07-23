@@ -1,4 +1,3 @@
-import type { PluginOptions } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
 import { TrimmedString } from '../../core/command'
 import { schemaErrorMessage } from '../../lib/guards'
@@ -43,7 +42,7 @@ export const DISABLED_GITHUB_CONFIG = GitHubPluginConfigSchema.make({
 })
 
 export const normalizeGitHubPluginConfig = Effect.fn('normalizeGitHubPluginConfig')(function* (
-	options: PluginOptions | undefined,
+	options: unknown,
 ) {
 	if (options === undefined) return DISABLED_GITHUB_CONFIG
 	const decoded = yield* Schema.decodeUnknownEffect(GitHubPluginOptions)(options).pipe(

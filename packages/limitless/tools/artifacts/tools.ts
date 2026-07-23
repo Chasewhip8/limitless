@@ -1,5 +1,5 @@
-import { tool } from '@opencode-ai/plugin'
-import { executeTool } from '../../core/tool-boundary'
+import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
+import { encodeToolFailure, type ToolExecutor, toolModelOutput } from '../../plugin/tool-boundary'
 import { ArtifactCreateInput, ArtifactCreateResult, artifactCreate } from './create'
 import { ArtifactListInput, ArtifactListResult, artifactList } from './list'
 import {
@@ -12,84 +12,62 @@ import {
 } from './templates'
 import { TypstCompileInput, TypstCompileResult, typstCompile } from './typst'
 
-export function artifactTools() {
+export function artifactTools(executeTool: ToolExecutor) {
 	return {
-		artifact_create: tool({
+		artifact_create: Tool.make({
 			description:
 				'Create an empty durable project-scoped artifact workspace or instantiate one from a built-in artifact template.',
-			args: {
-				title: tool.schema.string().optional(),
-				slug: tool.schema.string().optional(),
-				template: tool.schema.string().optional(),
-			},
+			input: ArtifactCreateInput,
+			output: ArtifactCreateResult,
+			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
-				executeTool(
-					'artifact_create',
-					ArtifactCreateInput,
-					ArtifactCreateResult,
-					args,
-					context,
-					(input) => artifactCreate(input, context),
-				),
+				executeTool('artifact_create', args, context, artifactCreate, encodeToolFailure),
 		}),
-		artifact_list: tool({
+		artifact_list: Tool.make({
 			description:
 				'List durable project-scoped artifact workspaces, optionally filtered by template.',
-			args: { template: tool.schema.string().optional() },
+			input: ArtifactListInput,
+			output: ArtifactListResult,
+			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
-				executeTool(
-					'artifact_list',
-					ArtifactListInput,
-					ArtifactListResult,
-					args,
-					context,
-					(input) => artifactList(input, context),
-				),
+				executeTool('artifact_list', args, context, artifactList, encodeToolFailure),
 		}),
-		artifact_templates_list: tool({
+		artifact_templates_list: Tool.make({
 			description: 'List built-in artifact templates available to artifact_create.',
-			args: {},
+			input: ArtifactTemplatesListInput,
+			output: ArtifactTemplatesListResult,
+			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool(
 					'artifact_templates_list',
-					ArtifactTemplatesListInput,
-					ArtifactTemplatesListResult,
 					args,
 					context,
 					artifactTemplatesList,
+					encodeToolFailure,
 				),
 		}),
-		artifact_template_read: tool({
+		artifact_template_read: Tool.make({
 			description:
 				'Read a text file from a built-in artifact template without creating an artifact (for example the sphere-showcase authoring reference).',
-			args: { template: tool.schema.string(), file: tool.schema.string() },
+			input: ArtifactTemplateReadInput,
+			output: ArtifactTemplateReadResult,
+			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool(
 					'artifact_template_read',
-					ArtifactTemplateReadInput,
-					ArtifactTemplateReadResult,
 					args,
 					context,
 					artifactTemplateRead,
+					encodeToolFailure,
 				),
 		}),
-		typst_compile: tool({
+		typst_compile: Tool.make({
 			description: 'Compile a Typst document artifact to PDF using the packaged Typst binary.',
-			args: {
-				artifact: tool.schema.string(),
-				entry: tool.schema.string().optional(),
-				format: tool.schema.string().optional(),
-				timeoutMs: tool.schema.number().optional(),
-			},
+			input: TypstCompileInput,
+			output: TypstCompileResult,
+			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
-				executeTool(
-					'typst_compile',
-					TypstCompileInput,
-					TypstCompileResult,
-					args,
-					context,
-					(input) => typstCompile(input, context),
-				),
+				executeTool('typst_compile', args, context, typstCompile, encodeToolFailure),
 		}),
 	}
 }

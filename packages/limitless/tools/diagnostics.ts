@@ -1,11 +1,11 @@
 import path from 'node:path'
-import type { ToolContext } from '@opencode-ai/plugin'
-import { tool } from '@opencode-ai/plugin'
+import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Effect, Schema } from 'effect'
 import { CommandResult, runCommand } from '../core/command'
+import { ToolExecutionContext } from '../core/execution'
 import { findExecutable, findUp } from '../core/filesystem'
 import { workspacePath, workspaceRoot } from '../core/paths'
-import { executeTool } from '../core/tool-boundary'
+import { encodeToolFailure, type ToolExecutor, toolModelOutput } from '../plugin/tool-boundary'
 
 export const DiagnosticsInput = Schema.Struct({
 	workspace: Schema.optional(Schema.String),
@@ -75,9 +75,9 @@ function skippedCheck(name: string, reason: string): SkippedCheck {
 
 export const lspDiagnostics = Effect.fn(function* lspDiagnostics(
 	input: typeof DiagnosticsInput.Type,
-	context: ToolContext,
 ) {
-	const cwd = workspaceRoot(input, context)
+	const context = yield* ToolExecutionContext
+	const cwd = workspaceRoot(input, context.projectRoot)
 	const filePath = input.filePath ?? input.path ?? '.'
 	const target = workspacePath(cwd, filePath)
 	const checks: Array<DiagnosticCheck> = []
@@ -123,24 +123,15 @@ export const lspDiagnostics = Effect.fn(function* lspDiagnostics(
 	return summarizeDiagnostics(checks)
 })
 
-export function diagnosticsTools() {
+export function diagnosticsTools(executeTool: ToolExecutor) {
 	return {
-		lsp_diagnostics: tool({
+		lsp_diagnostics: Tool.make({
 			description: 'Run safe local diagnostics for TS/JS projects.',
-			args: {
-				workspace: tool.schema.string().optional(),
-				filePath: tool.schema.string().optional(),
-				path: tool.schema.string().optional(),
-			},
+			input: DiagnosticsInput,
+			output: DiagnosticsResult,
+			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
-				executeTool(
-					'lsp_diagnostics',
-					DiagnosticsInput,
-					DiagnosticsResult,
-					args,
-					context,
-					(input) => lspDiagnostics(input, context),
-				),
+				executeTool('lsp_diagnostics', args, context, lspDiagnostics, encodeToolFailure),
 		}),
 	}
 }

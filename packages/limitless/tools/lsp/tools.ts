@@ -1,9 +1,8 @@
-import type { PluginInput } from '@opencode-ai/plugin'
-import { tool } from '@opencode-ai/plugin'
-import { executeTool } from '../../core/tool-boundary'
+import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
+import { type ToolExecutor, toolModelOutput } from '../../plugin/tool-boundary'
 import { LspCallHierarchyInput, LspCallHierarchyResult, lspCallHierarchy } from './call-hierarchy'
 import { LspDefinitionInput, LspDefinitionResult, lspDefinition } from './definition'
-import { lspToolFailureEncoder } from './errors'
+import { encodeLspToolFailure } from './errors'
 import { LspHoverInput, LspHoverResult, lspHover } from './hover'
 import {
 	LspImplementationInput,
@@ -14,134 +13,67 @@ import { LspReferencesInput, LspReferencesResult, lspReferences } from './refere
 import { LspRenameInput, LspRenameResult, lspRename } from './rename'
 import { LspSymbolsInput, LspSymbolsResult, lspSymbols } from './symbols'
 
-const pathArgs = {
-	workspace: tool.schema.string().optional(),
-	filePath: tool.schema.string().optional(),
-	path: tool.schema.string().optional(),
-}
-
-const positionArgs = {
-	...pathArgs,
-	server: tool.schema.string().optional(),
-	timeoutMs: tool.schema.number().optional(),
-	offset: tool.schema.number().optional(),
-	line: tool.schema.number().optional(),
-	character: tool.schema.number().optional(),
-}
-
-export function lspTools(pluginInput: PluginInput) {
+export function lspTools(executeTool: ToolExecutor) {
 	return {
-		lsp_definition: tool({
+		lsp_definition: Tool.make({
 			description:
 				'Find definitions, declarations, and type definitions supported by the configured language server.',
-			args: { ...positionArgs, maxResults: tool.schema.number().optional() },
-			execute: (args, context) =>
-				executeTool(
-					'lsp_definition',
-					LspDefinitionInput,
-					LspDefinitionResult,
-					args,
-					context,
-					(input) => lspDefinition(pluginInput, input, context),
-					lspToolFailureEncoder,
-				),
+			input: LspDefinitionInput,
+			output: LspDefinitionResult,
+			toModelOutput: toolModelOutput,
+			execute: (input, context) =>
+				executeTool('lsp_definition', input, context, lspDefinition, encodeLspToolFailure),
 		}),
-		lsp_hover: tool({
+		lsp_hover: Tool.make({
 			description: 'Show normalized hover information at a zero-based file position.',
-			args: positionArgs,
-			execute: (args, context) =>
-				executeTool(
-					'lsp_hover',
-					LspHoverInput,
-					LspHoverResult,
-					args,
-					context,
-					(input) => lspHover(pluginInput, input, context),
-					lspToolFailureEncoder,
-				),
+			input: LspHoverInput,
+			output: LspHoverResult,
+			toModelOutput: toolModelOutput,
+			execute: (input, context) =>
+				executeTool('lsp_hover', input, context, lspHover, encodeLspToolFailure),
 		}),
-		lsp_implementation: tool({
+		lsp_implementation: Tool.make({
 			description: 'Find implementations through the configured language server.',
-			args: { ...positionArgs, maxResults: tool.schema.number().optional() },
-			execute: (args, context) =>
-				executeTool(
-					'lsp_implementation',
-					LspImplementationInput,
-					LspImplementationResult,
-					args,
-					context,
-					(input) => lspImplementation(pluginInput, input, context),
-					lspToolFailureEncoder,
-				),
+			input: LspImplementationInput,
+			output: LspImplementationResult,
+			toModelOutput: toolModelOutput,
+			execute: (input, context) =>
+				executeTool('lsp_implementation', input, context, lspImplementation, encodeLspToolFailure),
 		}),
-		lsp_call_hierarchy: tool({
+		lsp_call_hierarchy: Tool.make({
 			description:
 				'Find incoming and outgoing calls for every prepared call hierarchy item at a file position.',
-			args: { ...positionArgs, maxResults: tool.schema.number().optional() },
-			execute: (args, context) =>
-				executeTool(
-					'lsp_call_hierarchy',
-					LspCallHierarchyInput,
-					LspCallHierarchyResult,
-					args,
-					context,
-					(input) => lspCallHierarchy(pluginInput, input, context),
-					lspToolFailureEncoder,
-				),
+			input: LspCallHierarchyInput,
+			output: LspCallHierarchyResult,
+			toModelOutput: toolModelOutput,
+			execute: (input, context) =>
+				executeTool('lsp_call_hierarchy', input, context, lspCallHierarchy, encodeLspToolFailure),
 		}),
-		lsp_references: tool({
+		lsp_references: Tool.make({
 			description:
 				'Find references through the configured language server for a zero-based file position.',
-			args: {
-				...positionArgs,
-				includeDeclaration: tool.schema.boolean().optional(),
-				maxResults: tool.schema.number().optional(),
-			},
-			execute: (args, context) =>
-				executeTool(
-					'lsp_references',
-					LspReferencesInput,
-					LspReferencesResult,
-					args,
-					context,
-					(input) => lspReferences(pluginInput, input, context),
-					lspToolFailureEncoder,
-				),
+			input: LspReferencesInput,
+			output: LspReferencesResult,
+			toModelOutput: toolModelOutput,
+			execute: (input, context) =>
+				executeTool('lsp_references', input, context, lspReferences, encodeLspToolFailure),
 		}),
-		lsp_symbols: tool({
+		lsp_symbols: Tool.make({
 			description: 'Find document or workspace symbols through configured language servers.',
-			args: {
-				...pathArgs,
-				server: tool.schema.string().optional(),
-				timeoutMs: tool.schema.number().optional(),
-				query: tool.schema.string().optional(),
-				maxResults: tool.schema.number().optional(),
-			},
-			execute: (args, context) =>
-				executeTool(
-					'lsp_symbols',
-					LspSymbolsInput,
-					LspSymbolsResult,
-					args,
-					context,
-					(input) => lspSymbols(pluginInput, input, context),
-					lspToolFailureEncoder,
-				),
+			input: LspSymbolsInput,
+			output: LspSymbolsResult,
+			toModelOutput: toolModelOutput,
+			execute: (input, context) =>
+				executeTool('lsp_symbols', input, context, lspSymbols, encodeLspToolFailure),
 		}),
-		lsp_rename: tool({
+		lsp_rename: Tool.make({
 			description:
 				'Preview rename edits from the configured language server without writing files.',
-			args: { ...positionArgs, newName: tool.schema.string() },
-			execute: (args, context) =>
-				executeTool(
-					'lsp_rename',
-					LspRenameInput,
-					LspRenameResult,
-					args,
-					context,
-					(input) => lspRename(pluginInput, input, context),
-					lspToolFailureEncoder,
-				),
+			input: LspRenameInput,
+			output: LspRenameResult,
+			toModelOutput: toolModelOutput,
+			execute: (input, context) =>
+				executeTool('lsp_rename', input, context, lspRename, encodeLspToolFailure),
 		}),
 	}
 }

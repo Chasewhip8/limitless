@@ -4,30 +4,26 @@ import os from 'node:os'
 import path from 'node:path'
 import { PassThrough, Writable } from 'node:stream'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
-import { Effect, Result, Schema } from 'effect'
+import { Deferred, Effect, Fiber, Result, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { createProtocolConnection, ShutdownRequest } from 'vscode-languageserver-protocol/node'
 import { toolOperationError } from '../core/errors'
-import { executeTool } from '../core/tool-boundary'
 import {
-	LspCallHierarchyInput,
-	LspCallHierarchyResult,
-	lspCallHierarchy,
-} from '../tools/lsp/call-hierarchy'
-import { LspServerConfig } from '../tools/lsp/config'
+	ToolExecutionContext,
+	type ToolExecutionContext as ToolExecutionContextType,
+} from '../core/execution'
+import { LspCallHierarchyResult } from '../tools/lsp/call-hierarchy'
+import { decodeLspConfig, LspConfig, LspServerConfig, loadServerConfigs } from '../tools/lsp/config'
 import { connectionResource, withDocument } from '../tools/lsp/connection'
-import { LspDefinitionInput, LspDefinitionResult, lspDefinition } from '../tools/lsp/definition'
-import { LspToolFailurePayload, lspToolFailureEncoder } from '../tools/lsp/errors'
-import { LspHoverInput, LspHoverResult, lspHover } from '../tools/lsp/hover'
-import {
-	LspImplementationInput,
-	LspImplementationResult,
-	lspImplementation,
-} from '../tools/lsp/implementation'
+import { LspDefinitionResult } from '../tools/lsp/definition'
+import { LspToolFailurePayload } from '../tools/lsp/errors'
+import { LspHoverResult } from '../tools/lsp/hover'
+import { LspImplementationResult } from '../tools/lsp/implementation'
 import { LspReferencesInput, LspReferencesResult, lspReferences } from '../tools/lsp/references'
-import { LspRenameInput, LspRenameResult, lspRename } from '../tools/lsp/rename'
-import { LspSymbolsInput, LspSymbolsResult, lspSymbols } from '../tools/lsp/symbols'
+import { LspRenameResult } from '../tools/lsp/rename'
+import { LspSymbolsResult } from '../tools/lsp/symbols'
+import { lspTools } from '../tools/lsp/tools'
+import { settleTestTool, testToolExecution, testToolExecutor } from './execution'
 
 const fakeServerPath = fileURLToPath(new URL('./fixtures/fake-lsp-server.mjs', import.meta.url))
 const sampleContent = 'const foo = 1\nfoo + foo\n'
@@ -60,22 +56,11 @@ const FakeLspLogEntry = Schema.Struct({
 })
 type FakeLspLogEntry = typeof FakeLspLogEntry.Type
 
-function context(worktree: string, abort: AbortSignal = new AbortController().signal): ToolContext {
-	return {
-		sessionID: 'session',
-		messageID: 'message',
-		agent: 'limitless',
-		directory: worktree,
-		worktree,
-		abort,
-		metadata: () => undefined,
-		ask: () => {
-			throw new Error('ask is not used by LSP tests.')
-		},
-	}
+function context(worktree: string): ToolExecutionContextType {
+	return testToolExecution(worktree)
 }
 
-function pluginInput(
+function lspOptions(
 	env: Record<string, string> = {},
 	lsp: unknown = {
 		fake: {
@@ -84,16 +69,8 @@ function pluginInput(
 			env,
 		},
 	},
-): PluginInput {
-	const input = {
-		client: {
-			config: {
-				get: () => Promise.resolve({ data: { lsp } }),
-			},
-		},
-	}
-	// The SDK client surface is broad; this operational fixture only implements config.get.
-	return input as unknown as PluginInput
+) {
+	return { lsp }
 }
 
 function testPromise<T>(evaluate: () => Promise<T>) {
@@ -152,10 +129,27 @@ function withWorkspace<T, E, R>(body: (workspace: string) => Effect.Effect<T, E,
 	)
 }
 
-function decodeToolResult(result: Awaited<ReturnType<typeof executeTool>>) {
-	return Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(
-		typeof result === 'string' ? result : result.output,
-	)
+function runLspTool(
+	name: keyof ReturnType<typeof lspTools>,
+	workspace: string,
+	input: unknown,
+	env: Record<string, string> = {},
+	lsp?: unknown,
+) {
+	const ctx = context(workspace)
+	return Effect.gen(function* () {
+		const config = yield* decodeLspConfig(lspOptions(env, lsp))
+		const result = yield* Effect.result(
+			settleTestTool(lspTools(testToolExecutor(ctx, config.servers))[name], input, ctx),
+		)
+		if (Result.isSuccess(result)) return result.success.structured
+		return (
+			result.failure.metadata ?? {
+				error: result.failure._tag,
+				message: result.failure.message,
+			}
+		)
+	})
 }
 
 function runReferences(
@@ -164,18 +158,7 @@ function runReferences(
 	env: Record<string, string> = {},
 	lsp?: unknown,
 ) {
-	const ctx = context(workspace)
-	return testPromise(() =>
-		executeTool(
-			'lsp_references',
-			LspReferencesInput,
-			LspReferencesResult,
-			input,
-			ctx,
-			(args) => lspReferences(pluginInput(env, lsp), args, ctx),
-			lspToolFailureEncoder,
-		),
-	).pipe(Effect.flatMap(decodeToolResult))
+	return runLspTool('lsp_references', workspace, input, env, lsp)
 }
 
 function runDefinition(
@@ -184,96 +167,43 @@ function runDefinition(
 	env: Record<string, string> = {},
 	lsp?: unknown,
 ) {
-	const ctx = context(workspace)
-	return testPromise(() =>
-		executeTool(
-			'lsp_definition',
-			LspDefinitionInput,
-			LspDefinitionResult,
-			input,
-			ctx,
-			(args) => lspDefinition(pluginInput(env, lsp), args, ctx),
-			lspToolFailureEncoder,
-		),
-	).pipe(Effect.flatMap(decodeToolResult))
+	return runLspTool('lsp_definition', workspace, input, env, lsp)
 }
 
 function runHover(workspace: string, input: unknown, env: Record<string, string> = {}) {
-	const ctx = context(workspace)
-	return testPromise(() =>
-		executeTool(
-			'lsp_hover',
-			LspHoverInput,
-			LspHoverResult,
-			input,
-			ctx,
-			(args) => lspHover(pluginInput(env), args, ctx),
-			lspToolFailureEncoder,
-		),
-	).pipe(Effect.flatMap(decodeToolResult))
+	return runLspTool('lsp_hover', workspace, input, env)
 }
 
 function runImplementation(workspace: string, input: unknown, env: Record<string, string> = {}) {
-	const ctx = context(workspace)
-	return testPromise(() =>
-		executeTool(
-			'lsp_implementation',
-			LspImplementationInput,
-			LspImplementationResult,
-			input,
-			ctx,
-			(args) => lspImplementation(pluginInput(env), args, ctx),
-			lspToolFailureEncoder,
-		),
-	).pipe(Effect.flatMap(decodeToolResult))
+	return runLspTool('lsp_implementation', workspace, input, env)
 }
 
 function runCallHierarchy(workspace: string, input: unknown, env: Record<string, string> = {}) {
-	const ctx = context(workspace)
-	return testPromise(() =>
-		executeTool(
-			'lsp_call_hierarchy',
-			LspCallHierarchyInput,
-			LspCallHierarchyResult,
-			input,
-			ctx,
-			(args) => lspCallHierarchy(pluginInput(env), args, ctx),
-			lspToolFailureEncoder,
-		),
-	).pipe(Effect.flatMap(decodeToolResult))
+	return runLspTool('lsp_call_hierarchy', workspace, input, env)
 }
 
 function runSymbols(workspace: string, input: unknown, env: Record<string, string> = {}) {
-	const ctx = context(workspace)
-	return testPromise(() =>
-		executeTool(
-			'lsp_symbols',
-			LspSymbolsInput,
-			LspSymbolsResult,
-			input,
-			ctx,
-			(args) => lspSymbols(pluginInput(env), args, ctx),
-			lspToolFailureEncoder,
-		),
-	).pipe(Effect.flatMap(decodeToolResult))
+	return runLspTool('lsp_symbols', workspace, input, env)
 }
 
 function runRename(workspace: string, input: unknown, env: Record<string, string> = {}) {
-	const ctx = context(workspace)
-	return testPromise(() =>
-		executeTool(
-			'lsp_rename',
-			LspRenameInput,
-			LspRenameResult,
-			input,
-			ctx,
-			(args) => lspRename(pluginInput(env), args, ctx),
-			lspToolFailureEncoder,
-		),
-	).pipe(Effect.flatMap(decodeToolResult))
+	return runLspTool('lsp_rename', workspace, input, env)
 }
 
 describe('LSP tools', () => {
+	test('reads generated Limitless LSP options through the injected capability', () =>
+		Effect.runPromise(
+			withWorkspace(() =>
+				Effect.gen(function* () {
+					const config = yield* decodeLspConfig(lspOptions())
+					const configs = yield* loadServerConfigs('lsp_test').pipe(
+						Effect.provideService(LspConfig, config),
+					)
+					expect(configs.map((config) => config.id)).toEqual(['fake'])
+				}),
+			),
+		))
+
 	test('request write failures do not escape as unhandled rejections', () =>
 		Effect.runPromise(
 			Effect.scoped(
@@ -1206,34 +1136,38 @@ describe('LSP tools', () => {
 		Effect.runPromise(
 			withWorkspace((workspace) =>
 				Effect.gen(function* () {
-					const controller = new AbortController()
-					const ctx = context(workspace, controller.signal)
+					const ctx = context(workspace)
 					const markerName = 'cancel-dispatched'
 					const markerPath = path.join(workspace, markerName)
 					const logPath = path.join(workspace, 'cancel-lsp.log')
+					const dispatched = yield* Deferred.make<void>()
 					yield* Effect.acquireRelease(
 						Effect.sync(() =>
 							watch(workspace, (_event, fileName) => {
-								if (fileName?.toString() === markerName) controller.abort()
+								if (fileName?.toString() === markerName)
+									Deferred.doneUnsafe(dispatched, Effect.void)
 							}),
 						),
 						(fileWatcher) => Effect.sync(() => fileWatcher.close()),
 					)
-					const result = yield* Effect.result(
-						lspReferences(
-							pluginInput({
-								FAKE_LSP_HOLD_REFERENCES: '1',
-								FAKE_LSP_LATE_RESPONSE: '1',
-								FAKE_LSP_LOG: logPath,
-								FAKE_LSP_REQUEST_MARKER: markerPath,
-							}),
-							LspReferencesInput.make({ filePath: 'sample.ts', offset: 6 }),
-							ctx,
-						),
+					const config = yield* decodeLspConfig(
+						lspOptions({
+							FAKE_LSP_HOLD_REFERENCES: '1',
+							FAKE_LSP_LATE_RESPONSE: '1',
+							FAKE_LSP_LOG: logPath,
+							FAKE_LSP_REQUEST_MARKER: markerPath,
+						}),
 					)
+					const fiber = yield* lspReferences(
+						LspReferencesInput.make({ filePath: 'sample.ts', offset: 6 }),
+					).pipe(
+						Effect.provideService(LspConfig, config),
+						Effect.provideService(ToolExecutionContext, ctx),
+						Effect.forkChild,
+					)
+					yield* Deferred.await(dispatched)
+					yield* Fiber.interrupt(fiber)
 
-					expect(Result.isFailure(result)).toBe(true)
-					if (Result.isFailure(result)) expect(result.failure.message).toContain('cancelled')
 					const entries = yield* readLspLog(logPath)
 					const methods = clientMethods(entries)
 					expect(methods.indexOf('$/cancelRequest')).toBeGreaterThan(
@@ -1308,42 +1242,39 @@ describe('LSP tools', () => {
 			),
 		))
 
-	test('rejects malformed configured server fields with server context', () =>
+	test('rejects malformed generated server options during plugin activation', () =>
 		Effect.runPromise(
-			withWorkspace((workspace) =>
+			withWorkspace(() =>
 				Effect.gen(function* () {
-					const raw = yield* runReferences(
-						workspace,
-						{ filePath: 'sample.ts', offset: 6 },
-						{},
-						{
-							fake: {
-								command: [process.execPath, fakeServerPath],
-								extensions: ['.ts'],
-								initialization: 42,
-							},
-						},
+					const result = yield* Effect.result(
+						decodeLspConfig(
+							lspOptions(
+								{},
+								{
+									fake: {
+										command: [process.execPath, fakeServerPath],
+										extensions: ['.ts'],
+										initialization: 42,
+									},
+								},
+							),
+						),
 					)
-					const payload = yield* Schema.decodeUnknownEffect(LspToolFailurePayload)(raw)
 
-					expect(payload.server).toBe('fake')
-					expect(payload.message).toEqual(
-						expect.stringContaining('Invalid OpenCode LSP configuration'),
-					)
+					expect(Result.isFailure(result)).toBe(true)
+					if (Result.isFailure(result)) {
+						expect(result.failure.message).toContain('Invalid Limitless LSP plugin option for fake')
+						expect(result.failure.message).toContain('initialization')
+					}
 				}),
 			),
 		))
 
-	test('treats a disabled global LSP config as having no servers', () =>
+	test('treats generated empty LSP options as having no servers', () =>
 		Effect.runPromise(
 			withWorkspace((workspace) =>
 				Effect.gen(function* () {
-					const raw = yield* runReferences(
-						workspace,
-						{ filePath: 'sample.ts', offset: 6 },
-						{},
-						false,
-					)
+					const raw = yield* runReferences(workspace, { filePath: 'sample.ts', offset: 6 }, {}, {})
 					const payload = yield* Schema.decodeUnknownEffect(LspToolFailurePayload)(raw)
 
 					expect(payload.message).toContain('No LSP servers are configured')

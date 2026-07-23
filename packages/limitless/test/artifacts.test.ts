@@ -1,49 +1,28 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { Effect, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { executeTool } from '../core/tool-boundary'
-import {
-	ArtifactCreateInput,
-	ArtifactCreateResult,
-	artifactCreate,
-} from '../tools/artifacts/create'
-import {
-	ArtifactListInput,
-	ArtifactListResult,
-	artifactList,
-	artifactSlugFromString,
-} from '../tools/artifacts/list'
+import { ToolExecutionContext } from '../core/execution'
+import { ArtifactCreateResult } from '../tools/artifacts/create'
+import { ArtifactListResult, artifactSlugFromString } from '../tools/artifacts/list'
 import {
 	artifactDirectoryPath,
 	artifactRelativePath,
 	artifactsRoot,
 } from '../tools/artifacts/paths'
 import {
-	ArtifactTemplateReadInput,
 	ArtifactTemplateReadResult,
-	ArtifactTemplatesListInput,
 	ArtifactTemplatesListResult,
-	artifactTemplateRead,
-	artifactTemplatesList,
 } from '../tools/artifacts/templates'
-import { TypstCompileInput, TypstCompileResult, typstCompile } from '../tools/artifacts/typst'
+import { artifactTools } from '../tools/artifacts/tools'
+import { TypstCompileInput, type TypstCompileResult, typstCompile } from '../tools/artifacts/typst'
+import { settleTestTool, testToolExecution, testToolExecutor } from './execution'
 
-type ArtifactContext = Parameters<typeof artifactCreate>[1]
+type ArtifactContext = ToolExecutionContext
 
 function context(worktree: string, sessionID = 'session'): ArtifactContext {
-	return {
-		sessionID,
-		messageID: 'message',
-		agent: 'limitless',
-		directory: worktree,
-		worktree,
-		abort: new AbortController().signal,
-		metadata: () => undefined,
-		ask: () => {
-			throw new Error('ask is not used by artifact tests.')
-		},
-	}
+	return testToolExecution(worktree, sessionID)
 }
 
 async function withWorkspace<T>(body: (workspace: string) => Promise<T>): Promise<T> {
@@ -55,15 +34,21 @@ async function withWorkspace<T>(body: (workspace: string) => Promise<T>): Promis
 	}
 }
 
-function parseToolOutput<Input, Decoded>(
-	schema: { readonly make: (input: Input) => Decoded },
-	result: Awaited<ReturnType<typeof executeTool>>,
-): Decoded {
-	return schema.make(JSON.parse(typeof result === 'string' ? result : result.output))
-}
-
-function parseUnknownToolOutput(result: Awaited<ReturnType<typeof executeTool>>): unknown {
-	return JSON.parse(typeof result === 'string' ? result : result.output) as unknown
+function runArtifactTool(
+	name: keyof ReturnType<typeof artifactTools>,
+	input: unknown,
+	ctx: ArtifactContext,
+) {
+	const definition = artifactTools(testToolExecutor(ctx))[name]
+	return Effect.runPromise(
+		settleTestTool(definition, input, ctx).pipe(
+			Effect.match({
+				onFailure: (failure) =>
+					failure.metadata ?? { error: failure._tag, message: failure.message },
+				onSuccess: (result) => result.structured,
+			}),
+		),
+	)
 }
 
 async function runArtifactCreate(
@@ -74,15 +59,11 @@ async function runArtifactCreate(
 	},
 	ctx: ArtifactContext,
 ): Promise<ArtifactCreateResult> {
-	const result = await executeTool(
-		'artifact_create',
-		ArtifactCreateInput,
-		ArtifactCreateResult,
-		input,
-		ctx,
-		(args) => artifactCreate(args, ctx),
+	return Effect.runPromise(
+		Schema.decodeUnknownEffect(ArtifactCreateResult)(
+			await runArtifactTool('artifact_create', input, ctx),
+		),
 	)
-	return parseToolOutput(ArtifactCreateResult, result)
 }
 
 async function runArtifactCreatePayload(
@@ -93,72 +74,44 @@ async function runArtifactCreatePayload(
 	},
 	ctx: ArtifactContext,
 ): Promise<unknown> {
-	const result = await executeTool(
-		'artifact_create',
-		ArtifactCreateInput,
-		ArtifactCreateResult,
-		input,
-		ctx,
-		(args) => artifactCreate(args, ctx),
-	)
-	return parseUnknownToolOutput(result)
+	return runArtifactTool('artifact_create', input, ctx)
 }
 
 async function runArtifactList(
 	input: { readonly template?: string },
 	ctx: ArtifactContext,
 ): Promise<ArtifactListResult> {
-	const result = await executeTool(
-		'artifact_list',
-		ArtifactListInput,
-		ArtifactListResult,
-		input,
-		ctx,
-		(args) => artifactList(args, ctx),
+	return Effect.runPromise(
+		Schema.decodeUnknownEffect(ArtifactListResult)(
+			await runArtifactTool('artifact_list', input, ctx),
+		),
 	)
-	return parseToolOutput(ArtifactListResult, result)
 }
 
 async function runTemplatesList(ctx: ArtifactContext): Promise<ArtifactTemplatesListResult> {
-	const result = await executeTool(
-		'artifact_templates_list',
-		ArtifactTemplatesListInput,
-		ArtifactTemplatesListResult,
-		{},
-		ctx,
-		(args) => artifactTemplatesList(args),
+	return Effect.runPromise(
+		Schema.decodeUnknownEffect(ArtifactTemplatesListResult)(
+			await runArtifactTool('artifact_templates_list', {}, ctx),
+		),
 	)
-	return parseToolOutput(ArtifactTemplatesListResult, result)
 }
 
 async function runTemplateRead(
 	input: { readonly template?: string; readonly file?: string },
 	ctx: ArtifactContext,
 ): Promise<ArtifactTemplateReadResult> {
-	const result = await executeTool(
-		'artifact_template_read',
-		ArtifactTemplateReadInput,
-		ArtifactTemplateReadResult,
-		input,
-		ctx,
-		(args) => artifactTemplateRead(args),
+	return Effect.runPromise(
+		Schema.decodeUnknownEffect(ArtifactTemplateReadResult)(
+			await runArtifactTool('artifact_template_read', input, ctx),
+		),
 	)
-	return parseToolOutput(ArtifactTemplateReadResult, result)
 }
 
 async function runTemplateReadPayload(
 	input: { readonly template?: string; readonly file?: string },
 	ctx: ArtifactContext,
 ): Promise<unknown> {
-	const result = await executeTool(
-		'artifact_template_read',
-		ArtifactTemplateReadInput,
-		ArtifactTemplateReadResult,
-		input,
-		ctx,
-		(args) => artifactTemplateRead(args),
-	)
-	return parseUnknownToolOutput(result)
+	return runArtifactTool('artifact_template_read', input, ctx)
 }
 
 async function runTypstCompile(
@@ -171,15 +124,10 @@ async function runTypstCompile(
 	ctx: ArtifactContext,
 	typstBin: string,
 ): Promise<TypstCompileResult> {
-	const result = await executeTool(
-		'typst_compile',
-		TypstCompileInput,
-		TypstCompileResult,
-		input,
-		ctx,
-		(args) => typstCompile(args, ctx, { typstBin }),
+	const decoded = await Effect.runPromise(Schema.decodeUnknownEffect(TypstCompileInput)(input))
+	return Effect.runPromise(
+		typstCompile(decoded, { typstBin }).pipe(Effect.provideService(ToolExecutionContext, ctx)),
 	)
-	return parseToolOutput(TypstCompileResult, result)
 }
 
 async function runTypstCompilePayload(
@@ -191,15 +139,7 @@ async function runTypstCompilePayload(
 	},
 	ctx: ArtifactContext,
 ): Promise<unknown> {
-	const result = await executeTool(
-		'typst_compile',
-		TypstCompileInput,
-		TypstCompileResult,
-		input,
-		ctx,
-		(args) => typstCompile(args, ctx),
-	)
-	return parseUnknownToolOutput(result)
+	return runArtifactTool('typst_compile', input, ctx)
 }
 
 describe('artifact slug validation', () => {
@@ -367,9 +307,8 @@ describe('template and typst tools', () => {
 				{ artifact: 'document', timeoutMs: 0 },
 			]) {
 				await expect(runTypstCompilePayload(input, context(workspace))).resolves.toMatchObject({
-					ok: false,
-					error: 'ToolInputError',
-					tool: 'typst_compile',
+					error: 'LLM.ToolFailure',
+					message: expect.stringContaining('Invalid tool input'),
 				})
 			}
 		})
@@ -523,16 +462,25 @@ describe('template and typst tools', () => {
 	test('rejects unknown, traversal, directory, and binary template file reads', async () => {
 		await withWorkspace(async (workspace) => {
 			const ctx = context(workspace)
-			const rejected = [
-				{ template: 'sphere-showcase', file: 'missing.typ' },
+			const invalidInputs = [
 				{ template: 'sphere-showcase', file: 'sphere/' },
 				{ template: 'sphere-showcase', file: '../sphere/main.typ' },
 				{ template: 'sphere-showcase', file: '/etc/passwd' },
+			]
+			for (const input of invalidInputs) {
+				await expect(runTemplateReadPayload(input, ctx)).resolves.toMatchObject({
+					error: 'LLM.ToolFailure',
+					message: expect.stringContaining('Invalid tool input'),
+				})
+			}
+
+			const unavailableFiles = [
+				{ template: 'sphere-showcase', file: 'missing.typ' },
 				{ template: 'unknown-template', file: 'main.typ' },
 				{ template: 'sphere-showcase', file: 'assets/cover.png' },
 				{ template: 'sphere-showcase', file: 'assets/fonts/Inter-Variable.ttf' },
 			]
-			for (const input of rejected) {
+			for (const input of unavailableFiles) {
 				await expect(runTemplateReadPayload(input, ctx)).resolves.toMatchObject({
 					ok: false,
 					error: 'ToolInputError',

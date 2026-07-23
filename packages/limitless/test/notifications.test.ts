@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
-import { describe, expect, test, vi } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { resolveNotificationConfig } from '../index'
 import { isNotificationEventEnabled } from '../integrations/notifications/events'
 import {
@@ -20,7 +20,7 @@ describe('normalizeNotificationConfig', () => {
 
 		expect(config.enabled).toBe(false)
 		expect(config.command).toBeNull()
-		expect(config.events).toEqual({ complete: true, question: true })
+		expect(config.events).toEqual({ complete: true, permission: true, question: true })
 		expect(config.timeoutMs).toBe(DEFAULT_NOTIFICATION_TIMEOUT_MS)
 	})
 
@@ -39,6 +39,7 @@ describe('normalizeNotificationConfig', () => {
 		expect(config.command).toEqual(['notify-send', 'OpenCode needs attention'])
 		expect(config.timeoutMs).toBe(1000)
 		expect(isNotificationEventEnabled(config, 'complete')).toBe(true)
+		expect(isNotificationEventEnabled(config, 'permission')).toBe(true)
 		expect(isNotificationEventEnabled(config, 'question')).toBe(true)
 	})
 
@@ -53,23 +54,18 @@ describe('normalizeNotificationConfig', () => {
 		expect((error satisfies NotificationConfigError).message).toContain('notifications')
 	})
 
-	test('recovers once with a warning at the plugin boundary', async () => {
-		const warn = vi.spyOn(console, 'log').mockImplementation(() => {})
-		const config = await runEffect(
-			resolveNotificationConfig({
-				notifications: {
-					enable: true,
-					command: ['notify-send'],
-					events: { complete: 'yes' },
-				},
-			}),
-		)
-
-		expect(config.enabled).toBe(false)
-		expect(config.command).toBeNull()
-		expect(warn).toHaveBeenCalledTimes(1)
-		expect(warn.mock.calls[0]?.join(' ')).toContain('[limitless] invalid notifications config:')
-		warn.mockRestore()
+	test('rejects malformed present config at the plugin boundary', async () => {
+		await expect(
+			runEffect(
+				resolveNotificationConfig({
+					notifications: {
+						enable: true,
+						command: ['notify-send'],
+						events: { complete: 'yes' },
+					},
+				}),
+			),
+		).rejects.toThrow()
 	})
 
 	test('respects per-event toggles', async () => {
@@ -78,18 +74,19 @@ describe('normalizeNotificationConfig', () => {
 				notifications: {
 					enable: true,
 					command: ['notify-send', 'OpenCode needs attention'],
-					events: { complete: false, question: true },
+					events: { complete: false, permission: false, question: true },
 				},
 			}),
 		)
 
 		expect(isNotificationEventEnabled(config, 'complete')).toBe(false)
+		expect(isNotificationEventEnabled(config, 'permission')).toBe(false)
 		expect(isNotificationEventEnabled(config, 'question')).toBe(true)
 	})
 })
 
 describe('notification runner', () => {
-	test('tracks child sessions, deduplicates idle, resets on busy, and cleans up deletion', async () => {
+	test('handles native V2 permission, question, and every terminal execution event', async () => {
 		const directory = mkdtempSync(join(tmpdir(), 'limitless-notifications-'))
 		const marker = join(directory, 'notifications')
 		const config = await runEffect(
@@ -106,52 +103,59 @@ describe('notification runner', () => {
 			}),
 		)
 		const runner = await runEffect(createNotificationRunner(config))
+		const lookupSession = (sessionID: string) =>
+			Effect.succeed(sessionID === 'child' ? { parentID: 'parent' } : {})
 
 		try {
 			await runEffect(
 				Effect.gen(function* () {
-					yield* runner.handleEvent({ type: 'unrelated', properties: {} })
-					yield* runner.handleEvent({
-						type: 'session.created',
-						properties: { info: { id: 'child', parentID: 'parent' } },
-					})
-					yield* runner.handleEvent({
-						type: 'session.idle',
-						properties: { sessionID: 'child' },
-					})
-					yield* Effect.all(
-						[
-							runner.handleEvent({
-								type: 'session.idle',
-								properties: { sessionID: 'parent' },
-							}),
-							runner.handleEvent({
-								type: 'session.idle',
-								properties: { sessionID: 'parent' },
-							}),
-						],
-						{ concurrency: 'unbounded' },
+					yield* runner.handleEvent({ type: 'unrelated', data: {} }, lookupSession)
+					yield* runner.handleEvent(
+						{
+							type: 'permission.v2.asked',
+							data: { sessionID: 'child', action: 'shell', resource: 'git push' },
+						},
+						lookupSession,
 					)
-					yield* runner.handleEvent({
-						type: 'session.status',
-						properties: { sessionID: 'parent', status: { type: 'busy' } },
-					})
-					yield* runner.handleEvent({
-						type: 'session.idle',
-						properties: { sessionID: 'parent' },
-					})
-					yield* runner.handleEvent({
-						type: 'session.deleted',
-						properties: { info: { id: 'parent' } },
-					})
-					yield* runner.handleEvent({
-						type: 'session.idle',
-						properties: { sessionID: 'parent' },
-					})
+					yield* runner.handleEvent(
+						{
+							type: 'question.v2.asked',
+							data: { sessionID: 'parent' },
+						},
+						lookupSession,
+					)
+					yield* runner.handleEvent(
+						{
+							type: 'session.execution.succeeded',
+							data: { sessionID: 'child' },
+						},
+						lookupSession,
+					)
+					yield* runner.handleEvent(
+						{
+							type: 'session.execution.succeeded',
+							data: { sessionID: 'parent' },
+						},
+						lookupSession,
+					)
+					yield* runner.handleEvent(
+						{
+							type: 'session.execution.failed',
+							data: { sessionID: 'parent', error: { type: 'test', message: 'failed' } },
+						},
+						lookupSession,
+					)
+					yield* runner.handleEvent(
+						{
+							type: 'session.execution.interrupted',
+							data: { sessionID: 'parent', reason: 'user' },
+						},
+						lookupSession,
+					)
 				}),
 			)
 
-			expect(readFileSync(marker, 'utf8')).toBe('xxx')
+			expect(readFileSync(marker, 'utf8')).toBe('xxxxx')
 		} finally {
 			rmSync(directory, { recursive: true, force: true })
 		}

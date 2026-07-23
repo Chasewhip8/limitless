@@ -17,199 +17,25 @@ let
     );
 
   opencodeDir = ".config/opencode";
-  opencodePluginDir = "${opencodeDir}/plugins";
-  skillsDirectory = ".agents/skills";
+  skillsDirectory = "${opencodeDir}/skills";
 
   enabledSkills = cfg.enable && cfg.skills.enable;
   enabledLsp = cfg.enable && cfg.lsp.enable;
   enabledLinear = cfg.enable && cfg.mcp.linear.enable;
   enabledOpencodeService = cfg.enable && cfg.opencode.service.enable;
-  enabledSlack = cfg.enable && cfg.slack.enable;
-
-  opencodePackage =
-    if cfg.opencode.disableClaudeCode then
-      pkgs.symlinkJoin {
-        name = "opencode-disable-claude-code";
-        paths = [ cfg.opencode.package ];
-        nativeBuildInputs = [ pkgs.makeWrapper ];
-        postBuild = ''
-          wrapProgram $out/bin/opencode --set OPENCODE_DISABLE_CLAUDE_CODE 1
-        '';
-      }
-    else
-      cfg.opencode.package;
 
   opencodeServiceUrl = "http://${cfg.opencode.service.hostname}:${toString cfg.opencode.service.port}";
-  opencodeAttachCommand = "${opencodePackage}/bin/opencode attach ${opencodeServiceUrl} --dir \"$PWD\"";
-  slackRepository = if cfg.slack.repository == null then "/" else cfg.slack.repository;
-  slackPrepare = pkgs.writeShellScript "limitless-slack-prepare" ''
-    set -eu
-    : "''${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
-    ${pkgs.coreutils}/bin/rm -f "$XDG_RUNTIME_DIR/limitless-slack-ready"
-  '';
-  slackBootstrap = pkgs.writeShellScript "limitless-slack-bootstrap" ''
-    set -eu
-    : "''${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
-    ready_file="$XDG_RUNTIME_DIR/limitless-slack-ready"
+  opencodeAttachCommand = "${cfg.opencode.package}/bin/opencode2 --server ${opencodeServiceUrl} \"$PWD\"";
 
-    while ! ${pkgs.curl}/bin/curl --fail --silent --show-error \
-      ${lib.escapeShellArg "${opencodeServiceUrl}/global/health"} >/dev/null 2>&1; do
-      ${pkgs.coreutils}/bin/sleep 0.1
-    done
-
-    probe_response="$(${pkgs.curl}/bin/curl --fail --silent --show-error \
-      --request POST \
-      --header ${lib.escapeShellArg "x-opencode-directory: ${slackRepository}"} \
-      --header 'content-type: application/json' \
-      --data '{"title":"Limitless Slack startup probe"}' \
-      ${lib.escapeShellArg "${opencodeServiceUrl}/session"})"
-    probe_id="$(printf '%s' "$probe_response" | ${pkgs.jq}/bin/jq --exit-status --raw-output '.id')"
-
-    cleanup_probe() {
-      ${pkgs.curl}/bin/curl --fail --silent --show-error \
-        --request DELETE \
-        --header ${lib.escapeShellArg "x-opencode-directory: ${slackRepository}"} \
-        ${lib.escapeShellArg "${opencodeServiceUrl}/session"}/"$probe_id" >/dev/null || true
-    }
-    trap cleanup_probe EXIT
-
-    while [ ! -s "$ready_file" ]; do
-      ${pkgs.coreutils}/bin/sleep 0.1
-    done
-
-    cleanup_probe
-    trap - EXIT
-  '';
+  permissionRule = action: resource: effect: { inherit action resource effect; };
 
   defaultAgentBrowserPackage = self.packages.${system}."agent-browser";
   defaultEffectSolutionsPackage = self.packages.${system}."effect-solutions";
-  defaultSentryPackage = self.packages.${system}.sentry;
-  defaultAcliPackage = pkgs.acli;
 
-  enabledAcli = cfg.enable && cfg.tools.acli.enable;
   enabledAgentBrowser = cfg.enable && cfg.tools.agentBrowser.enable;
   enabledEffectSolutions = cfg.enable && cfg.tools.effectSolutions.enable;
-  enabledSentry = cfg.enable && cfg.tools.sentry.enable;
-  enabledAcliSkill = enabledSkills && enabledAcli;
   enabledAgentBrowserSkill = enabledSkills && enabledAgentBrowser;
   enabledEffectSolutionsSkill = enabledSkills && enabledEffectSolutions;
-  enabledSentrySkill = enabledSkills && enabledSentry;
-
-  acliSkillPackage = pkgs.runCommand "limitless-atlassian-cli-skill" { } ''
-    mkdir -p $out/atlassian-cli
-    cp ${self}/nix/skills/atlassian-cli/SKILL.md $out/atlassian-cli/SKILL.md
-  '';
-
-  acliPackage =
-    if cfg.tools.acli.tokenFile == null then
-      cfg.tools.acli.package
-    else
-      let
-        realAcli = lib.getExe cfg.tools.acli.package;
-        site = lib.escapeShellArg (if cfg.tools.acli.site == null then "" else cfg.tools.acli.site);
-        email = lib.escapeShellArg (if cfg.tools.acli.email == null then "" else cfg.tools.acli.email);
-        tokenFile = lib.escapeShellArg cfg.tools.acli.tokenFile;
-      in
-      pkgs.writeShellScriptBin "acli" ''
-        set -eu
-
-        real_acli=${lib.escapeShellArg realAcli}
-        site=${site}
-        email=${email}
-        token_file=${tokenFile}
-
-        if [ "''${1:-}" = "jira" ]; then
-          if [ -z "''${XDG_RUNTIME_DIR:-}" ]; then
-            printf '%s\n' "acli: XDG_RUNTIME_DIR is required for token-file authentication" >&2
-            exit 1
-          fi
-
-          runtime_dir="$XDG_RUNTIME_DIR/limitless-acli"
-          ${pkgs.coreutils}/bin/install -d -m 0700 "$runtime_dir" "$runtime_dir/config"
-          export ACLI_CONFIG_DIR="$runtime_dir/config"
-
-          if [ "''${2:-}" = "auth" ] && [ "''${3:-}" = "logout" ]; then
-            set +e
-            "$real_acli" "$@"
-            status=$?
-            set -e
-            ${pkgs.coreutils}/bin/rm -f "$runtime_dir/identity"
-            exit "$status"
-          fi
-
-          if [ "''${2:-}" = "auth" ] && [ "''${3:-}" = "login" ]; then
-            exec -a acli "$real_acli" "$@"
-          fi
-
-          (
-            ${pkgs.util-linux}/bin/flock -x 9
-
-            if [ ! -r "$token_file" ]; then
-              printf 'acli: Jira API token file is not readable: %s\n' "$token_file" >&2
-              exit 1
-            fi
-
-            fingerprint="$({
-              printf '%s\0%s\0' "$site" "$email"
-              ${pkgs.coreutils}/bin/cat "$token_file"
-            } | ${pkgs.coreutils}/bin/sha256sum | ${pkgs.coreutils}/bin/cut -d ' ' -f 1)"
-
-            current_fingerprint=""
-            if [ -r "$runtime_dir/identity" ]; then
-              current_fingerprint="$(${pkgs.coreutils}/bin/cat "$runtime_dir/identity")"
-            fi
-
-            if [ "$fingerprint" != "$current_fingerprint" ]; then
-              if ! "$real_acli" jira auth login \
-                --site "$site" \
-                --email "$email" \
-                --token < "$token_file" 1>&2; then
-                printf '%s\n' "acli: Jira authentication failed; verify the site, email, and agenix token" >&2
-                exit 1
-              fi
-
-              identity_tmp="$runtime_dir/.identity.$$"
-              umask 077
-              printf '%s\n' "$fingerprint" > "$identity_tmp"
-              ${pkgs.coreutils}/bin/mv "$identity_tmp" "$runtime_dir/identity"
-            fi
-          ) 9> "$runtime_dir/auth.lock"
-        fi
-
-        exec -a acli "$real_acli" "$@"
-      '';
-
-  sentryPackage =
-    if cfg.tools.sentry.tokenFile == null then
-      cfg.tools.sentry.package
-    else
-      let
-        realSentry = lib.getExe cfg.tools.sentry.package;
-        tokenFile = lib.escapeShellArg cfg.tools.sentry.tokenFile;
-      in
-      pkgs.writeShellScriptBin "sentry" ''
-        set -eu
-
-        real_sentry=${lib.escapeShellArg realSentry}
-        token_file=${tokenFile}
-
-        if [ ! -r "$token_file" ]; then
-          printf 'sentry: Sentry API token file is not readable: %s\n' "$token_file" >&2
-          exit 1
-        fi
-
-        SENTRY_AUTH_TOKEN="$(${pkgs.coreutils}/bin/cat "$token_file")"
-        if [ -z "$SENTRY_AUTH_TOKEN" ]; then
-          printf 'sentry: Sentry API token file is empty: %s\n' "$token_file" >&2
-          exit 1
-        fi
-
-        export SENTRY_AUTH_TOKEN
-        export SENTRY_FORCE_ENV_TOKEN=1
-        export SENTRY_CLI_NO_UPDATE_CHECK=1
-
-        exec -a sentry "$real_sentry" "$@"
-      '';
 
   enabledSkillsPackage = pkgs.runCommand "limitless-enabled-skills" { } ''
     copySkills() {
@@ -221,10 +47,8 @@ let
 
     mkdir -p $out
     copySkills ${cfg.skills.package}
-    ${lib.optionalString enabledAcliSkill "copySkills ${acliSkillPackage}"}
     ${lib.optionalString enabledAgentBrowserSkill "copySkills ${cfg.tools.agentBrowser.package}/share/skills"}
     ${lib.optionalString enabledEffectSolutionsSkill "copySkills ${cfg.tools.effectSolutions.package}/share/skills"}
-    ${lib.optionalString enabledSentrySkill "copySkills ${cfg.tools.sentry.package}/share/skills"}
   '';
 
   mkLspServer =
@@ -252,18 +76,7 @@ let
 
   baseOpencodeConfig = builtins.fromJSON (builtins.readFile "${self}/opencode/opencode.json");
 
-  defaultOpencodeConfig = lib.recursiveUpdate baseOpencodeConfig (
-    {
-      inherit (cfg.opencode) permission;
-    }
-    // lib.optionalAttrs enabledLsp {
-      lsp = lspServers;
-    }
-  );
-
-  opencodeConfig = lib.recursiveUpdate defaultOpencodeConfig cfg.opencode.settings // {
-    default_agent = "limitless";
-  };
+  repositoryPermissionRules = baseOpencodeConfig.permissions;
 
   limitlessPluginOptions = {
     github = {
@@ -280,25 +93,47 @@ let
     notifications = {
       inherit (cfg.notifications)
         enable
-        command
         includeChildSessions
         timeoutMs
         ;
       events = {
-        inherit (cfg.notifications.events) complete question;
+        inherit (cfg.notifications.events) complete permission question;
       };
-    };
-    slack = {
-      inherit (cfg.slack)
-        enable
-        agent
-        botTokenEnv
-        appTokenEnv
-        ;
     }
-    // lib.optionalAttrs (cfg.slack.repository != null) {
-      inherit (cfg.slack) repository;
+    // lib.optionalAttrs (cfg.notifications.command != [ ]) {
+      inherit (cfg.notifications) command;
     };
+    lsp = lib.optionalAttrs enabledLsp lspServers;
+  };
+
+  limitlessPlugin = {
+    package = "file://${cfg.plugins.limitless.package}/limitless.js";
+    options = limitlessPluginOptions;
+  };
+
+  defaultOpencodeConfig = lib.recursiveUpdate (removeAttrs baseOpencodeConfig [ "permissions" ]) (
+    {
+      permissions = cfg.opencode.permissions ++ repositoryPermissionRules;
+      plugins = [ limitlessPlugin ];
+    }
+    // lib.optionalAttrs enabledLsp {
+      lsp = lspServers;
+    }
+    // lib.optionalAttrs enabledLinear {
+      mcp.servers.linear = {
+        type = "remote";
+        url = "https://mcp.linear.app/mcp";
+        disabled = false;
+        headers.Authorization = "Bearer {env:LINEAR_API_KEY}";
+        oauth = false;
+      };
+    }
+  );
+
+  opencodeConfig = lib.recursiveUpdate defaultOpencodeConfig cfg.opencode.settings // {
+    default_agent = "limitless";
+    permissions = cfg.opencode.permissions ++ repositoryPermissionRules;
+    plugins = (cfg.opencode.settings.plugins or [ ]) ++ [ limitlessPlugin ];
   };
 
   lspPackages =
@@ -327,85 +162,69 @@ in
     opencode = {
       package = lib.mkOption {
         type = lib.types.package;
-        default = self.packages.${system}.opencode;
-        description = "OpenCode package to install. Defaults to the Numtide llm-agents.nix OpenCode package.";
+        default = self.packages.${system}.opencode2;
+        description = "OpenCode 2.0 beta package to install. Defaults to the pinned Numtide llm-agents.nix opencode2 package.";
       };
 
-      disableClaudeCode = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = "Disable OpenCode's Claude Code integration by setting OPENCODE_DISABLE_CLAUDE_CODE=1 for the CLI and server.";
-      };
-
-      permission = lib.mkOption {
+      permissions = lib.mkOption {
         inherit (jsonFormat) type;
-        default = {
-          "*" = "allow";
-          external_directory = "allow";
-          read = {
-            "*" = "allow";
-            # Private key and credential stores should be deliberate reads.
-            "~/.ssh/**" = "ask";
-            "$HOME/.ssh/**" = "ask";
-            "~/.aws/**" = "ask";
-            "$HOME/.aws/**" = "ask";
-            "~/.gnupg/**" = "ask";
-            "$HOME/.gnupg/**" = "ask";
-            "~/.config/gh/hosts.yml" = "ask";
-            "$HOME/.config/gh/hosts.yml" = "ask";
-          };
-          bash = {
-            "*" = "allow";
-            # History rewrites and worktree-destructive git operations are easy to lose data with.
-            "git reset*" = "ask";
-            "git clean*" = "ask";
-            "git checkout -- *" = "ask";
-            "git restore *" = "ask";
-            "git rebase*" = "ask";
-            "git push --force*" = "ask";
-            "git push -f*" = "ask";
-            "git branch -D *" = "ask";
-            # Broad deletion and shredding should never happen accidentally.
-            "rm -rf *" = "ask";
-            "rm -fr *" = "ask";
-            "trash *" = "ask";
-            "shred *" = "ask";
-            # Disk and partition commands can damage the host, not just the project.
-            "dd *" = "ask";
-            "mkfs*" = "ask";
-            "fdisk*" = "ask";
-            "parted*" = "ask";
-            "wipefs*" = "ask";
-            # Privilege escalation and recursive ownership changes can escape the workspace.
-            "sudo *" = "ask";
-            "su *" = "ask";
-            "doas *" = "ask";
-            "chmod -R *" = "ask";
-            "chown -R *" = "ask";
-            # Pipe-to-shell installers combine network input with immediate execution.
-            "curl * | sh*" = "ask";
-            "curl * | bash*" = "ask";
-            "wget * | sh*" = "ask";
-            "wget * | bash*" = "ask";
-            # Publishing and infrastructure mutations affect systems outside the local checkout.
-            "npm publish*" = "ask";
-            "bun publish*" = "ask";
-            "pnpm publish*" = "ask";
-            "yarn publish*" = "ask";
-            "docker push*" = "ask";
-            "kubectl delete*" = "ask";
-            "kubectl apply*" = "ask";
-            "terraform apply*" = "ask";
-            "terraform destroy*" = "ask";
-          };
-        };
-        description = "Default OpenCode permission configuration.";
+        default = [
+          (permissionRule "*" "*" "allow")
+        ]
+        ++ map (resource: permissionRule "read" resource "ask") [
+          "~/.ssh/**"
+          "$HOME/.ssh/**"
+          "~/.aws/**"
+          "$HOME/.aws/**"
+          "~/.gnupg/**"
+          "$HOME/.gnupg/**"
+          "~/.config/gh/hosts.yml"
+          "$HOME/.config/gh/hosts.yml"
+        ]
+        ++ map (resource: permissionRule "shell" resource "ask") [
+          "git reset*"
+          "git clean*"
+          "git checkout -- *"
+          "git restore *"
+          "git rebase*"
+          "git push --force*"
+          "git push -f*"
+          "git branch -D *"
+          "rm -rf *"
+          "rm -fr *"
+          "trash *"
+          "shred *"
+          "dd *"
+          "mkfs*"
+          "fdisk*"
+          "parted*"
+          "wipefs*"
+          "sudo *"
+          "su *"
+          "doas *"
+          "chmod -R *"
+          "chown -R *"
+          "curl * | sh*"
+          "curl * | bash*"
+          "wget * | sh*"
+          "wget * | bash*"
+          "npm publish*"
+          "bun publish*"
+          "pnpm publish*"
+          "yarn publish*"
+          "docker push*"
+          "kubectl delete*"
+          "kubectl apply*"
+          "terraform apply*"
+          "terraform destroy*"
+        ];
+        description = "Ordered native OpenCode 2 permission rules; repository edit denials are appended after these rules.";
       };
 
       settings = lib.mkOption {
         type = lib.types.attrsOf jsonFormat.type;
         default = { };
-        description = "Additional OpenCode settings deep-merged over generated defaults.";
+        description = "Additional native OpenCode 2 settings deep-merged over generated defaults.";
       };
 
       extraAgentsFile = lib.mkOption {
@@ -454,38 +273,6 @@ in
     };
 
     tools = {
-      acli = {
-        enable = lib.mkEnableOption "Atlassian CLI and its companion Jira skill";
-
-        package = lib.mkOption {
-          type = lib.types.package;
-          default = defaultAcliPackage;
-          defaultText = lib.literalExpression "pkgs.acli";
-          description = "Atlassian CLI package to install.";
-        };
-
-        site = lib.mkOption {
-          type = lib.types.nullOr (lib.types.strMatching "^[A-Za-z0-9.-]+$");
-          default = null;
-          example = "company.atlassian.net";
-          description = "Jira Cloud hostname used for token-file authentication.";
-        };
-
-        email = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          example = "agent@example.com";
-          description = "Atlassian account email used for token-file authentication.";
-        };
-
-        tokenFile = lib.mkOption {
-          type = lib.types.nullOr (lib.types.strMatching "^/.*");
-          default = null;
-          example = "/run/agenix/atlassian-api-token";
-          description = "Optional runtime file containing an Atlassian API token. The token value is never written to generated configuration or passed in process arguments.";
-        };
-      };
-
       agentBrowser = {
         enable = lib.mkOption {
           type = lib.types.bool;
@@ -513,23 +300,6 @@ in
           type = lib.types.package;
           default = defaultEffectSolutionsPackage;
           description = "effect-solutions package to install.";
-        };
-      };
-
-      sentry = {
-        enable = lib.mkEnableOption "Sentry CLI and its companion agent skill";
-
-        package = lib.mkOption {
-          type = lib.types.package;
-          default = defaultSentryPackage;
-          description = "Sentry CLI package to install.";
-        };
-
-        tokenFile = lib.mkOption {
-          type = lib.types.nullOr (lib.types.strMatching "^/.*");
-          default = null;
-          example = "/run/agenix/sentry-api-token";
-          description = "Runtime file containing a Sentry API token. The token value is never written to generated configuration or passed in process arguments.";
         };
       };
     };
@@ -588,7 +358,7 @@ in
     };
 
     notifications = {
-      enable = lib.mkEnableOption "running a system command on OpenCode completion and question events";
+      enable = lib.mkEnableOption "running a system command on OpenCode completion, permission, and question events";
 
       command = lib.mkOption {
         type = lib.types.listOf lib.types.str;
@@ -620,7 +390,13 @@ in
         complete = lib.mkOption {
           type = lib.types.bool;
           default = true;
-          description = "Run the notification command when a top-level OpenCode session becomes idle.";
+          description = "Run the notification command when a top-level OpenCode session execution terminates.";
+        };
+
+        permission = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Run the notification command when OpenCode requests permission.";
         };
 
         question = lib.mkOption {
@@ -628,42 +404,6 @@ in
           default = true;
           description = "Run the notification command before the OpenCode question tool prompts the user.";
         };
-      };
-    };
-
-    slack = {
-      enable = lib.mkEnableOption "the repository-scoped Slack bridge for OpenCode";
-
-      repository = lib.mkOption {
-        type = lib.types.nullOr (lib.types.strMatching "^/.*");
-        default = null;
-        example = "/home/me/workspace";
-        description = "Absolute repository directory used for every Slack-backed OpenCode session.";
-      };
-
-      agent = lib.mkOption {
-        type = lib.types.strMatching ".+";
-        default = "gary";
-        description = "OpenCode agent selected for Slack-backed turns.";
-      };
-
-      botTokenEnv = lib.mkOption {
-        type = lib.types.strMatching "^[A-Za-z_][A-Za-z0-9_]*$";
-        default = "SLACK_BOT_TOKEN";
-        description = "Environment variable containing the Slack bot token.";
-      };
-
-      appTokenEnv = lib.mkOption {
-        type = lib.types.strMatching "^[A-Za-z_][A-Za-z0-9_]*$";
-        default = "SLACK_APP_TOKEN";
-        description = "Environment variable containing the Slack Socket Mode app token.";
-      };
-
-      environmentFile = lib.mkOption {
-        type = lib.types.nullOr (lib.types.strMatching "^/.*");
-        default = null;
-        example = "/run/agenix/limitless-slack-environment";
-        description = "Optional runtime EnvironmentFile that supplies Slack tokens to the OpenCode user service without copying values into the Nix store.";
       };
     };
 
@@ -952,7 +692,7 @@ in
       };
     };
 
-    mcp.linear.enable = lib.mkEnableOption "Linear MCP server configuration for OpenCode";
+    mcp.linear.enable = lib.mkEnableOption "Linear MCP server configuration for OpenCode 2";
   };
 
   config = lib.mkIf cfg.enable (
@@ -973,39 +713,13 @@ in
             message = "programs.limitless.notifications.command must be non-empty when notifications are enabled.";
           }
           {
-            assertion = !enabledSlack || cfg.opencode.service.enable;
-            message = "programs.limitless.slack.enable requires programs.limitless.opencode.service.enable.";
-          }
-          {
-            assertion = !enabledSlack || cfg.slack.repository != null;
-            message = "programs.limitless.slack.repository must be set when Slack support is enabled.";
-          }
-          {
-            assertion = !enabledSlack || pkgs.stdenv.isLinux;
-            message = "programs.limitless Slack service integration currently requires Linux.";
-          }
-          {
-            assertion =
-              cfg.tools.acli.tokenFile == null
-              || (cfg.tools.acli.enable && cfg.tools.acli.site != null && cfg.tools.acli.email != null);
-            message = "programs.limitless.tools.acli token-file authentication requires enable = true plus non-null site and email values.";
-          }
-          {
-            assertion = cfg.tools.acli.tokenFile == null || pkgs.stdenv.isLinux;
-            message = "programs.limitless.tools.acli.tokenFile currently requires Linux and XDG_RUNTIME_DIR.";
-          }
-          {
-            assertion = !enabledSentry || cfg.tools.sentry.tokenFile != null;
-            message = "programs.limitless.tools.sentry.tokenFile must be set when Sentry CLI support is enabled.";
-          }
-          {
-            assertion = lib.attrByPath [ "agent" "limitless" "disable" ] false cfg.opencode.settings != true;
-            message = "programs.limitless keeps the limitless default agent enabled; remove opencode.settings.agent.limitless.disable.";
+            assertion = lib.attrByPath [ "agents" "limitless" "disabled" ] false cfg.opencode.settings != true;
+            message = "programs.limitless keeps the limitless default agent enabled; remove opencode.settings.agents.limitless.disabled.";
           }
         ];
 
         home = {
-          packages = [ opencodePackage ];
+          packages = [ cfg.opencode.package ];
           file = {
             "${opencodeDir}/opencode.json".text = builtins.toJSON opencodeConfig;
             "${opencodeDir}/AGENTS.md".text = agentsText;
@@ -1013,39 +727,6 @@ in
               source = cfg.agents.package;
               recursive = true;
             };
-            "${opencodePluginDir}/limitless.js".text = ''
-              import plugin from "${cfg.plugins.limitless.package}/limitless.js";
-
-              const generatedOptions = ${builtins.toJSON limitlessPluginOptions};
-              const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
-
-              export default (input, options = {}) => {
-                const base = object(options);
-                const github = object(base.github);
-                const notifications = object(base.notifications);
-                const notificationEvents = object(notifications.events);
-                const slack = object(base.slack);
-                return plugin(input, {
-                  ...base,
-                  github: {
-                    ...generatedOptions.github,
-                    ...github,
-                  },
-                  notifications: {
-                    ...generatedOptions.notifications,
-                    ...notifications,
-                    events: {
-                      ...generatedOptions.notifications.events,
-                      ...notificationEvents,
-                    },
-                  },
-                  slack: {
-                    ...generatedOptions.slack,
-                    ...slack,
-                  },
-                });
-              };
-            '';
           };
         };
       }
@@ -1064,14 +745,8 @@ in
       (lib.mkIf enabledAgentBrowser {
         home.packages = [ cfg.tools.agentBrowser.package ];
       })
-      (lib.mkIf enabledAcli {
-        home.packages = [ acliPackage ];
-      })
       (lib.mkIf enabledEffectSolutions {
         home.packages = [ cfg.tools.effectSolutions.package ];
-      })
-      (lib.mkIf enabledSentry {
-        home.packages = [ sentryPackage ];
       })
       (lib.mkIf enabledLsp {
         home.packages = lspPackages;
@@ -1080,45 +755,25 @@ in
         home.shellAliases.${cfg.opencode.service.alias} = lib.mkDefault opencodeAttachCommand;
       })
       (lib.mkIf (enabledOpencodeService && pkgs.stdenv.isLinux) {
-        systemd.user.services.opencode = {
+        systemd.user.services.opencode2 = {
           Unit = {
-            Description = "OpenCode server";
+            Description = "OpenCode 2 beta server";
             X-Restart-Triggers = [
               config.home.file."${opencodeDir}/opencode.json".source
               config.home.file."${opencodeDir}/AGENTS.md".source
               config.home.file."${opencodeDir}/agents".source
-              config.home.file."${opencodePluginDir}/limitless.js".source
+              cfg.plugins.limitless.package
             ]
-            ++ lib.optional enabledSkills config.home.file."${skillsDirectory}".source
-            ++ lib.optional enabledLinear config.home.file."${opencodePluginDir}/linear-mcp.js".source;
+            ++ lib.optional enabledSkills config.home.file."${skillsDirectory}".source;
           };
 
           Service = {
-            Environment = [
-              "OPENCODE_EXPERIMENTAL_WEBSOCKETS=true"
-            ]
-            ++ lib.optional cfg.opencode.disableClaudeCode "OPENCODE_DISABLE_CLAUDE_CODE=1"
-            ++ lib.optional enabledSlack "LIMITLESS_SLACK_SERVICE=1";
-            ExecStart = "${opencodePackage}/bin/opencode serve --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
+            ExecStart = "${cfg.opencode.package}/bin/opencode2 serve --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
             Restart = "on-failure";
             RestartSec = "5s";
-          }
-          // lib.optionalAttrs enabledSlack {
-            WorkingDirectory = slackRepository;
-            ExecStartPre = slackPrepare;
-            ExecStartPost = slackBootstrap;
-            TimeoutStartSec = "90s";
-          }
-          // lib.optionalAttrs (enabledSlack && cfg.slack.environmentFile != null) {
-            EnvironmentFile = [ cfg.slack.environmentFile ];
           };
 
           Install.WantedBy = [ "default.target" ];
-        };
-      })
-      (lib.mkIf enabledLinear {
-        home.file."${opencodePluginDir}/linear-mcp.js" = {
-          source = "${self.packages.${system}."linear-mcp"}/linear-mcp.js";
         };
       })
     ]

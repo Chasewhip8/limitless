@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import type { ToolContext } from '@opencode-ai/plugin'
 import { Effect } from 'effect'
+import { ToolExecutionContext } from '../../core/execution'
 import { MANAGED_REPOS_STORAGE_RELATIVE_PATH } from '../../core/storage'
 import { optionalField } from '../../lib/type-utils'
 import {
@@ -105,17 +105,16 @@ const githubCloneRequest = Effect.fn('githubCloneRequest')(function* (
 	config: GitHubConfig,
 	normalizedRepo: string,
 	requestedRef: string | undefined,
-	context: ToolContext,
 	cloneRuntime: GitHubCloneRuntime,
 	options: GitHubCloneOptions,
 ) {
-	const root = yield* ensureManagedRoot(context.worktree)
+	const context = yield* ToolExecutionContext
+	const root = yield* ensureManagedRoot(context.projectRoot)
 	const directory = cloneDirectoryNameFromValidated(normalizedRepo, requestedRef)
 	const target = path.join(root, directory)
-	const runtime = yield* makeGitRuntime(config, context, options)
+	const runtime = yield* makeGitRuntime(config, options)
 	return yield* cloneRuntime.targetSemaphore.withPermit(target)(
 		Effect.gen(function* () {
-			if (runtime.signal.aborted) return yield* cloneFailure('ABORTED', 'GitHub clone was aborted.')
 			const entries: Array<GitHubSubmodule> = []
 			const existing = yield* pathState(target)
 			const state: GitHubCloneState = existing === 'missing' ? 'created' : 'updated'
@@ -150,7 +149,6 @@ const githubCloneRequest = Effect.fn('githubCloneRequest')(function* (
 export const githubClone = Effect.fn('githubClone')(function* (
 	config: GitHubConfig,
 	input: GitHubCloneInput,
-	context: ToolContext,
 	cloneRuntime: GitHubCloneRuntime,
 	options: GitHubCloneOptions = {},
 ) {
@@ -159,7 +157,7 @@ export const githubClone = Effect.fn('githubClone')(function* (
 	return yield* Effect.gen(function* () {
 		repo = yield* assertConfiguredRepo(input.repo, config)
 		requestedRef = yield* validateGitHubRef(input.ref)
-		return yield* githubCloneRequest(config, repo, requestedRef, context, cloneRuntime, options)
+		return yield* githubCloneRequest(config, repo, requestedRef, cloneRuntime, options)
 	}).pipe(
 		Effect.match({
 			onFailure: (failure) =>

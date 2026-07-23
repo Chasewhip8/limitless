@@ -1,7 +1,7 @@
-import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
 import { ReferencesRequest } from 'vscode-languageserver-protocol/node'
 import { DEFAULT_TIMEOUT_MS } from '../../core/command'
+import { ToolExecutionContext } from '../../core/execution'
 import { workspaceRelative, workspaceRoot } from '../../core/paths'
 import { loadServerConfigs } from './config'
 import {
@@ -11,7 +11,6 @@ import {
 	resolveFile,
 	resolvePosition,
 	runOnCapableServer,
-	withCancellation,
 	withDocument,
 } from './connection'
 import { decodeServerValue } from './errors'
@@ -43,15 +42,14 @@ export const LspReferencesResult = Schema.Struct({
 export type LspReferencesResult = typeof LspReferencesResult.Type
 
 const lspReferencesOperation = Effect.fn(function* lspReferencesOperation(
-	pluginInput: PluginInput,
 	input: LspReferencesInput,
-	context: ToolContext,
 ) {
+	const context = yield* ToolExecutionContext
 	const tool = 'lsp_references'
-	const workspace = workspaceRoot(input, context)
+	const workspace = workspaceRoot(input, context.projectRoot)
 	const filePath = yield* resolveFile(tool, workspace, input)
 	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const configs = yield* loadServerConfigs(tool)
 	const candidates = yield* requireCandidates(tool, configs, filePath, input.server)
 	return yield* runOnCapableServer(
 		tool,
@@ -102,14 +100,6 @@ const lspReferencesOperation = Effect.fn(function* lspReferencesOperation(
 	)
 })
 
-export const lspReferences = Effect.fn(function* lspReferences(
-	pluginInput: PluginInput,
-	input: LspReferencesInput,
-	context: ToolContext,
-) {
-	return yield* withCancellation(
-		'lsp_references',
-		context.abort,
-		lspReferencesOperation(pluginInput, input, context),
-	)
+export const lspReferences = Effect.fn(function* lspReferences(input: LspReferencesInput) {
+	return yield* lspReferencesOperation(input)
 })

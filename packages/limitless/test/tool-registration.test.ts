@@ -1,8 +1,6 @@
-import type { PluginInput } from '@opencode-ai/plugin'
-import { tool } from '@opencode-ai/plugin'
 import { Effect, Option, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { createLimitless, resolvePluginConfigs } from '../index'
+import { limitlessTools, registerLimitlessTools, resolvePluginConfigs } from '../index'
 import { ArtifactCreateInput } from '../tools/artifacts/create'
 import { ArtifactListInput } from '../tools/artifacts/list'
 import { ArtifactTemplateReadInput, ArtifactTemplatesListInput } from '../tools/artifacts/templates'
@@ -17,219 +15,111 @@ import { LspImplementationInput } from '../tools/lsp/implementation'
 import { LspReferencesInput } from '../tools/lsp/references'
 import { LspRenameInput } from '../tools/lsp/rename'
 import { LspSymbolsInput } from '../tools/lsp/symbols'
+import { testToolExecution, testToolExecutor } from './execution'
 
 const contracts = [
-	{
-		name: 'artifact_create',
-		input: ArtifactCreateInput,
-		valid: { title: 'Brief', slug: 'brief', template: 'brief' },
-	},
-	{ name: 'artifact_list', input: ArtifactListInput, valid: { template: 'brief' } },
+	{ name: 'artifact_create', input: ArtifactCreateInput, valid: { slug: 'brief' } },
+	{ name: 'artifact_list', input: ArtifactListInput, valid: {} },
 	{ name: 'artifact_templates_list', input: ArtifactTemplatesListInput, valid: {} },
 	{
 		name: 'artifact_template_read',
 		input: ArtifactTemplateReadInput,
 		valid: { template: 'brief', file: 'main.typ' },
 	},
-	{
-		name: 'typst_compile',
-		input: TypstCompileInput,
-		valid: { artifact: 'brief', entry: 'main.typ', format: 'pdf', timeoutMs: 100 },
-	},
-	{
-		name: 'ast_grep_search',
-		input: AstGrepSearchInput,
-		valid: {
-			pattern: 'foo',
-			lang: 'ts',
-			language: 'typescript',
-			paths: ['src'],
-			workspace: '.',
-			json: true,
-			timeoutMs: 100,
-		},
-	},
+	{ name: 'typst_compile', input: TypstCompileInput, valid: { artifact: 'brief' } },
+	{ name: 'ast_grep_search', input: AstGrepSearchInput, valid: { pattern: 'foo' } },
 	{
 		name: 'ast_grep_replace',
 		input: AstGrepReplaceInput,
-		valid: {
-			pattern: 'foo',
-			rewrite: 'bar',
-			lang: 'ts',
-			language: 'typescript',
-			paths: ['src'],
-			workspace: '.',
-			dryRun: true,
-			timeoutMs: 100,
-		},
+		valid: { pattern: 'foo', rewrite: 'bar' },
 	},
-	{
-		name: 'lsp_diagnostics',
-		input: DiagnosticsInput,
-		valid: { workspace: '.', filePath: 'src/a.ts', path: 'src/a.ts' },
-	},
+	{ name: 'lsp_diagnostics', input: DiagnosticsInput, valid: {} },
 	{
 		name: 'lsp_definition',
 		input: LspDefinitionInput,
-		valid: {
-			workspace: '.',
-			filePath: 'src/a.ts',
-			path: 'src/a.ts',
-			server: 'typescript',
-			timeoutMs: 100,
-			offset: 0,
-			line: 0,
-			character: 0,
-			maxResults: 10,
-		},
+		valid: { filePath: 'src/a.ts', offset: 0 },
 	},
 	{
 		name: 'lsp_hover',
 		input: LspHoverInput,
-		valid: {
-			workspace: '.',
-			filePath: 'src/a.ts',
-			path: 'src/a.ts',
-			server: 'typescript',
-			timeoutMs: 100,
-			offset: 0,
-			line: 0,
-			character: 0,
-		},
+		valid: { filePath: 'src/a.ts', offset: 0 },
 	},
 	{
 		name: 'lsp_implementation',
 		input: LspImplementationInput,
-		valid: {
-			workspace: '.',
-			filePath: 'src/a.ts',
-			path: 'src/a.ts',
-			server: 'typescript',
-			timeoutMs: 100,
-			offset: 0,
-			line: 0,
-			character: 0,
-			maxResults: 10,
-		},
+		valid: { filePath: 'src/a.ts', offset: 0 },
 	},
 	{
 		name: 'lsp_call_hierarchy',
 		input: LspCallHierarchyInput,
-		valid: {
-			workspace: '.',
-			filePath: 'src/a.ts',
-			path: 'src/a.ts',
-			server: 'typescript',
-			timeoutMs: 100,
-			offset: 0,
-			line: 0,
-			character: 0,
-			maxResults: 10,
-		},
+		valid: { filePath: 'src/a.ts', offset: 0 },
 	},
 	{
 		name: 'lsp_references',
 		input: LspReferencesInput,
-		valid: {
-			workspace: '.',
-			filePath: 'src/a.ts',
-			path: 'src/a.ts',
-			server: 'typescript',
-			timeoutMs: 100,
-			offset: 0,
-			line: 0,
-			character: 0,
-			includeDeclaration: true,
-			maxResults: 10,
-		},
+		valid: { filePath: 'src/a.ts', offset: 0 },
 	},
-	{
-		name: 'lsp_symbols',
-		input: LspSymbolsInput,
-		valid: {
-			workspace: '.',
-			filePath: 'src/a.ts',
-			path: 'src/a.ts',
-			server: 'typescript',
-			timeoutMs: 100,
-			query: 'symbol',
-			maxResults: 10,
-		},
-	},
+	{ name: 'lsp_symbols', input: LspSymbolsInput, valid: {} },
 	{
 		name: 'lsp_rename',
 		input: LspRenameInput,
-		valid: {
-			workspace: '.',
-			filePath: 'src/a.ts',
-			path: 'src/a.ts',
-			server: 'typescript',
-			timeoutMs: 100,
-			offset: 0,
-			line: 0,
-			character: 0,
-			newName: 'renamed',
-		},
+		valid: { filePath: 'src/a.ts', offset: 0, newName: 'renamed' },
 	},
-	{ name: 'github_clone', input: GitHubCloneInput, valid: { repo: 'owner/repo', ref: 'main' } },
+	{ name: 'github_clone', input: GitHubCloneInput, valid: { repo: 'owner/repo' } },
 ] as const
 
-describe('OpenCode tool transport parity', () => {
-	test('allocates GitHub serialization state per plugin instance', async () => {
-		const [first, second] = await Effect.runPromise(
-			Effect.all([resolvePluginConfigs(undefined), resolvePluginConfigs(undefined)]),
-		)
-
-		expect(first.githubCloneRuntime.targetSemaphore).not.toBe(
-			second.githubCloneRuntime.targetSemaphore,
-		)
+const makeTools = Effect.fn('makeTestTools')(function* () {
+	const configs = yield* resolvePluginConfigs({
+		github: { enable: true, allowUnrestrictedRepos: true },
+		lsp: {},
 	})
+	const execution = testToolExecution('/project')
+	return limitlessTools(
+		testToolExecutor(execution, configs.lspConfig.servers),
+		configs.githubConfig,
+		configs.githubCloneRuntime,
+	)
+})
 
-	test('registers every tool and mirrors Effect argument keys and optionality in Zod', async () => {
-		// Tool definitions close over PluginInput but do not inspect it until an LSP tool executes.
-		const pluginInput = Object.create(null) as PluginInput
-		const hooks = await createLimitless()(pluginInput, {
-			github: { enable: true, allowUnrestrictedRepos: true },
-		})
-		const registrations = hooks.tool ?? {}
-		const expectedNames = contracts.map(({ name }) => name).sort()
-		expect(Object.keys(registrations).sort()).toEqual(expectedNames)
+describe('OpenCode 2 tool registrations', () => {
+	test('registers all 16 tools with their Effect Schema contracts', async () => {
+		const tools = await Effect.runPromise(makeTools())
+		expect(Object.keys(tools).sort()).toEqual(contracts.map(({ name }) => name).sort())
 
 		for (const contract of contracts) {
-			const registration = registrations[contract.name]
-			expect(registration, contract.name).toBeDefined()
-			if (registration === undefined) continue
-
-			const zodSchema = tool.schema.object(registration.args)
-			const argumentKeys = Object.keys(contract.input.fields).sort()
-			expect(Object.keys(registration.args).sort(), contract.name).toEqual(argumentKeys)
-			expect(zodSchema.safeParse(contract.valid).success, `${contract.name} valid Zod input`).toBe(
-				true,
-			)
+			const definition = tools[contract.name]
+			expect(definition.input, contract.name).toBe(contract.input)
 			expect(
-				Option.isSome(Schema.decodeUnknownOption(contract.input)(contract.valid)),
-				`${contract.name} valid Effect input`,
+				Option.isSome(Schema.decodeUnknownOption(definition.input)(contract.valid)),
+				`${contract.name} accepts its valid input`,
 			).toBe(true)
-
-			for (const key of argumentKeys) {
-				const withoutKey = Object.fromEntries(
-					Object.entries(contract.valid).filter(([candidate]) => candidate !== key),
-				)
-				const zodAccepts = zodSchema.safeParse(withoutKey).success
-				const effectAccepts = Option.isSome(Schema.decodeUnknownOption(contract.input)(withoutKey))
-				expect(zodAccepts, `${contract.name}.${key} optionality`).toBe(effectAccepts)
-			}
 		}
 	})
 
-	test('registers Slack transport tools only when the Slack bridge is configured', async () => {
-		const pluginInput = Object.create(null) as PluginInput
-		const hooks = await createLimitless()(pluginInput, {
-			slack: { enable: true, repository: '/workspace' },
-		})
+	test('exposes every tool directly with codemode disabled', async () => {
+		const tools = await Effect.runPromise(makeTools())
+		const registrations: Array<{ readonly name: string; readonly codemode: boolean | undefined }> =
+			[]
 
-		expect(Object.keys(hooks.tool ?? {})).toEqual(
-			expect.arrayContaining(['slack_attach_file', 'slack_status']),
+		registerLimitlessTools(
+			{
+				add: (name, _tool, options) => {
+					registrations.push({ name, codemode: options?.codemode })
+				},
+			},
+			tools,
+		)
+
+		expect(registrations).toHaveLength(16)
+		expect(registrations.every(({ codemode }) => codemode === false)).toBe(true)
+	})
+
+	test('allocates GitHub serialization state per plugin activation', async () => {
+		const [first, second] = await Effect.runPromise(
+			Effect.all([resolvePluginConfigs({ lsp: {} }), resolvePluginConfigs({ lsp: {} })]),
+		)
+		expect(first.githubCloneRuntime.targetSemaphore).not.toBe(
+			second.githubCloneRuntime.targetSemaphore,
 		)
 	})
 })

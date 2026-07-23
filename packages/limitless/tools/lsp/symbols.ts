@@ -1,7 +1,7 @@
-import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
 import { Effect, Result, Schema } from 'effect'
 import { DocumentSymbolRequest, WorkspaceSymbolRequest } from 'vscode-languageserver-protocol/node'
 import { DEFAULT_TIMEOUT_MS } from '../../core/command'
+import { ToolExecutionContext } from '../../core/execution'
 import { workspacePath, workspaceRelative, workspaceRoot } from '../../core/paths'
 import { loadServerConfigs } from './config'
 import {
@@ -10,7 +10,6 @@ import {
 	requireCandidates,
 	runOnCapableServer,
 	uriToFilePath,
-	withCancellation,
 	withDocument,
 } from './connection'
 import { decodeServerValue, lspError } from './errors'
@@ -141,17 +140,14 @@ const normalizeSymbolInformation = Effect.fn(function* normalizeSymbolInformatio
 	})
 })
 
-const lspSymbolsOperation = Effect.fn(function* lspSymbolsOperation(
-	pluginInput: PluginInput,
-	input: LspSymbolsInput,
-	context: ToolContext,
-) {
+const lspSymbolsOperation = Effect.fn(function* lspSymbolsOperation(input: LspSymbolsInput) {
+	const context = yield* ToolExecutionContext
 	const tool = 'lsp_symbols'
-	const workspace = workspaceRoot(input, context)
+	const workspace = workspaceRoot(input, context.projectRoot)
 	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
 	const filePathInput = input.filePath ?? input.path
 	const filePath = filePathInput === undefined ? undefined : workspacePath(workspace, filePathInput)
-	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const configs = yield* loadServerConfigs(tool)
 	const candidates =
 		input.query !== undefined && filePath === undefined && input.server === undefined
 			? configs
@@ -263,14 +259,6 @@ const lspSymbolsOperation = Effect.fn(function* lspSymbolsOperation(
 	)
 })
 
-export const lspSymbols = Effect.fn(function* lspSymbols(
-	pluginInput: PluginInput,
-	input: LspSymbolsInput,
-	context: ToolContext,
-) {
-	return yield* withCancellation(
-		'lsp_symbols',
-		context.abort,
-		lspSymbolsOperation(pluginInput, input, context),
-	)
+export const lspSymbols = Effect.fn(function* lspSymbols(input: LspSymbolsInput) {
+	return yield* lspSymbolsOperation(input)
 })

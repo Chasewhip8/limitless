@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest'
 const productionDirectory = fileURLToPath(new URL('..', import.meta.url))
 const workspaceRoot = fileURLToPath(new URL('../../..', import.meta.url))
 const rootIndex = path.join(productionDirectory, 'index.ts')
-const toolBoundary = path.join(productionDirectory, 'core', 'tool-boundary.ts')
+const toolBoundary = path.join(productionDirectory, 'plugin', 'tool-boundary.ts')
 const exampleDocsScript = path.join(workspaceRoot, 'scripts', 'generate-example-docs.ts')
 const limitlessPackage = path.join(productionDirectory, 'package.json')
 const lspDirectory = path.join(productionDirectory, 'tools', 'lsp')
@@ -16,15 +16,9 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 	['.', new Set(['index.ts'])],
 	[
 		'core',
-		new Set([
-			'command.ts',
-			'errors.ts',
-			'filesystem.ts',
-			'paths.ts',
-			'storage.ts',
-			'tool-boundary.ts',
-		]),
+		new Set(['command.ts', 'errors.ts', 'execution.ts', 'filesystem.ts', 'paths.ts', 'storage.ts']),
 	],
+	['plugin', new Set(['tool-boundary.ts'])],
 	['lib', new Set(['guards.ts', 'type-utils.ts'])],
 	['tools', new Set(['ast-grep.ts', 'diagnostics.ts'])],
 	[
@@ -102,7 +96,14 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 
 const operationalTypes = new Map([
 	['core/command.ts', new Set(['RunOptions'])],
+	['core/execution.ts', new Set(['ToolExecutionContext'])],
+	['integrations/notifications/runner.ts', new Set(['NotificationSessionLookup'])],
+	[
+		'plugin/tool-boundary.ts',
+		new Set(['SessionDirectoryResolver', 'ToolErrorEncoder', 'ToolExecutor']),
+	],
 	['tools/github/runtime.ts', new Set(['GitRuntime', 'GitHubCloneRuntime'])],
+	['tools/lsp/config.ts', new Set(['LspConfig'])],
 	['tools/lsp/runtime.ts', new Set(['LspRuntimeState', 'LspConnectionRuntime'])],
 	[
 		'integrations/slack/runtime.ts',
@@ -121,6 +122,16 @@ const operationalTypes = new Map([
 		]),
 	],
 	['integrations/slack/runner.ts', new Set(['SlackRunner'])],
+])
+
+const openCodeAdapterModules = new Set([
+	'index.ts',
+	'plugin/tool-boundary.ts',
+	'tools/artifacts/tools.ts',
+	'tools/ast-grep.ts',
+	'tools/diagnostics.ts',
+	'tools/github/tools.ts',
+	'tools/lsp/tools.ts',
 ])
 
 const operationSchemas = new Map<string, ReadonlySet<string>>([
@@ -292,7 +303,7 @@ const barrelSurfaces = new Map<string, ReadonlySet<string>>([
 			'normalizeGitHubPluginConfig',
 		]),
 	],
-	['tools/lsp/index.ts', new Set(['lspTools'])],
+	['tools/lsp/index.ts', new Set(['LspConfig', 'decodeLspConfig', 'lspTools'])],
 	[
 		'integrations/notifications/index.ts',
 		new Set([
@@ -302,6 +313,7 @@ const barrelSurfaces = new Map<string, ReadonlySet<string>>([
 			'NotificationConfigError',
 			'createNotificationRunner',
 			'normalizeNotificationConfig',
+			'NotificationSessionLookupError',
 		]),
 	],
 	[
@@ -617,6 +629,7 @@ describe('production architecture', () => {
 			expect.arrayContaining([
 				'packages/limitless/core/**/*.ts',
 				'packages/limitless/lib/**/*.ts',
+				'packages/limitless/plugin/**/*.ts',
 				'packages/limitless/tools/**/*.ts',
 				'packages/limitless/integrations/**/*.ts',
 			]),
@@ -654,6 +667,17 @@ describe('production architecture', () => {
 				effectImportBindings(sourceFile, 'Schema'),
 			)
 			const specifiers = moduleSpecifiers(sourceFile)
+			for (const specifier of specifiers) {
+				if (
+					(specifier === '@opencode-ai/plugin' || specifier === '@opencode-ai/plugin/tool') &&
+					!openCodeAdapterModules.has(relative)
+				) {
+					violations.push(`${relative} imports the OpenCode V1 plugin API`)
+				}
+				if (specifier.startsWith('@opencode-ai/core/')) {
+					violations.push(`${relative} imports a private OpenCode Core API`)
+				}
+			}
 			const targets = specifiers
 				.map((specifier) => resolveRelativeImport(sourceFile, specifier, productionFiles))
 				.filter((target): target is string => target !== undefined)

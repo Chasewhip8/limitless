@@ -22,7 +22,6 @@ export const runGit = Effect.fn('runGit')(function* (
 		cwd,
 		timeout: runtime.timeoutMs,
 		env: runtime.env,
-		signal: runtime.signal,
 	})
 	return {
 		...result,
@@ -39,7 +38,6 @@ export const git = Effect.fn('git')(function* (
 ) {
 	const result = yield* runGit(runtime, args, cwd)
 	if (!result.ok) {
-		if (runtime.signal.aborted) return yield* cloneFailure('ABORTED', `Git ${action} was aborted.`)
 		const detail = trimmed(result.stderr) ?? trimmed(result.stdout) ?? 'Git exited without output.'
 		return yield* cloneFailure('GIT_COMMAND_FAILED', `Git ${action} failed: ${detail}`)
 	}

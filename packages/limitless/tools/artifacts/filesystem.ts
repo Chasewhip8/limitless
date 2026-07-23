@@ -14,7 +14,7 @@ import {
 function operationPromise<Value>(
 	toolName: string,
 	message: string,
-	operation: () => PromiseLike<Value>,
+	operation: (signal: AbortSignal) => PromiseLike<Value>,
 ): Effect.Effect<Value, ToolOperationError> {
 	return Effect.tryPromise({
 		try: operation,
@@ -245,7 +245,9 @@ const readTextFile = Effect.fn(function* readTextFile(
 	toolName: string,
 	message: string,
 ) {
-	return yield* operationPromise(toolName, message, () => readFile(filePath, 'utf8'))
+	return yield* operationPromise(toolName, message, (signal) =>
+		readFile(filePath, { encoding: 'utf8', signal }),
+	)
 })
 
 export const readJsonFile = Effect.fn(function* readJsonFile<Decoded>(

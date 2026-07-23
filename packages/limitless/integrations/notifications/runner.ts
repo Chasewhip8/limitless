@@ -1,76 +1,57 @@
-import { Effect, Option, Ref, Schema } from 'effect'
+import { Effect, Option, Schema } from 'effect'
 import { schemaErrorMessage } from '../../lib/guards'
 import type { NotificationConfig } from './config'
 import { runNotificationCommand } from './events'
-import type { NotificationEvent } from './schema'
-import { NotificationEventEnvelope, NotificationOpenCodeEvent } from './schema'
+import {
+	NotificationEventEnvelope,
+	NotificationOpenCodeEvent,
+	type NotificationSession,
+	type NotificationSessionLookupError,
+} from './schema'
+
+export type NotificationSessionLookup = (
+	sessionID: string,
+) => Effect.Effect<NotificationSession, NotificationSessionLookupError>
 
 export const createNotificationRunner = Effect.fn('createNotificationRunner')(function* (
 	config: NotificationConfig,
 ) {
-	const state = yield* Ref.make({
-		childSessionIds: new Set<string>(),
-		completedIdleSessionIds: new Set<string>(),
-	})
 	const handleDecodedEvent = Effect.fn('NotificationRunner.handleDecodedEvent')(function* (
 		event: NotificationOpenCodeEvent,
+		lookupSession: NotificationSessionLookup,
 	) {
-		switch (event.type) {
-			case 'session.created':
-			case 'session.updated':
-				yield* Ref.update(state, (current) => {
-					const childSessionIds = new Set(current.childSessionIds)
-					if (event.properties.info.parentID !== undefined)
-						childSessionIds.add(event.properties.info.id)
-					else childSessionIds.delete(event.properties.info.id)
-					return { ...current, childSessionIds }
-				})
-				return
-			case 'session.deleted':
-				yield* Ref.update(state, (current) => {
-					const childSessionIds = new Set(current.childSessionIds)
-					const completedIdleSessionIds = new Set(current.completedIdleSessionIds)
-					childSessionIds.delete(event.properties.info.id)
-					completedIdleSessionIds.delete(event.properties.info.id)
-					return { childSessionIds, completedIdleSessionIds }
-				})
-				return
-			case 'session.status':
-				if (event.properties.status.type !== 'busy') return
-				yield* Ref.update(state, (current) => {
-					const completedIdleSessionIds = new Set(current.completedIdleSessionIds)
-					completedIdleSessionIds.delete(event.properties.sessionID)
-					return { ...current, completedIdleSessionIds }
-				})
-				return
-			case 'session.idle': {
-				const shouldNotify = yield* Ref.modify(state, (current) => {
-					const sessionID = event.properties.sessionID
-					if (!config.includeChildSessions && current.childSessionIds.has(sessionID))
-						return [false, current]
-					if (current.completedIdleSessionIds.has(sessionID)) return [false, current]
-					const completedIdleSessionIds = new Set(current.completedIdleSessionIds)
-					completedIdleSessionIds.add(sessionID)
-					return [true, { ...current, completedIdleSessionIds }]
-				})
-				if (shouldNotify) yield* runNotificationCommand(config, 'complete')
-				return
-			}
+		if (event.type === 'permission.v2.asked') {
+			yield* runNotificationCommand(config, 'permission')
+			return
 		}
+		if (event.type === 'question.v2.asked') {
+			yield* runNotificationCommand(config, 'question')
+			return
+		}
+		const session = yield* lookupSession(event.data.sessionID).pipe(
+			Effect.catch((error) =>
+				Effect.logError(`[limitless] notification session lookup failed: ${error.message}`).pipe(
+					Effect.as<NotificationSession>({}),
+				),
+			),
+		)
+		if (!config.includeChildSessions && session.parentID !== undefined) return
+		yield* runNotificationCommand(config, 'complete')
 	})
+
 	return {
-		notify: (event: NotificationEvent) => runNotificationCommand(config, event),
-		handleEvent: (event: unknown) => {
+		notify: runNotificationCommand.bind(null, config),
+		handleEvent: (event: unknown, lookupSession: NotificationSessionLookup) => {
 			if (!config.enabled) return Effect.void
 			const envelope = Schema.decodeUnknownOption(NotificationEventEnvelope)(event)
 			if (
 				Option.isNone(envelope) ||
 				![
-					'session.created',
-					'session.updated',
-					'session.deleted',
-					'session.status',
-					'session.idle',
+					'permission.v2.asked',
+					'question.v2.asked',
+					'session.execution.succeeded',
+					'session.execution.failed',
+					'session.execution.interrupted',
 				].includes(envelope.value.type)
 			)
 				return Effect.void
@@ -80,7 +61,7 @@ export const createNotificationRunner = Effect.fn('createNotificationRunner')(fu
 						Effect.logWarning(
 							`[limitless] ignored malformed ${envelope.value.type} notification event: ${schemaErrorMessage(error)}`,
 						),
-					onSuccess: handleDecodedEvent,
+					onSuccess: (decoded) => handleDecodedEvent(decoded, lookupSession),
 				}),
 			)
 		},

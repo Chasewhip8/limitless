@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises'
-import type { ToolContext } from '@opencode-ai/plugin'
 import { Effect, Option, Result, Schema } from 'effect'
 import { isMissingPath, toolOperationError } from '../../core/errors'
+import { ToolExecutionContext } from '../../core/execution'
 import { optionalField } from '../../lib/type-utils'
 import { artifactRelativePath, ensureArtifactsRoot, readArtifactManifest } from './paths'
 import {
@@ -61,11 +61,9 @@ const readArtifactsDirectory = Effect.fn(function* readArtifactsDirectory(root: 
 	})
 })
 
-export const artifactList = Effect.fn(function* artifactList(
-	input: ArtifactListInput,
-	context: ToolContext,
-) {
-	const root = yield* ensureArtifactsRoot(context.worktree, false, 'artifact_list')
+export const artifactList = Effect.fn(function* artifactList(input: ArtifactListInput) {
+	const context = yield* ToolExecutionContext
+	const root = yield* ensureArtifactsRoot(context.projectRoot, false, 'artifact_list')
 	if (root === undefined) return ArtifactListResult.make({ ok: true, artifacts: [] })
 	const entries = yield* readArtifactsDirectory(root)
 	const artifacts: Array<ArtifactListEntry> = []
@@ -75,7 +73,7 @@ export const artifactList = Effect.fn(function* artifactList(
 		const slug = artifactSlugFromString(entry.name)
 		if (slug === undefined) continue
 		const manifest = yield* Effect.result(
-			readArtifactManifest(context.worktree, slug, 'artifact_list'),
+			readArtifactManifest(context.projectRoot, slug, 'artifact_list'),
 		)
 		if (Result.isFailure(manifest)) {
 			if (manifest.failure._tag !== 'ToolInputError' && !isMissingPath(manifest.failure)) {

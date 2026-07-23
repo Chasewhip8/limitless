@@ -1,14 +1,13 @@
 import path from 'node:path'
-import type { ToolContext } from '@opencode-ai/plugin'
 
 export function workspaceRoot(
 	input: { readonly workspace?: string | undefined },
-	context: ToolContext,
+	projectRoot: string,
 ): string {
-	if (input.workspace === undefined) return path.resolve(context.worktree)
+	if (input.workspace === undefined) return path.resolve(projectRoot)
 	return path.isAbsolute(input.workspace)
 		? path.resolve(input.workspace)
-		: path.resolve(context.worktree, input.workspace)
+		: path.resolve(projectRoot, input.workspace)
 }
 
 export function workspacePath(workspace: string, filePath: string): string {

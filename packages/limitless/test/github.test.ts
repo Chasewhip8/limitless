@@ -4,9 +4,12 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
-import type { ToolContext } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
 import { afterEach, describe, expect, test, vi } from 'vitest'
+import {
+	ToolExecutionContext,
+	type ToolExecutionContext as ToolExecutionContextType,
+} from '../core/execution'
 import { resolveGitHubConfig } from '../index'
 import { githubClone as githubCloneEffect } from '../tools/github/clone'
 import { type GitHubCloneOptions, GitHubCloneResult } from '../tools/github/clone-schema'
@@ -14,6 +17,7 @@ import { normalizeGitHubPluginConfig } from '../tools/github/config'
 import { assertAllowedRepo, cloneDirectoryName, normalizeRepo } from '../tools/github/repository'
 import { makeGitHubCloneRuntime } from '../tools/github/runtime'
 import { resolveGitHubSubmoduleUrl } from '../tools/github/submodules'
+import { testToolExecution } from './execution'
 
 const execFileAsync = promisify(execFile)
 const tokenEnv = 'LIMITLESS_TEST_GITHUB_TOKEN'
@@ -128,30 +132,20 @@ async function createWorktree(root: string): Promise<string> {
 	return worktree
 }
 
-function toolContext(worktree: string, signal = new AbortController().signal): ToolContext {
-	return {
-		sessionID: 'session',
-		messageID: 'message',
-		agent: 'limitless',
-		directory: worktree,
-		worktree,
-		abort: signal,
-		metadata: () => undefined,
-		ask: () => {
-			throw new Error('ask is not used by githubClone tests')
-		},
-	}
+function toolContext(worktree: string): ToolExecutionContextType {
+	return testToolExecution(worktree)
 }
 
 function githubClone(
 	config: Parameters<typeof githubCloneEffect>[0],
 	input: Parameters<typeof githubCloneEffect>[1],
-	context: Parameters<typeof githubCloneEffect>[2],
+	context: ToolExecutionContextType,
 	options: GitHubCloneOptions = {},
 ) {
 	return Effect.runPromise(
-		githubCloneEffect(config, input, context, cloneRuntime, options).pipe(
+		githubCloneEffect(config, input, cloneRuntime, options).pipe(
 			Effect.flatMap(Schema.decodeUnknownEffect(GitHubCloneResult)),
+			Effect.provideService(ToolExecutionContext, context),
 		),
 	)
 }
@@ -194,15 +188,11 @@ describe('GitHub configuration and naming', () => {
 		warn.mockRestore()
 	})
 
-	test('returns a typed config failure and recovers with one warning at initialization', async () => {
+	test('returns a typed config failure without silently disabling GitHub', async () => {
 		const malformed = { github: { enable: true, allowedRepos: ['owner/repo', 42] } }
 		const error = await Effect.runPromise(normalizeGitHubPluginConfig(malformed).pipe(Effect.flip))
 		expect(error._tag).toBe('GitHubConfigError')
-
-		const warn = vi.spyOn(console, 'log').mockImplementation(() => {})
-		expect((await Effect.runPromise(resolveGitHubConfig(malformed))).enabled).toBe(false)
-		expect(warn).toHaveBeenCalledTimes(1)
-		warn.mockRestore()
+		await expect(Effect.runPromise(resolveGitHubConfig(malformed))).rejects.toThrow()
 	})
 
 	test('validates repositories and allowlists', async () => {
@@ -400,22 +390,6 @@ describe('GitHub clone lifecycle', () => {
 		if (result.ok) throw new Error('Expected repository policy failure')
 		expect(result.error.code).toBe('REPOSITORY_NOT_ALLOWED')
 		expect(await readdir(worktree)).toEqual([])
-	})
-
-	test('propagates cancellation before starting Git', async () => {
-		const root = await testRoot()
-		const worktree = await createWorktree(root)
-		const abort = new AbortController()
-		abort.abort()
-		const result = await githubClone(
-			unrestrictedConfig,
-			{ repo: 'owner/repo' },
-			toolContext(worktree, abort.signal),
-			{ gitBin: 'git' },
-		)
-		expect(result.ok).toBe(false)
-		if (result.ok) throw new Error('Expected aborted clone')
-		expect(result.error.code).toBe('ABORTED')
 	})
 
 	test('sanitizes token-bearing Git environment and removes failed staging checkouts', async () => {

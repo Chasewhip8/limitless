@@ -1,7 +1,7 @@
-import type { PluginInput, ToolContext } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
 import { ImplementationRequest } from 'vscode-languageserver-protocol/node'
 import { DEFAULT_TIMEOUT_MS } from '../../core/command'
+import { ToolExecutionContext } from '../../core/execution'
 import { workspaceRelative, workspaceRoot } from '../../core/paths'
 import { loadServerConfigs } from './config'
 import {
@@ -10,7 +10,6 @@ import {
 	resolveFile,
 	resolvePosition,
 	runOnCapableServer,
-	withCancellation,
 	withDocument,
 } from './connection'
 import { decodeServerValue } from './errors'
@@ -47,15 +46,14 @@ export const LspImplementationResult = Schema.Struct({
 export type LspImplementationResult = typeof LspImplementationResult.Type
 
 const lspImplementationOperation = Effect.fn(function* lspImplementationOperation(
-	pluginInput: PluginInput,
 	input: LspImplementationInput,
-	context: ToolContext,
 ) {
+	const context = yield* ToolExecutionContext
 	const tool = 'lsp_implementation' as const
-	const workspace = workspaceRoot(input, context)
+	const workspace = workspaceRoot(input, context.projectRoot)
 	const filePath = yield* resolveFile(tool, workspace, input)
 	const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-	const configs = yield* loadServerConfigs(pluginInput, tool, workspace)
+	const configs = yield* loadServerConfigs(tool)
 	const candidates = yield* requireCandidates(tool, configs, filePath, input.server)
 	return yield* runOnCapableServer(
 		tool,
@@ -103,13 +101,7 @@ const lspImplementationOperation = Effect.fn(function* lspImplementationOperatio
 })
 
 export const lspImplementation = Effect.fn(function* lspImplementation(
-	pluginInput: PluginInput,
 	input: LspImplementationInput,
-	context: ToolContext,
 ) {
-	return yield* withCancellation(
-		'lsp_implementation',
-		context.abort,
-		lspImplementationOperation(pluginInput, input, context),
-	)
+	return yield* lspImplementationOperation(input)
 })

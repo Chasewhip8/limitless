@@ -1,34 +1,19 @@
 import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { Option, Schema } from 'effect'
+import { Effect, Option, Schema } from 'effect'
 import { runPromise } from 'effect/Effect'
 import { afterEach, describe, expect, test } from 'vitest'
+import { ToolExecutionContext } from '../core/execution'
 import {
 	AstGrepReplaceInput,
 	AstGrepSearchInput,
 	astGrepMutationScopeGap,
 	astGrepReplace,
 } from '../tools/ast-grep'
+import { testToolExecution } from './execution'
 
 const tempDirectories: Array<string> = []
-type AstGrepContext = Parameters<typeof astGrepReplace>[1]
-
-function context(root: string): AstGrepContext {
-	return {
-		sessionID: 'session',
-		messageID: 'message',
-		agent: 'limitless',
-		directory: root,
-		worktree: root,
-		abort: new AbortController().signal,
-		metadata: () => undefined,
-		ask: () => {
-			throw new Error('ask is not used by ast-grep tests')
-		},
-	}
-}
-
 async function worktree(): Promise<string> {
 	const directory = await mkdtemp(path.join(tmpdir(), 'limitless-astgrep-'))
 	tempDirectories.push(directory)
@@ -60,7 +45,11 @@ describe('ast-grep managed repository guardrail', () => {
 		)
 		await expect(runPromise(astGrepMutationScopeGap(root, root, ['src']))).resolves.toBeUndefined()
 		await expect(
-			runPromise(astGrepReplace({ pattern: '$A', rewrite: '$A', dryRun: false }, context(root))),
+			runPromise(
+				astGrepReplace({ pattern: '$A', rewrite: '$A', dryRun: false }).pipe(
+					Effect.provideService(ToolExecutionContext, testToolExecution(root)),
+				),
+			),
 		).resolves.toEqual({
 			ok: false,
 			error:
