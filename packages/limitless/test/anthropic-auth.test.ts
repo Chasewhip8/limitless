@@ -579,7 +579,7 @@ describe('published Anthropic loader and AI SDK integration', () => {
 
 					const event: AISDKHooks['sdk'] = {
 						model: {} as AISDKHooks['sdk']['model'],
-						package: '@limitless/anthropic-subscription',
+						package: 'aisdk:@limitless/anthropic-subscription',
 						options: { apiKey: credential.access },
 					}
 					if (sdkHook === undefined) throw new Error('SDK hook was not registered')

@@ -122,7 +122,10 @@ function configureAnthropicSubscriptionSdk(
 	loader: AnthropicV1AuthLoader,
 	resolveCredential: ResolveAnthropicCredential,
 ) {
-	if (event.package !== ANTHROPIC_OAUTH_PROVIDER_PACKAGE.slice('aisdk:'.length)) {
+	if (
+		event.package !== ANTHROPIC_OAUTH_PROVIDER_PACKAGE &&
+		event.package !== ANTHROPIC_OAUTH_PROVIDER_PACKAGE.slice('aisdk:'.length)
+	) {
 		return Effect.void
 	}
 
