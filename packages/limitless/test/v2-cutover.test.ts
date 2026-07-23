@@ -105,6 +105,8 @@ describe('decisive OpenCode 2 cutover', () => {
 			expect(sources.get(name), name).toContain(`model: ${model}`)
 			expect(sources.get(name), name).not.toMatch(/^request:/mu)
 		}
+		expect(sources.get('limitless.md')).toContain('color: "#F8BBD0"')
+		expect(sources.get('limitless-focus.md')).toContain('color: "#FFD700"')
 		expect([...sources.values()].join('\n')).toContain('permissions:')
 	})
 
