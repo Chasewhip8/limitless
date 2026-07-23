@@ -473,7 +473,7 @@ describe('Anthropic provider isolation', () => {
 	test('adapts only the Anthropic catalog after this OAuth method connects', () => {
 		const values = catalogDraft()
 		transformAnthropicOAuthCatalog(values.draft, true)
-		expect(values.anthropicProvider.package).toBe('aisdk:@limitless/anthropic-subscription')
+		expect(values.anthropicProvider.package).toBe('aisdk:@ai-sdk/anthropic')
 		expect(values.anthropicModel.cost).toEqual([])
 		expect(values.openaiProvider.package).toBe('aisdk:@ai-sdk/openai')
 		expect(values.openaiModel.cost).toEqual([{ input: 1, output: 1 }])
@@ -590,9 +590,7 @@ describe('Anthropic provider isolation', () => {
 					const connected = catalogDraft()
 					catalogTransform?.(connected.draft)
 					expect(connected.anthropicProvider.disabled).toBe(false)
-					expect(connected.anthropicProvider.package).toBe(
-						'aisdk:@limitless/anthropic-subscription',
-					)
+					expect(connected.anthropicProvider.package).toBe('aisdk:@ai-sdk/anthropic')
 				}),
 			),
 		)
@@ -600,7 +598,7 @@ describe('Anthropic provider isolation', () => {
 })
 
 describe('Anthropic AI SDK boundary', () => {
-	test('replaces API-key setup only for the synthetic subscription package', async () => {
+	test('replaces native Anthropic API-key setup for an active subscription', async () => {
 		let requestHeaders: Headers | undefined
 		const upstream: typeof fetch = async (_input, init) => {
 			requestHeaders = new Headers(init?.headers)
@@ -608,11 +606,11 @@ describe('Anthropic AI SDK boundary', () => {
 		}
 		const event = {
 			model: {} as never,
-			package: '@limitless/anthropic-subscription',
+			package: '@ai-sdk/anthropic',
 			options: { apiKey: 'oauth-access', fetch: upstream },
 		} as Parameters<typeof configureAnthropicSubscriptionSdk>[0]
 
-		configureAnthropicSubscriptionSdk(event)
+		configureAnthropicSubscriptionSdk(event, true)
 		expect(event.options.apiKey).toBeUndefined()
 		expect(event.options.authToken).toBe('oauth-access')
 		expect(event.sdk).toBeDefined()
@@ -621,14 +619,14 @@ describe('Anthropic AI SDK boundary', () => {
 		expect(requestHeaders?.get('x-api-key')).toBeNull()
 	})
 
-	test('leaves non-matching AI SDK packages untouched', () => {
+	test('leaves native Anthropic API-key setup untouched without an active subscription', () => {
 		const options = { apiKey: 'normal-api-key' }
 		const event = {
 			model: {} as never,
 			package: '@ai-sdk/anthropic',
 			options,
 		} as Parameters<typeof configureAnthropicSubscriptionSdk>[0]
-		configureAnthropicSubscriptionSdk(event)
+		configureAnthropicSubscriptionSdk(event, false)
 		expect(event.options).toBe(options)
 		expect(event.options).toEqual({ apiKey: 'normal-api-key' })
 		expect(event.sdk).toBeUndefined()

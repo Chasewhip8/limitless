@@ -308,7 +308,7 @@ const barrelSurfaces = new Map<string, ReadonlySet<string>>([
 		new Set([
 			'ANTHROPIC_INTEGRATION_ID',
 			'ANTHROPIC_OAUTH_METHOD_ID',
-			'ANTHROPIC_OAUTH_PROVIDER_PACKAGE',
+			'ANTHROPIC_PROVIDER_PACKAGE',
 			'AnthropicOAuthError',
 			'AnthropicSubscriptionAuthConfig',
 			'AnthropicSubscriptionAuthConfigError',

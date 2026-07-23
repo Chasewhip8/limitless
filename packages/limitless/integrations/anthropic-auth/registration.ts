@@ -8,8 +8,7 @@ import { DEFAULT_ANTHROPIC_SUBSCRIPTION_AUTH_CONFIG } from './config'
 import { ANTHROPIC_INTEGRATION_ID, ANTHROPIC_OAUTH_METHOD_ID, anthropicOAuthMethod } from './oauth'
 import { makeAnthropicOAuthFetch } from './provider-boundary'
 
-export const ANTHROPIC_OAUTH_PROVIDER_PACKAGE = 'aisdk:@limitless/anthropic-subscription'
-const nativeAnthropicProviderPackage = 'aisdk:@ai-sdk/anthropic'
+export const ANTHROPIC_PROVIDER_PACKAGE = 'aisdk:@ai-sdk/anthropic'
 
 export function registerAnthropicOAuthMethod(
 	draft: IntegrationDraft,
@@ -34,17 +33,9 @@ export function transformAnthropicOAuthCatalog(
 		return
 	}
 	if (!subscriptionConnected) return
-	if (anthropic.provider.package === nativeAnthropicProviderPackage) {
-		draft.provider.update(ANTHROPIC_INTEGRATION_ID, (provider) => {
-			provider.package = ANTHROPIC_OAUTH_PROVIDER_PACKAGE
-		})
-	}
 	for (const model of anthropic.models.values()) {
 		draft.model.update(ANTHROPIC_INTEGRATION_ID, model.id, (updated) => {
 			updated.cost = []
-			if (updated.package === nativeAnthropicProviderPackage) {
-				updated.package = ANTHROPIC_OAUTH_PROVIDER_PACKAGE
-			}
 		})
 	}
 }
@@ -60,8 +51,12 @@ export function isLimitlessAnthropicOAuthCredential(credential: unknown): boolea
 	)
 }
 
-export function configureAnthropicSubscriptionSdk(event: AISDKHooks['sdk']): void {
-	if (event.package !== ANTHROPIC_OAUTH_PROVIDER_PACKAGE.slice('aisdk:'.length)) return
+export function configureAnthropicSubscriptionSdk(
+	event: AISDKHooks['sdk'],
+	subscriptionConnected: boolean,
+): void {
+	if (!subscriptionConnected || event.package !== ANTHROPIC_PROVIDER_PACKAGE.slice('aisdk:'.length))
+		return
 	const accessToken = event.options.apiKey
 	if (typeof accessToken !== 'string' || accessToken.length === 0) {
 		throw new Error('Anthropic subscription OAuth resolved without an access token.')
@@ -116,7 +111,7 @@ export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSub
 		yield* ctx.aisdk.hook(
 			'sdk',
 			Effect.fn('configureAnthropicSubscriptionSdk')(function* (event) {
-				yield* Effect.sync(() => configureAnthropicSubscriptionSdk(event))
+				yield* Effect.sync(() => configureAnthropicSubscriptionSdk(event, subscriptionConnected))
 			}),
 		)
 
