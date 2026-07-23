@@ -8,7 +8,6 @@ import {
 	ANTHROPIC_INTEGRATION_ID,
 	ANTHROPIC_OAUTH_METHOD_ID,
 	anthropicOAuthMethod,
-	configureAnthropicSubscriptionSdk,
 	isLimitlessAnthropicOAuthCredential,
 	normalizeAnthropicSubscriptionAuthConfig,
 	registerAnthropicOAuthMethod,
@@ -417,12 +416,14 @@ describe('Anthropic provider isolation', () => {
 			id: 'anthropic',
 			name: 'Anthropic',
 			package: 'aisdk:@ai-sdk/anthropic',
+			headers: undefined as Record<string, string> | undefined,
 			disabled: false,
 		}
 		const openaiProvider = {
 			id: 'openai',
 			name: 'OpenAI',
 			package: 'aisdk:@ai-sdk/openai',
+			headers: undefined as Record<string, string> | undefined,
 			disabled: false,
 		}
 		const anthropicModel = {
@@ -473,7 +474,8 @@ describe('Anthropic provider isolation', () => {
 	test('adapts only the Anthropic catalog after this OAuth method connects', () => {
 		const values = catalogDraft()
 		transformAnthropicOAuthCatalog(values.draft, true)
-		expect(values.anthropicProvider.package).toBe('aisdk:@ai-sdk/anthropic')
+		expect(values.anthropicProvider.package).toBe('@opencode-ai/ai/providers/anthropic')
+		expect(values.anthropicProvider.headers?.['anthropic-beta']).toContain('oauth-2025-04-20')
 		expect(values.anthropicModel.cost).toEqual([])
 		expect(values.openaiProvider.package).toBe('aisdk:@ai-sdk/openai')
 		expect(values.openaiModel.cost).toEqual([{ input: 1, output: 1 }])
@@ -563,7 +565,7 @@ describe('Anthropic provider isolation', () => {
 						if (reloads === 2) markReloaded?.()
 					}),
 			},
-			aisdk: { hook: () => Effect.void },
+			session: { hook: () => Effect.void },
 			event: {
 				subscribe: () =>
 					Stream.fromEffect(Effect.promise(() => connectionUpdate)).pipe(
@@ -590,45 +592,9 @@ describe('Anthropic provider isolation', () => {
 					const connected = catalogDraft()
 					catalogTransform?.(connected.draft)
 					expect(connected.anthropicProvider.disabled).toBe(false)
-					expect(connected.anthropicProvider.package).toBe('aisdk:@ai-sdk/anthropic')
+					expect(connected.anthropicProvider.package).toBe('@opencode-ai/ai/providers/anthropic')
 				}),
 			),
 		)
-	})
-})
-
-describe('Anthropic AI SDK boundary', () => {
-	test('replaces native Anthropic API-key setup for an active subscription', async () => {
-		let requestHeaders: Headers | undefined
-		const upstream: typeof fetch = async (_input, init) => {
-			requestHeaders = new Headers(init?.headers)
-			return new Response('ok')
-		}
-		const event = {
-			model: {} as never,
-			package: '@ai-sdk/anthropic',
-			options: { apiKey: 'oauth-access', fetch: upstream },
-		} as Parameters<typeof configureAnthropicSubscriptionSdk>[0]
-
-		configureAnthropicSubscriptionSdk(event, true)
-		expect(event.options.apiKey).toBeUndefined()
-		expect(event.options.authToken).toBe('oauth-access')
-		expect(event.sdk).toBeDefined()
-		await event.options.fetch('https://api.anthropic.com/v1/messages', { method: 'GET' })
-		expect(requestHeaders?.get('authorization')).toBe('Bearer oauth-access')
-		expect(requestHeaders?.get('x-api-key')).toBeNull()
-	})
-
-	test('leaves native Anthropic API-key setup untouched without an active subscription', () => {
-		const options = { apiKey: 'normal-api-key' }
-		const event = {
-			model: {} as never,
-			package: '@ai-sdk/anthropic',
-			options,
-		} as Parameters<typeof configureAnthropicSubscriptionSdk>[0]
-		configureAnthropicSubscriptionSdk(event, false)
-		expect(event.options).toBe(options)
-		expect(event.options).toEqual({ apiKey: 'normal-api-key' })
-		expect(event.sdk).toBeUndefined()
 	})
 })

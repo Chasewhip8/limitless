@@ -314,7 +314,6 @@ const barrelSurfaces = new Map<string, ReadonlySet<string>>([
 			'AnthropicSubscriptionAuthConfigError',
 			'DEFAULT_ANTHROPIC_SUBSCRIPTION_AUTH_CONFIG',
 			'anthropicOAuthMethod',
-			'configureAnthropicSubscriptionSdk',
 			'isLimitlessAnthropicOAuthCredential',
 			'normalizeAnthropicSubscriptionAuthConfig',
 			'registerAnthropicOAuthMethod',

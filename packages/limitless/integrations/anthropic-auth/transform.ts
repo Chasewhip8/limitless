@@ -136,7 +136,10 @@ export function sanitizeAnthropicSystemText(text: string): string {
 	return sanitized.trim()
 }
 
-function systemBlock(text: string, properties: Record<string, unknown> = {}) {
+function systemBlock(
+	text: string,
+	properties: Record<string, unknown> = {},
+): { type: 'text'; text: string } {
 	return { ...properties, type: 'text', text }
 }
 
@@ -189,6 +192,13 @@ function billingHeader(messages: ReadonlyArray<unknown>): string {
 	return `x-anthropic-billing-header: cc_version=${CLAUDE_CODE_VERSION}.${suffix}; cc_entrypoint=${claudeCodeEntrypoint}; cch=${cch};`
 }
 
+export function prepareAnthropicOAuthSystem(system: unknown, messages: ReadonlyArray<unknown>) {
+	const prepared = prependClaudeCodeIdentity(system)
+	return messages.some((message) => isRecord(message) && message.role === 'user')
+		? [systemBlock(billingHeader(messages)), ...prepared]
+		: prepared
+}
+
 function prefixRequestToolNames(body: Record<string, unknown>): Record<string, unknown> {
 	const tools = Array.isArray(body.tools)
 		? body.tools.map((tool) =>
@@ -219,10 +229,7 @@ export function rewriteAnthropicRequestBody(body: string): string {
 	)
 	if (!Schema.is(JsonRecord)(decoded)) return body
 	const messages = Array.isArray(decoded.messages) ? decoded.messages : []
-	const system = prependClaudeCodeIdentity(decoded.system)
-	const withBilling = messages.some((message) => isRecord(message) && message.role === 'user')
-		? [systemBlock(billingHeader(messages)), ...system]
-		: system
+	const withBilling = prepareAnthropicOAuthSystem(decoded.system, messages)
 	return JSON.stringify(prefixRequestToolNames({ ...decoded, system: withBilling }))
 }
 

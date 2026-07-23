@@ -12,7 +12,6 @@ export {
 } from './oauth'
 export {
 	ANTHROPIC_PROVIDER_PACKAGE,
-	configureAnthropicSubscriptionSdk,
 	isLimitlessAnthropicOAuthCredential,
 	registerAnthropicOAuthMethod,
 	registerAnthropicSubscriptionAuth,

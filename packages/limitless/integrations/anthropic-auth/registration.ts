@@ -1,14 +1,29 @@
-import { createAnthropic } from '@ai-sdk/anthropic'
 import type { Plugin } from '@opencode-ai/plugin/v2/effect'
-import type { AISDKHooks } from '@opencode-ai/plugin/v2/effect/aisdk'
 import type { CatalogDraft } from '@opencode-ai/plugin/v2/effect/catalog'
 import type { IntegrationDraft } from '@opencode-ai/plugin/v2/effect/integration'
 import { Cause, Effect, Semaphore, Stream } from 'effect'
 import { DEFAULT_ANTHROPIC_SUBSCRIPTION_AUTH_CONFIG } from './config'
 import { ANTHROPIC_INTEGRATION_ID, ANTHROPIC_OAUTH_METHOD_ID, anthropicOAuthMethod } from './oauth'
-import { makeAnthropicOAuthFetch } from './provider-boundary'
+import {
+	CLAUDE_CODE_USER_AGENT,
+	prepareAnthropicOAuthSystem,
+	REQUIRED_ANTHROPIC_OAUTH_BETAS,
+} from './transform'
 
-export const ANTHROPIC_PROVIDER_PACKAGE = 'aisdk:@ai-sdk/anthropic'
+export const ANTHROPIC_PROVIDER_PACKAGE = '@opencode-ai/ai/providers/anthropic'
+const anthropicAISDKPackage = 'aisdk:@ai-sdk/anthropic'
+
+function mergeAnthropicOAuthBetas(current: string | undefined): string {
+	return [
+		...new Set([
+			...REQUIRED_ANTHROPIC_OAUTH_BETAS,
+			...(current ?? '')
+				.split(',')
+				.map((value) => value.trim())
+				.filter(Boolean),
+		]),
+	].join(',')
+}
 
 export function registerAnthropicOAuthMethod(
 	draft: IntegrationDraft,
@@ -33,9 +48,22 @@ export function transformAnthropicOAuthCatalog(
 		return
 	}
 	if (!subscriptionConnected) return
+	draft.provider.update(ANTHROPIC_INTEGRATION_ID, (provider) => {
+		// OpenCode handles this native package before AI SDK hooks and maps OAuth credentials to Bearer auth.
+		if (provider.package === anthropicAISDKPackage) provider.package = ANTHROPIC_PROVIDER_PACKAGE
+		provider.headers = {
+			...provider.headers,
+			accept: 'application/json',
+			'anthropic-beta': mergeAnthropicOAuthBetas(provider.headers?.['anthropic-beta']),
+			'anthropic-dangerous-direct-browser-access': 'true',
+			'user-agent': CLAUDE_CODE_USER_AGENT,
+			'x-app': 'cli',
+		}
+	})
 	for (const model of anthropic.models.values()) {
 		draft.model.update(ANTHROPIC_INTEGRATION_ID, model.id, (updated) => {
 			updated.cost = []
+			if (updated.package === anthropicAISDKPackage) updated.package = ANTHROPIC_PROVIDER_PACKAGE
 		})
 	}
 }
@@ -49,23 +77,6 @@ export function isLimitlessAnthropicOAuthCredential(credential: unknown): boolea
 		'methodID' in credential &&
 		credential.methodID === ANTHROPIC_OAUTH_METHOD_ID
 	)
-}
-
-export function configureAnthropicSubscriptionSdk(
-	event: AISDKHooks['sdk'],
-	subscriptionConnected: boolean,
-): void {
-	if (!subscriptionConnected || event.package !== ANTHROPIC_PROVIDER_PACKAGE.slice('aisdk:'.length))
-		return
-	const accessToken = event.options.apiKey
-	if (typeof accessToken !== 'string' || accessToken.length === 0) {
-		throw new Error('Anthropic subscription OAuth resolved without an access token.')
-	}
-	const upstreamFetch = typeof event.options.fetch === 'function' ? event.options.fetch : fetch
-	delete event.options.apiKey
-	event.options.authToken = accessToken
-	event.options.fetch = makeAnthropicOAuthFetch(accessToken, upstreamFetch)
-	event.sdk = createAnthropic(event.options)
 }
 
 export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSubscriptionAuth')(
@@ -108,11 +119,14 @@ export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSub
 		yield* ctx.catalog.transform((draft) => {
 			transformAnthropicOAuthCatalog(draft, subscriptionConnected, blocked)
 		})
-		yield* ctx.aisdk.hook(
-			'sdk',
-			Effect.fn('configureAnthropicSubscriptionSdk')(function* (event) {
-				yield* Effect.sync(() => configureAnthropicSubscriptionSdk(event, subscriptionConnected))
-			}),
+		yield* ctx.session.hook(
+			'context',
+			Effect.fn('configureAnthropicSubscriptionContext')((event) =>
+				Effect.sync(() => {
+					if (!subscriptionConnected || event.model.providerID !== ANTHROPIC_INTEGRATION_ID) return
+					event.system = prepareAnthropicOAuthSystem(event.system, event.messages)
+				}),
+			),
 		)
 
 		const loading = yield* Semaphore.make(1)
