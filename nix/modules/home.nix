@@ -24,8 +24,7 @@ let
   enabledLinear = cfg.enable && cfg.mcp.linear.enable;
   enabledOpencodeService = cfg.enable && cfg.opencode.service.enable;
 
-  opencodeServiceUrl = "http://${cfg.opencode.service.hostname}:${toString cfg.opencode.service.port}";
-  opencodeAttachCommand = "${cfg.opencode.package}/bin/opencode2 --server ${opencodeServiceUrl} \"$PWD\"";
+  opencodeAttachCommand = "${cfg.opencode.package}/bin/opencode2 \"$PWD\"";
 
   permissionRule = action: resource: effect: { inherit action resource effect; };
 
@@ -768,7 +767,7 @@ in
           };
 
           Service = {
-            ExecStart = "${cfg.opencode.package}/bin/opencode2 serve --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
+            ExecStart = "${cfg.opencode.package}/bin/opencode2 serve --service --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
             Restart = "on-failure";
             RestartSec = "5s";
           };

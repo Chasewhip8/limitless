@@ -121,7 +121,7 @@ The Limitless plugin uses `Plugin.define`, `Tool.make`, Effect Schema contracts,
 
 Language-server definitions for Limitless tools come only from validated Home Manager-generated plugin `options.lsp`. The tools intentionally do not read or merge effective OpenCode configuration, so project-local `lsp` overrides can affect OpenCode's own LSP behavior but are not observed by Limitless tools.
 
-Home Manager installs skills in the native global OpenCode 2 location, `~/.config/opencode/skills`. Service mode runs `opencode2 serve`; its shell alias connects with `opencode2 --server <url> "$PWD"`.
+Home Manager installs skills in the native global OpenCode 2 location, `~/.config/opencode/skills`. Service mode runs `opencode2 serve --service`, which registers its generated credential in OpenCode's state directory; the shell alias uses normal managed-service discovery to connect with that credential.
 
 The packaged GPT-5.6 Luna, Sol, and Terra models use the 400k short-context limits by default. Separate `-long` and `-fast-long` aliases advertise a conservative 500k context limit to OpenCode so compaction starts before the provider's full 1.05M window is exhausted. OpenAI does not officially support long context with Priority processing, so a Fast Long request may be downgraded to the default service tier.
 

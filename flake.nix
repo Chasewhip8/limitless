@@ -203,20 +203,18 @@
               assert pkgs.lib.assertMsg (
                 lspConfig.lsp != { } && (builtins.elemAt lspConfig.plugins 0).options.lsp == lspConfig.lsp
               ) "generated OpenCode and Limitless plugin LSP configurations drifted";
-              assert pkgs.lib.assertMsg (
+              assert pkgs.lib.assertMsg
                 (builtins.elemAt disabledConfig.plugins 0).options.notifications.events.permission
-              ) "permission request notifications must default to enabled";
+                "permission request notifications must default to enabled";
               assert pkgs.lib.assertMsg (
                 !pkgs.stdenv.isLinux
-                ||
-                  serviceHome.config.home.shellAliases.oc
-                  == "${opencodePackage}/bin/opencode2 --server http://127.0.0.1:4096 \"$PWD\""
+                || serviceHome.config.home.shellAliases.oc == "${opencodePackage}/bin/opencode2 \"$PWD\""
               ) "generated OpenCode2 service alias drifted";
               assert pkgs.lib.assertMsg (
                 !pkgs.stdenv.isLinux
                 ||
                   serviceHome.config.systemd.user.services.opencode2.Service.ExecStart
-                  == "${opencodePackage}/bin/opencode2 serve --hostname 127.0.0.1 --port 4096"
+                  == "${opencodePackage}/bin/opencode2 serve --service --hostname 127.0.0.1 --port 4096"
               ) "generated OpenCode2 service command drifted";
               pkgs.runCommand "limitless-generated-runtime-config-check" { } ''
                 touch "$out"
