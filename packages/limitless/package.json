@@ -6,6 +6,7 @@
 	"main": "./index.ts",
 	"types": "./index.ts",
 	"dependencies": {
+		"@ai-sdk/anthropic": "3.0.82",
 		"@opencode-ai/plugin": "0.0.0-next-16040",
 		"@opencode-ai/schema": "0.0.0-next-16040",
 		"effect": "4.0.0-beta.98",

@@ -8,6 +8,12 @@ const productionDirectory = fileURLToPath(new URL('..', import.meta.url))
 const workspaceRoot = fileURLToPath(new URL('../../..', import.meta.url))
 const rootIndex = path.join(productionDirectory, 'index.ts')
 const toolBoundary = path.join(productionDirectory, 'plugin', 'tool-boundary.ts')
+const anthropicProviderBoundary = path.join(
+	productionDirectory,
+	'integrations',
+	'anthropic-auth',
+	'provider-boundary.ts',
+)
 const exampleDocsScript = path.join(workspaceRoot, 'scripts', 'generate-example-docs.ts')
 const limitlessPackage = path.join(productionDirectory, 'package.json')
 const lspDirectory = path.join(productionDirectory, 'tools', 'lsp')
@@ -73,6 +79,17 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 		]),
 	],
 	[
+		'integrations/anthropic-auth',
+		new Set([
+			'config.ts',
+			'index.ts',
+			'oauth.ts',
+			'provider-boundary.ts',
+			'registration.ts',
+			'transform.ts',
+		]),
+	],
+	[
 		'integrations/notifications',
 		new Set(['config.ts', 'events.ts', 'index.ts', 'runner.ts', 'schema.ts']),
 	],
@@ -97,6 +114,10 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 const operationalTypes = new Map([
 	['core/command.ts', new Set(['RunOptions'])],
 	['core/execution.ts', new Set(['ToolExecutionContext'])],
+	[
+		'integrations/anthropic-auth/oauth.ts',
+		new Set(['CredentialOAuth', 'RefreshDeferred', 'RefreshFlight']),
+	],
 	['integrations/notifications/runner.ts', new Set(['NotificationSessionLookup'])],
 	[
 		'plugin/tool-boundary.ts',
@@ -126,6 +147,8 @@ const operationalTypes = new Map([
 
 const openCodeAdapterModules = new Set([
 	'index.ts',
+	'integrations/anthropic-auth/provider-boundary.ts',
+	'integrations/anthropic-auth/registration.ts',
 	'plugin/tool-boundary.ts',
 	'tools/artifacts/tools.ts',
 	'tools/ast-grep.ts',
@@ -280,6 +303,25 @@ const operationSchemaOwners = new Map(
 )
 
 const barrelSurfaces = new Map<string, ReadonlySet<string>>([
+	[
+		'integrations/anthropic-auth/index.ts',
+		new Set([
+			'ANTHROPIC_INTEGRATION_ID',
+			'ANTHROPIC_OAUTH_METHOD_ID',
+			'ANTHROPIC_OAUTH_PROVIDER_PACKAGE',
+			'AnthropicOAuthError',
+			'AnthropicSubscriptionAuthConfig',
+			'AnthropicSubscriptionAuthConfigError',
+			'DEFAULT_ANTHROPIC_SUBSCRIPTION_AUTH_CONFIG',
+			'anthropicOAuthMethod',
+			'configureAnthropicSubscriptionSdk',
+			'isLimitlessAnthropicOAuthCredential',
+			'normalizeAnthropicSubscriptionAuthConfig',
+			'registerAnthropicOAuthMethod',
+			'registerAnthropicSubscriptionAuth',
+			'transformAnthropicOAuthCatalog',
+		]),
+	],
 	[
 		'tools/artifacts/index.ts',
 		new Set([
@@ -446,7 +488,7 @@ function visit(
 	}
 	const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined
 	if (
-		sourceFile.fileName !== rootIndex &&
+		!new Set([rootIndex, anthropicProviderBoundary]).has(sourceFile.fileName) &&
 		modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)
 	) {
 		violations.push(`${location(sourceFile, node)} async implementation outside root index.ts`)
@@ -460,6 +502,7 @@ function visit(
 		const allowed =
 			sourceFile.fileName === rootIndex ||
 			sourceFile.fileName === toolBoundary ||
+			sourceFile.fileName === anthropicProviderBoundary ||
 			(isScript && isModuleScope(node, sourceFile))
 		if (!allowed)
 			violations.push(`${location(sourceFile, node)} Effect.runPromise outside boundary modules`)
@@ -733,7 +776,7 @@ describe('production architecture', () => {
 
 			if (relative.endsWith('/index.ts') && relative !== 'index.ts') continue
 			const featureRoot = relative.match(
-				/^(tools\/(?:artifacts|github|lsp)|integrations\/(?:notifications|slack))\//u,
+				/^(tools\/(?:artifacts|github|lsp)|integrations\/(?:anthropic-auth|notifications|slack))\//u,
 			)?.[1]
 			if (
 				featureRoot !== undefined &&
@@ -788,6 +831,7 @@ describe('production architecture', () => {
 			sourceFiles.find((sourceFile) => sourceFile.fileName === rootIndex) as ts.SourceFile,
 		)
 		for (const featureIndex of [
+			'./integrations/anthropic-auth/index',
 			'./integrations/notifications/index',
 			'./integrations/slack/index',
 			'./tools/artifacts/index',

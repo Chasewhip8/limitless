@@ -154,6 +154,11 @@ describe('decisive OpenCode 2 cutover', () => {
 		expect(home).toContain('oauth = false;')
 		expect(home).toContain('disabled = false;')
 		expect(home).toContain('options = limitlessPluginOptions;')
+		expect(home).toContain('anthropicSubscriptionAuth = {')
+		expect(home).toContain('anthropicSubscriptionAuth.enable = lib.mkOption')
+		expect(home).toMatch(
+			/anthropicSubscriptionAuth\.enable = lib\.mkOption \{[\s\S]*?default = true;/u,
+		)
 		expect(home).toContain('lsp = lib.optionalAttrs enabledLsp lspServers;')
 		expect(home).toMatch(/skillsDirectory = "\$\{opencodeDir\}\/skills";/u)
 		expect(home).not.toContain('limitless.js".text')

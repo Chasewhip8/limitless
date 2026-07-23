@@ -85,6 +85,7 @@
 
           evaluateHome =
             {
+              anthropicSubscriptionAuthEnabled ? null,
               linearEnabled ? false,
               lspEnabled ? false,
               serviceEnabled ? false,
@@ -104,6 +105,9 @@
                     lsp.enable = lspEnabled;
                     mcp.linear.enable = linearEnabled;
                     opencode.service.enable = serviceEnabled;
+                  }
+                  // pkgs.lib.optionalAttrs (anthropicSubscriptionAuthEnabled != null) {
+                    anthropicSubscriptionAuth.enable = anthropicSubscriptionAuthEnabled;
                   };
                 }
               ];
@@ -111,6 +115,7 @@
 
           enabledHome = evaluateHome { linearEnabled = true; };
           disabledHome = evaluateHome { };
+          anthropicAuthDisabledHome = evaluateHome { anthropicSubscriptionAuthEnabled = false; };
           lspHome = evaluateHome { lspEnabled = true; };
           serviceHome = evaluateHome { serviceEnabled = pkgs.stdenv.isLinux; };
           enabledConfig = builtins.fromJSON (
@@ -120,6 +125,10 @@
           disabledConfig = builtins.fromJSON (
             builtins.unsafeDiscardStringContext
               disabledHome.config.home.file.".config/opencode/opencode.json".text
+          );
+          anthropicAuthDisabledConfig = builtins.fromJSON (
+            builtins.unsafeDiscardStringContext
+              anthropicAuthDisabledHome.config.home.file.".config/opencode/opencode.json".text
           );
           lspConfig = builtins.fromJSON (
             builtins.unsafeDiscardStringContext lspHome.config.home.file.".config/opencode/opencode.json".text
@@ -177,6 +186,17 @@
             if (!payload.data?.some((plugin) => plugin.id === "limitless")) {
               throw new Error("OpenCode2 did not activate the Limitless plugin: " + JSON.stringify(payload))
             }
+            const integration = new URL("/api/integration/anthropic", service.url)
+            integration.searchParams.set("location[directory]", directory)
+            const integrationResponse = await fetch(integration, { headers, signal })
+            if (!integrationResponse.ok) throw new Error("Could not inspect the Anthropic integration")
+            const integrationPayload = await integrationResponse.json()
+            if (!integrationPayload.data?.methods?.some((method) => method.id === "limitless-claude-pro-max")) {
+              throw new Error(
+                "Limitless did not register native Anthropic subscription OAuth: "
+                  + JSON.stringify(integrationPayload)
+              )
+            }
             await reader.cancel()
           '';
 
@@ -194,6 +214,7 @@
               assert pkgs.lib.assertMsg (
                 builtins.length enabledConfig.plugins == 1
                 && (builtins.elemAt enabledConfig.plugins 0).options.lsp == { }
+                && (builtins.elemAt enabledConfig.plugins 0).options.anthropicSubscriptionAuth.enable
               ) "generated Limitless plugin options drifted";
               pkgs.runCommand "limitless-linear-mcp-config-check" { } ''
                 touch "$out"
@@ -206,6 +227,9 @@
               assert pkgs.lib.assertMsg
                 (builtins.elemAt disabledConfig.plugins 0).options.notifications.events.permission
                 "permission request notifications must default to enabled";
+              assert pkgs.lib.assertMsg (
+                !(builtins.elemAt anthropicAuthDisabledConfig.plugins 0).options.anthropicSubscriptionAuth.enable
+              ) "Anthropic subscription auth must support an explicit opt-out";
               assert pkgs.lib.assertMsg (
                 !pkgs.stdenv.isLinux
                 || serviceHome.config.home.shellAliases.oc == "${opencodePackage}/bin/opencode2 \"$PWD\""

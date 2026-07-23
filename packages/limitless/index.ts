@@ -3,6 +3,10 @@ import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Session } from '@opencode-ai/schema/session'
 import { Effect, Schema, Stream } from 'effect'
 import {
+	normalizeAnthropicSubscriptionAuthConfig,
+	registerAnthropicSubscriptionAuth,
+} from './integrations/anthropic-auth/index'
+import {
 	createNotificationRunner,
 	NotificationSessionLookupError,
 	normalizeNotificationConfig,
@@ -20,6 +24,7 @@ import { decodeLspConfig, lspTools } from './tools/lsp/index'
 
 export const resolveNotificationConfig = normalizeNotificationConfig
 export const resolveGitHubConfig = normalizeGitHubPluginConfig
+export const resolveAnthropicSubscriptionAuthConfig = normalizeAnthropicSubscriptionAuthConfig
 
 export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* (options: unknown) {
 	const notificationConfig = yield* normalizeNotificationConfig(options)
@@ -27,7 +32,14 @@ export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* 
 	const githubConfig = yield* normalizeGitHubPluginConfig(options)
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
 	const lspConfig = yield* decodeLspConfig(options)
-	return { notifications, githubConfig, githubCloneRuntime, lspConfig }
+	const anthropicSubscriptionAuthConfig = yield* normalizeAnthropicSubscriptionAuthConfig(options)
+	return {
+		notifications,
+		githubConfig,
+		githubCloneRuntime,
+		lspConfig,
+		anthropicSubscriptionAuthConfig,
+	}
 })
 
 export function limitlessTools(
@@ -76,6 +88,7 @@ export default Plugin.define({
 				),
 			configs.lspConfig,
 		)
+		yield* registerAnthropicSubscriptionAuth(ctx, configs.anthropicSubscriptionAuthConfig)
 		const tools = limitlessTools(executeTool, configs.githubConfig, configs.githubCloneRuntime)
 
 		yield* ctx.tool.transform((draft) => {
