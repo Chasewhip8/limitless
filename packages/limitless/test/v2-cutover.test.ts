@@ -19,7 +19,11 @@ const CheckedConfig = Schema.Struct({
 })
 const ReasoningVariant = Schema.Struct({
 	id: Schema.String,
-	settings: Schema.Struct({ reasoningEffort: Schema.String }),
+	settings: Schema.Struct({
+		reasoningEffort: Schema.String,
+		reasoningSummary: Schema.optional(Schema.String),
+		include: Schema.optional(Schema.Array(Schema.String)),
+	}),
 })
 const ReasoningConfig = Schema.Struct({
 	providers: Schema.Struct({
@@ -117,7 +121,14 @@ describe('decisive OpenCode 2 cutover', () => {
 		expect(models['gpt-5.6-sol-fast-long']).toEqual(
 			expect.objectContaining({
 				settings: { serviceTier: 'priority' },
-				variants: [{ id: 'max', settings: { reasoningEffort: 'max' } }],
+				variants: ['none', 'low', 'medium', 'high', 'xhigh', 'max'].map((id) => ({
+					id,
+					settings: {
+						reasoningEffort: id,
+						reasoningSummary: 'auto',
+						include: ['reasoning.encrypted_content'],
+					},
+				})),
 			}),
 		)
 		expect(JSON.stringify(config)).not.toContain('reasoning_effort')

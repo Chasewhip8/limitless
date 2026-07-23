@@ -57,6 +57,9 @@ export type AstGrepReplaceResult = typeof AstGrepReplaceResult.Type
 
 export const AST_GREP_BIN = '@AST_GREP_BIN@'
 
+export const AstGrepOptions = Schema.Struct({ binary: Schema.optional(Schema.String) })
+export type AstGrepOptions = typeof AstGrepOptions.Type
+
 function relativeTargets(input: AstGrepSearchInput | AstGrepReplaceInput) {
 	const paths = input.paths ?? ['.']
 	return paths.length === 0 ? ['.'] : paths
@@ -106,21 +109,27 @@ export const astGrepMutationScopeGap = Effect.fn(function* astGrepMutationScopeG
 	return undefined
 })
 
-export const astGrepSearch = Effect.fn(function* astGrepSearch(input: AstGrepSearchInput) {
+export const astGrepSearch = Effect.fn(function* astGrepSearch(
+	input: AstGrepSearchInput,
+	options: AstGrepOptions = {},
+) {
 	const context = yield* ToolExecutionContext
 	const cwd = workspaceRoot(input, context.projectRoot)
 	const args = ['run', '--pattern', input.pattern, '--lang', astGrepLanguage(input)]
 	if (astGrepJson(input)) args.push('--json=pretty')
 	args.push(...relativeTargets(input))
 
-	const result = yield* runCommand(AST_GREP_BIN, args, {
+	const result = yield* runCommand(options.binary ?? AST_GREP_BIN, args, {
 		cwd,
 		timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 	})
 	return AstGrepSearchResult.make(result)
 })
 
-export const astGrepReplace = Effect.fn(function* astGrepReplace(input: AstGrepReplaceInput) {
+export const astGrepReplace = Effect.fn(function* astGrepReplace(
+	input: AstGrepReplaceInput,
+	options: AstGrepOptions = {},
+) {
 	const context = yield* ToolExecutionContext
 	const dryRun = input.dryRun ?? true
 	const cwd = workspaceRoot(input, context.projectRoot)
@@ -144,7 +153,7 @@ export const astGrepReplace = Effect.fn(function* astGrepReplace(input: AstGrepR
 	else args.push('--update-all')
 	args.push(...targets)
 
-	const result = yield* runCommand(AST_GREP_BIN, args, {
+	const result = yield* runCommand(options.binary ?? AST_GREP_BIN, args, {
 		cwd,
 		timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 	})

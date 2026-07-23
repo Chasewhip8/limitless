@@ -1,6 +1,8 @@
+import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Effect, Option, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { limitlessTools, registerLimitlessTools, resolvePluginConfigs } from '../index'
+import { makeToolExecutor } from '../plugin/tool-boundary'
 import { ArtifactCreateInput } from '../tools/artifacts/create'
 import { ArtifactListInput } from '../tools/artifacts/list'
 import { ArtifactTemplateReadInput, ArtifactTemplatesListInput } from '../tools/artifacts/templates'
@@ -15,7 +17,7 @@ import { LspImplementationInput } from '../tools/lsp/implementation'
 import { LspReferencesInput } from '../tools/lsp/references'
 import { LspRenameInput } from '../tools/lsp/rename'
 import { LspSymbolsInput } from '../tools/lsp/symbols'
-import { testToolExecution, testToolExecutor } from './execution'
+import { testToolContext, testToolExecution, testToolExecutor } from './execution'
 
 const contracts = [
 	{ name: 'artifact_create', input: ArtifactCreateInput, valid: { slug: 'brief' } },
@@ -112,6 +114,36 @@ describe('OpenCode 2 tool registrations', () => {
 
 		expect(registrations).toHaveLength(16)
 		expect(registrations.every(({ codemode }) => codemode === false)).toBe(true)
+	})
+
+	test('routes all 16 tools through the shared session-directory boundary', async () => {
+		const configs = await Effect.runPromise(
+			resolvePluginConfigs({
+				github: { enable: true, allowUnrestrictedRepos: true },
+				lsp: {},
+			}),
+		)
+		const execution = testToolExecution('/project')
+		const calls: Array<string> = []
+		const boundaryFailure = new Tool.Failure({ message: 'session boundary reached' })
+		const execute = makeToolExecutor(
+			(sessionID) =>
+				Effect.sync(() => calls.push(sessionID)).pipe(Effect.andThen(Effect.fail(boundaryFailure))),
+			configs.lspConfig,
+		)
+		const tools = limitlessTools(execute, configs.githubConfig, configs.githubCloneRuntime)
+
+		for (const contract of contracts) {
+			const failure = await Effect.runPromise(
+				Tool.settle(
+					tools[contract.name],
+					{ input: contract.valid },
+					testToolContext(execution),
+				).pipe(Effect.flip),
+			)
+			expect(failure, contract.name).toBe(boundaryFailure)
+		}
+		expect(calls).toEqual(contracts.map(() => execution.sessionId))
 	})
 
 	test('allocates GitHub serialization state per plugin activation', async () => {

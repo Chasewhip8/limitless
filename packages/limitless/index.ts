@@ -1,7 +1,7 @@
 import { Plugin } from '@opencode-ai/plugin/v2/effect'
 import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Session } from '@opencode-ai/schema/session'
-import { Effect, Schema, Stream } from 'effect'
+import { Effect, Stream } from 'effect'
 import {
 	normalizeAnthropicSubscriptionAuthConfig,
 	registerAnthropicSubscriptionAuth,
@@ -11,7 +11,11 @@ import {
 	NotificationSessionLookupError,
 	normalizeNotificationConfig,
 } from './integrations/notifications/index'
-import { makeToolExecutor, type ToolExecutor } from './plugin/tool-boundary'
+import {
+	makeToolExecutor,
+	type SessionDirectoryResolver,
+	type ToolExecutor,
+} from './plugin/tool-boundary'
 import { artifactTools } from './tools/artifacts/index'
 import { astGrepTools } from './tools/ast-grep'
 import { diagnosticsTools } from './tools/diagnostics'
@@ -65,6 +69,21 @@ export function registerLimitlessTools(
 	}
 }
 
+export function makeSessionDirectoryResolver(
+	session: Pick<Plugin.Context['session'], 'get'>,
+): SessionDirectoryResolver {
+	return (sessionID) =>
+		session.get({ sessionID }).pipe(
+			Effect.map((info) => info.location.directory),
+			Effect.mapError(
+				() =>
+					new Tool.Failure({
+						message: 'Unable to resolve the OpenCode session directory.',
+					}),
+			),
+		)
+}
+
 export default Plugin.define({
 	id: 'limitless',
 	effect: Effect.fn('limitless.plugin')(function* (ctx) {
@@ -75,17 +94,7 @@ export default Plugin.define({
 			Effect.orDie,
 		)
 		const executeTool = makeToolExecutor(
-			(sessionID) =>
-				ctx.session.get({ sessionID }).pipe(
-					Effect.flatMap(Schema.decodeUnknownEffect(Session.Info)),
-					Effect.map((session) => session.location.directory),
-					Effect.mapError(
-						() =>
-							new Tool.Failure({
-								message: 'Unable to resolve the OpenCode session directory.',
-							}),
-					),
-				),
+			makeSessionDirectoryResolver(ctx.session),
 			configs.lspConfig,
 		)
 		yield* registerAnthropicSubscriptionAuth(ctx, configs.anthropicSubscriptionAuthConfig)
@@ -97,7 +106,6 @@ export default Plugin.define({
 
 		const lookupNotificationSession = (sessionID: string) =>
 			ctx.session.get({ sessionID: Session.ID.make(sessionID) }).pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(Session.Info)),
 				Effect.map((session) =>
 					session.parentID === undefined ? {} : { parentID: session.parentID },
 				),

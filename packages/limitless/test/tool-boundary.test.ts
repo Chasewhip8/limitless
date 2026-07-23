@@ -1,8 +1,10 @@
 import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
+import { Session } from '@opencode-ai/schema/session'
 import { Effect, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { toolInputError } from '../core/errors'
 import { ToolExecutionContext } from '../core/execution'
+import { makeSessionDirectoryResolver } from '../index'
 import { encodeToolFailure, makeToolExecutor } from '../plugin/tool-boundary'
 import { LspConfig } from '../tools/lsp/config'
 import { settleTestTool, testToolContext, testToolExecution } from './execution'
@@ -16,6 +18,29 @@ const BoundaryOutput = Schema.Struct({
 })
 
 describe('OpenCode 2 tool execution boundary', () => {
+	test('uses the Effect client decoded session without decoding it a second time', async () => {
+		const session = Schema.decodeUnknownSync(Session.Info)({
+			id: 'ses_test',
+			projectID: 'project_test',
+			cost: 0,
+			tokens: {
+				input: 0,
+				output: 0,
+				reasoning: 0,
+				cache: { read: 0, write: 0 },
+			},
+			time: { created: 0, updated: 0 },
+			title: 'Test session',
+			location: { directory: '/session/directory' },
+		})
+		const resolve = makeSessionDirectoryResolver({
+			get: () => Effect.succeed(session),
+		})
+
+		expect(typeof session.time.created).toBe('object')
+		expect(await Effect.runPromise(resolve(Session.ID.make('ses_test')))).toBe('/session/directory')
+	})
+
 	test('roots every call at session.location.directory and provides invocation identity', async () => {
 		const calls: Array<string> = []
 		const execution = testToolExecution('/ignored', 'ses_test')
