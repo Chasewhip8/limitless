@@ -152,7 +152,16 @@ function configureAnthropicSubscriptionSdk(
 		event.options.authToken = credential.access
 		event.options.fetch = loaded.fetch
 		event.sdk = createAnthropic(event.options)
-	}).pipe(Effect.orDie)
+		yield* Effect.logInfo('[limitless] initialized the Anthropic subscription AI SDK adapter')
+	}).pipe(
+		Effect.catchCause((cause) =>
+			Effect.logError(
+				'[limitless] failed to initialize the Anthropic subscription AI SDK adapter',
+				cause,
+			).pipe(Effect.andThen(Effect.failCause(cause))),
+		),
+		Effect.orDie,
+	)
 }
 
 export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSubscriptionAuth')(
