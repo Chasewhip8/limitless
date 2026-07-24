@@ -23,6 +23,7 @@ let
   enabledLsp = cfg.enable && cfg.lsp.enable;
   enabledLinear = cfg.enable && cfg.mcp.linear.enable;
   enabledOpencodeService = cfg.enable && cfg.opencode.service.enable;
+  enabledAnthropicAuth = cfg.enable && cfg.plugins.anthropicAuth.enable;
 
   opencodeAttachCommand = "${cfg.opencode.package}/bin/opencode2 \"$PWD\"";
 
@@ -103,6 +104,9 @@ let
       inherit (cfg.notifications) command;
     };
     lsp = lib.optionalAttrs enabledLsp lspServers;
+    providers = {
+      inherit (cfg.providers) disabled;
+    };
   };
 
   limitlessPlugin = {
@@ -110,10 +114,16 @@ let
     options = limitlessPluginOptions;
   };
 
+  anthropicAuthPlugin = {
+    package = "file://${cfg.plugins.anthropicAuth.package}/anthropic-auth.js";
+  };
+
+  managedPlugins = lib.optional enabledAnthropicAuth anthropicAuthPlugin ++ [ limitlessPlugin ];
+
   defaultOpencodeConfig = lib.recursiveUpdate (removeAttrs baseOpencodeConfig [ "permissions" ]) (
     {
       permissions = cfg.opencode.permissions ++ repositoryPermissionRules;
-      plugins = [ limitlessPlugin ];
+      plugins = managedPlugins;
     }
     // lib.optionalAttrs enabledLsp {
       lsp = lspServers;
@@ -132,8 +142,11 @@ let
   opencodeConfig = lib.recursiveUpdate defaultOpencodeConfig cfg.opencode.settings // {
     default_agent = "limitless";
     permissions = cfg.opencode.permissions ++ repositoryPermissionRules;
-    plugins = (cfg.opencode.settings.plugins or [ ]) ++ [ limitlessPlugin ];
+    plugins = (cfg.opencode.settings.plugins or [ ]) ++ managedPlugins;
   };
+  opencodeConfigText = builtins.toJSON opencodeConfig;
+  opencodeConfigRestartTrigger = pkgs.writeText "limitless-opencode.json" opencodeConfigText;
+  agentsRestartTrigger = pkgs.writeText "limitless-AGENTS.md" agentsText;
 
   lspPackages =
     lib.optional cfg.lsp.servers.biome.enable cfg.lsp.servers.biome.package
@@ -311,11 +324,27 @@ in
       };
     };
 
-    plugins.limitless = {
-      package = lib.mkOption {
-        type = lib.types.package;
-        default = self.packages.${system}.limitless;
-        description = "Package containing the Limitless OpenCode plugin.";
+    plugins = {
+      anthropicAuth = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Enable the reverse-engineered Claude Pro/Max OAuth plugin and native Anthropic provider adapter. Anthropic does not officially support this use.";
+        };
+
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = self.packages.${system}."anthropic-auth";
+          description = "Package containing the Anthropic OAuth plugin and provider adapter.";
+        };
+      };
+
+      limitless = {
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = self.packages.${system}.limitless;
+          description = "Package containing the Limitless OpenCode plugin.";
+        };
       };
     };
 
@@ -354,6 +383,15 @@ in
         default = false;
         description = "Allow managed clones to access any GitHub repository visible to the configured token when allowedRepos is empty.";
       };
+    };
+
+    providers.disabled = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [
+        "google-vertex"
+        "google-vertex-anthropic"
+      ];
+      description = "Provider IDs that the Limitless plugin removes from OpenCode's available catalog. Vertex defaults to disabled so ambient Google ADC cannot make it selectable.";
     };
 
     notifications = {
@@ -720,7 +758,7 @@ in
         home = {
           packages = [ cfg.opencode.package ];
           file = {
-            "${opencodeDir}/opencode.json".text = builtins.toJSON opencodeConfig;
+            "${opencodeDir}/opencode.json".text = opencodeConfigText;
             "${opencodeDir}/AGENTS.md".text = agentsText;
             "${opencodeDir}/agents" = {
               source = cfg.agents.package;
@@ -758,11 +796,12 @@ in
           Unit = {
             Description = "OpenCode 2 beta server";
             X-Restart-Triggers = [
-              config.home.file."${opencodeDir}/opencode.json".source
-              config.home.file."${opencodeDir}/AGENTS.md".source
+              opencodeConfigRestartTrigger
+              agentsRestartTrigger
               config.home.file."${opencodeDir}/agents".source
               cfg.plugins.limitless.package
             ]
+            ++ lib.optional enabledAnthropicAuth cfg.plugins.anthropicAuth.package
             ++ lib.optional enabledSkills config.home.file."${skillsDirectory}".source;
           };
 

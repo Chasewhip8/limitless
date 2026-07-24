@@ -48,6 +48,13 @@ const PluginManifest = Schema.Struct({
 		effect: Schema.String,
 	}),
 })
+const AnthropicAuthManifest = Schema.Struct({
+	dependencies: Schema.Struct({
+		'@opencode-ai/ai': Schema.String,
+		'@opencode-ai/plugin': Schema.String,
+		effect: Schema.String,
+	}),
+})
 
 function readJson<A, I>(filePath: string, schema: Schema.Codec<A, I>) {
 	return Effect.promise(() => readFile(filePath, 'utf8')).pipe(
@@ -137,10 +144,16 @@ describe('decisive OpenCode 2 cutover', () => {
 	})
 
 	test('pins the runtime-facing packages and Effect together', async () => {
-		const [rootManifest, pluginManifest, flake, lock] = await Promise.all([
+		const [rootManifest, pluginManifest, anthropicAuthManifest, flake, lock] = await Promise.all([
 			Effect.runPromise(readJson(path.join(root, 'package.json'), PackageManifest)),
 			Effect.runPromise(
 				readJson(path.join(root, 'packages', 'limitless', 'package.json'), PluginManifest),
+			),
+			Effect.runPromise(
+				readJson(
+					path.join(root, 'packages', 'anthropic-auth', 'package.json'),
+					AnthropicAuthManifest,
+				),
 			),
 			readFile(path.join(root, 'flake.nix'), 'utf8'),
 			readFile(path.join(root, 'bun.lock'), 'utf8'),
@@ -151,6 +164,13 @@ describe('decisive OpenCode 2 cutover', () => {
 			expect.objectContaining({
 				'@opencode-ai/plugin': '0.0.0-next-16040',
 				'@opencode-ai/schema': '0.0.0-next-16040',
+				effect: '4.0.0-beta.98',
+			}),
+		)
+		expect(anthropicAuthManifest.dependencies).toEqual(
+			expect.objectContaining({
+				'@opencode-ai/ai': '0.0.0-next-16040',
+				'@opencode-ai/plugin': '0.0.0-next-16040',
 				effect: '4.0.0-beta.98',
 			}),
 		)
@@ -167,9 +187,15 @@ describe('decisive OpenCode 2 cutover', () => {
 		expect(home).toContain('oauth = false;')
 		expect(home).toContain('disabled = false;')
 		expect(home).toContain('options = limitlessPluginOptions;')
+		expect(home).toContain('plugins.anthropicAuth.enable')
+		expect(home).toContain('anthropic-auth.js')
+		expect(home).toContain('managedPlugins')
+		expect(home).toContain('providers.disabled')
+		expect(home).toContain('"google-vertex-anthropic"')
 		expect(home).toContain('lsp = lib.optionalAttrs enabledLsp lspServers;')
 		expect(home).toMatch(/skillsDirectory = "\$\{opencodeDir\}\/skills";/u)
 		expect(home).not.toContain('limitless.js".text')
+		expect(home).not.toContain('anthropic-auth.js".text')
 		expect(home).not.toContain('/bin/opencode2 --server')
 		expect(home).toContain('/bin/opencode2 serve --service')
 	})

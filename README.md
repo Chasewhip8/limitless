@@ -27,6 +27,8 @@ switching.
 ## Features
 
 - **One module to enable**: `programs.limitless.enable = true` wires `opencode2`, agents, skills, plugins, MCPs, and language servers together.
+- **Anthropic subscription authentication**: a native OpenCode 2 plugin adds Claude Pro/Max OAuth while preserving normal `anthropic/*` models and API-key behavior.
+- **No ambient Vertex selection**: `google-vertex` and `google-vertex-anthropic` are disabled by default so credentials discovered through Google ADC cannot make them selectable; set `programs.limitless.providers.disabled = [ ];` to opt back in.
 - **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, and implementation.
 - **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed with their tools for Effect guidance and browser automation.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
@@ -60,6 +62,8 @@ programs.limitless = {
   skills = {
     enable = true;
   };
+
+  plugins.anthropicAuth.enable = true;
 
   git.ignoreStorage = true;
 
@@ -113,7 +117,20 @@ programs.limitless = {
 
 `git.ignoreStorage` enables Home Manager's Git module by default and adds `.limitless/` to the global ignore file. Set it to `false` if a repository should manage that directory itself.
 
-The checked-in `opencode/opencode.json` and generated Home Manager file use only native OpenCode 2 fields. Limitless deep-merges native `opencode.settings`, then enforces the `limitless` default agent, the ordered `opencode.permissions` rules, the managed-repository edit denial, and the direct Effect plugin declaration.
+The checked-in `opencode/opencode.json` and generated Home Manager file use only native OpenCode 2 fields. Limitless deep-merges native `opencode.settings`, then enforces the `limitless` default agent, the ordered `opencode.permissions` rules, the managed-repository edit denial, and direct Effect plugin declarations.
+
+## Anthropic subscription authentication
+
+Anthropic authentication is enabled by default. Run `/connect`, select Anthropic, and choose **Claude Pro/Max** to complete the hosted PKCE code flow. The plugin keeps the existing `anthropic/*` catalog: subscription credentials use a Claude Code-compatible native Anthropic route, while API keys and `ANTHROPIC_API_KEY` retain standard Anthropic request behavior. Native `providers.anthropic.settings.baseURL` remains the only endpoint override.
+
+> [!WARNING]
+> Anthropic does not officially support using Claude Pro/Max subscriptions through OpenCode. This reverse-engineered compatibility path may violate Anthropic's terms or put an account at risk. Disable it with `programs.limitless.plugins.anthropicAuth.enable = false` if you do not accept that risk.
+
+OpenCode 2 stores one saved credential per integration. Connecting Max replaces a saved Anthropic API key, and reconnecting a key replaces Max; environment and configured keys remain fallbacks when no saved credential is active. The V1 plugin's OAuth-based **Create an API Key** method is intentionally omitted because the V2 public integration API cannot faithfully persist a key from an OAuth callback.
+
+OAuth credentials created by the earlier experimental Limitless integration are deliberately blocked because they lack the namespaced routing marker. Reconnect **Claude Pro/Max** once after upgrading; this replaces the legacy credential without exposing its token to standard Anthropic routing.
+
+The compatibility profile remains pinned to the vendored upstream Claude Code `2.1.87` behavior. Refresh rotation is deduplicated within one OpenCode process; do not run service and standalone processes concurrently against the same state directory while Max is connected. The legacy `ANTHROPIC_BASE_URL` and `ANTHROPIC_INSECURE` variables are not supported.
 
 When `mcp.linear.enable` is true, Home Manager adds Linear at `mcp.servers.linear` with `disabled = false`, `oauth = false`, and `Authorization = "Bearer {env:LINEAR_API_KEY}"`. No Linear plugin or generated secret is involved; `LINEAR_API_KEY` must be present in the `opencode2` process environment at runtime.
 
@@ -191,6 +208,6 @@ Document artifacts are source-first: edit `main.typ` directly, compose with fram
 
 ## Maintainers
 
-Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, schema, and Effect are pinned to `opencode2`/`@opencode-ai/*@0.0.0-next-16040` and `effect@4.0.0-beta.98`; update them together because beta APIs and storage remain volatile.
+Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode-ai/*@0.0.0-next-16040` and `effect@4.0.0-beta.98`; update them together because beta APIs and storage remain volatile.
 
 For structure and implementation details, see the module options in `nix/modules/home.nix`.

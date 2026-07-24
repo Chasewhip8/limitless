@@ -18,7 +18,7 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 		'core',
 		new Set(['command.ts', 'errors.ts', 'execution.ts', 'filesystem.ts', 'paths.ts', 'storage.ts']),
 	],
-	['plugin', new Set(['tool-boundary.ts'])],
+	['plugin', new Set(['provider-policy.ts', 'tool-boundary.ts'])],
 	['lib', new Set(['guards.ts', 'type-utils.ts'])],
 	['tools', new Set(['ast-grep.ts', 'diagnostics.ts'])],
 	[
@@ -126,6 +126,7 @@ const operationalTypes = new Map([
 
 const openCodeAdapterModules = new Set([
 	'index.ts',
+	'plugin/provider-policy.ts',
 	'plugin/tool-boundary.ts',
 	'tools/artifacts/tools.ts',
 	'tools/ast-grep.ts',

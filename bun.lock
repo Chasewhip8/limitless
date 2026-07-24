@@ -13,6 +13,15 @@
         "vitest": "^3.0.0",
       },
     },
+    "packages/anthropic-auth": {
+      "name": "@limitless/anthropic-auth",
+      "version": "0.1.0",
+      "dependencies": {
+        "@opencode-ai/ai": "0.0.0-next-16040",
+        "@opencode-ai/plugin": "0.0.0-next-16040",
+        "effect": "4.0.0-beta.98",
+      },
+    },
     "packages/limitless": {
       "name": "limitless",
       "version": "1.0.0",
@@ -111,6 +120,8 @@
     "@isaacs/cliui": ["@isaacs/cliui@8.0.2", "", { "dependencies": { "string-width": "^5.1.2", "string-width-cjs": "npm:string-width@^4.2.0", "strip-ansi": "^7.0.1", "strip-ansi-cjs": "npm:strip-ansi@^6.0.1", "wrap-ansi": "^8.1.0", "wrap-ansi-cjs": "npm:wrap-ansi@^7.0.0" } }, "sha512-O8jcjabXaleOG9DQ0+ARXWZBTfnP4WNAqzuiJK7ll44AmxGKv/J2M4TPjxjY3znBCfvBXFzucm1twdyFybFqEA=="],
 
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
+
+    "@limitless/anthropic-auth": ["@limitless/anthropic-auth@workspace:packages/anthropic-auth"],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4", "", { "os": "darwin", "cpu": "arm64" }, "sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ=="],
 

@@ -7,6 +7,7 @@ import {
 	NotificationSessionLookupError,
 	normalizeNotificationConfig,
 } from './integrations/notifications/index'
+import { applyProviderPolicy, normalizeProviderPolicyConfig } from './plugin/provider-policy'
 import {
 	makeToolExecutor,
 	type SessionDirectoryResolver,
@@ -31,11 +32,13 @@ export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* 
 	const githubConfig = yield* normalizeGitHubPluginConfig(options)
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
 	const lspConfig = yield* decodeLspConfig(options)
+	const providerPolicy = yield* normalizeProviderPolicyConfig(options)
 	return {
 		notifications,
 		githubConfig,
 		githubCloneRuntime,
 		lspConfig,
+		providerPolicy,
 	}
 })
 
@@ -94,6 +97,9 @@ export default Plugin.define({
 
 		yield* ctx.tool.transform((draft) => {
 			registerLimitlessTools(draft, tools)
+		})
+		yield* ctx.catalog.transform((catalog) => {
+			applyProviderPolicy(catalog, configs.providerPolicy)
 		})
 
 		const lookupNotificationSession = (sessionID: string) =>
