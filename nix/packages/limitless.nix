@@ -29,7 +29,7 @@ let
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
     '';
 
-    outputHash = "sha256-As/uzFWX4/BlMEv7Ala4IqEh2uSflWqMr6+IhHocmcs=";
+    outputHash = "sha256-/5UPXfC82JQlIYyD6bxbn2dFGYAKev1gRnYF8Iwzrn0=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -65,7 +65,6 @@ pkgs.stdenvNoCC.mkDerivation {
 
     cp -r templates "$out/templates"
     cp -r frameworks "$out/frameworks"
-    cp packages/limitless/integrations/anthropic-auth/LICENSE.ex-machina "$out/LICENSE.ex-machina"
   '';
 
   meta = with pkgs.lib; {

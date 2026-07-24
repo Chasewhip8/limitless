@@ -36,7 +36,6 @@ switching.
 - **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional project-cached GitHub source research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **Optional Linear MCP**: Home Manager writes the remote Linear MCP entry directly when enabled; OpenCode reads `LINEAR_API_KEY` from its process environment.
-- **Claude subscription OAuth**: the Limitless plugin registers a native OpenCode 2 Claude Pro/Max connection method by default, with an explicit opt-out.
 - **Native attention hooks**: optionally run a system command when a session completes or the question tool prompts the user.
 - **Safer agent permissions**: common work is allowed, while credential access, destructive git operations, broad deletion, publishing, privilege escalation, and infrastructure mutations ask first.
 - **Optional service mode**: OpenCode can run as a user service with a shell alias that attaches from the current directory.
@@ -63,8 +62,6 @@ programs.limitless = {
   };
 
   git.ignoreStorage = true;
-
-  anthropicSubscriptionAuth.enable = true;
 
   tools = {
     agentBrowser.enable = true;
@@ -115,17 +112,6 @@ programs.limitless = {
 `tools.agentBrowser.enable` and `tools.effectSolutions.enable` default to `skills.enable`. Set either tool explicitly to install the CLI without installing skills.
 
 `git.ignoreStorage` enables Home Manager's Git module by default and adds `.limitless/` to the global ignore file. Set it to `false` if a repository should manage that directory itself.
-
-### Claude Pro/Max subscription authentication
-
-`anthropicSubscriptionAuth.enable` defaults to `true`. After activating the Home Manager configuration, fully restart OpenCode, select the Anthropic integration's **Claude Pro/Max subscription** method, complete the browser flow, and paste the returned authorization code. This OpenCode 2 adapter deliberately does not migrate OpenCode 1 credentials, so one fresh login is required. OpenCode owns the credential and durably persists refresh-token rotation through its native integration lifecycle; Limitless does not create a private credential file.
-
-The adapter supports only Claude Pro/Max subscription OAuth. OpenCode's normal Anthropic API-key connection remains available and is not transformed; Limitless does not add manual-key or console API-key creation methods. To turn the adapter off, first disconnect/remove its existing **Claude Pro/Max subscription** connection in OpenCode, then set `anthropicSubscriptionAuth.enable = false` and fully restart OpenCode. If the option is disabled while that OAuth connection still exists, Limitless warns and blocks Anthropic models so the lingering OAuth access token cannot be sent through the normal API-key path as `x-api-key`.
-
-> [!WARNING]
-> Anthropic has stated that using Claude Pro/Max subscriptions through third-party clients may violate its terms of service. Enable or leave this integration enabled only after evaluating that risk; Anthropic may change or block the flow without notice.
-
-The OpenCode 2 adapter wraps the public V1 plugin loader from [`@ex-machina/opencode-anthropic-auth` 1.8.1](https://github.com/ex-machina-co/opencode-anthropic-auth), the current integration target, as a pinned runtime dependency. That package owns the serialized Anthropic request and streaming-response compatibility transforms; Limitless does not deep-import or vendor them. Limitless retains its V2-native connection lifecycle and the adapted OAuth registration code, so OpenCode 2 alone owns credential refresh and persistence. The dependency and adapted OAuth code are copyright 2026 Ex Machina under the MIT License, retained at `packages/limitless/integrations/anthropic-auth/LICENSE.ex-machina` in the bundled output.
 
 The checked-in `opencode/opencode.json` and generated Home Manager file use only native OpenCode 2 fields. Limitless deep-merges native `opencode.settings`, then enforces the `limitless` default agent, the ordered `opencode.permissions` rules, the managed-repository edit denial, and the direct Effect plugin declaration.
 

@@ -43,8 +43,6 @@ const PackageManifest = Schema.Struct({
 })
 const PluginManifest = Schema.Struct({
 	dependencies: Schema.Struct({
-		'@ai-sdk/anthropic': Schema.String,
-		'@ex-machina/opencode-anthropic-auth': Schema.String,
 		'@opencode-ai/plugin': Schema.String,
 		'@opencode-ai/schema': Schema.String,
 		effect: Schema.String,
@@ -151,8 +149,6 @@ describe('decisive OpenCode 2 cutover', () => {
 		expect(rootManifest.devDependencies.effect).toBe('4.0.0-beta.98')
 		expect(pluginManifest.dependencies).toEqual(
 			expect.objectContaining({
-				'@ai-sdk/anthropic': '3.0.82',
-				'@ex-machina/opencode-anthropic-auth': '1.8.1',
 				'@opencode-ai/plugin': '0.0.0-next-16040',
 				'@opencode-ai/schema': '0.0.0-next-16040',
 				effect: '4.0.0-beta.98',
@@ -171,11 +167,6 @@ describe('decisive OpenCode 2 cutover', () => {
 		expect(home).toContain('oauth = false;')
 		expect(home).toContain('disabled = false;')
 		expect(home).toContain('options = limitlessPluginOptions;')
-		expect(home).toContain('anthropicSubscriptionAuth = {')
-		expect(home).toContain('anthropicSubscriptionAuth.enable = lib.mkOption')
-		expect(home).toMatch(
-			/anthropicSubscriptionAuth\.enable = lib\.mkOption \{[\s\S]*?default = true;/u,
-		)
 		expect(home).toContain('lsp = lib.optionalAttrs enabledLsp lspServers;')
 		expect(home).toMatch(/skillsDirectory = "\$\{opencodeDir\}\/skills";/u)
 		expect(home).not.toContain('limitless.js".text')

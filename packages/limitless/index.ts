@@ -1,12 +1,7 @@
-import { createAnthropic } from '@ai-sdk/anthropic'
 import { Plugin } from '@opencode-ai/plugin/v2/effect'
 import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Session } from '@opencode-ai/schema/session'
 import { Effect, Stream } from 'effect'
-import {
-	normalizeAnthropicSubscriptionAuthConfig,
-	registerAnthropicSubscriptionAuth,
-} from './integrations/anthropic-auth/index'
 import {
 	createNotificationRunner,
 	NotificationSessionLookupError,
@@ -29,13 +24,6 @@ import { decodeLspConfig, lspTools } from './tools/lsp/index'
 
 export const resolveNotificationConfig = normalizeNotificationConfig
 export const resolveGitHubConfig = normalizeGitHubPluginConfig
-export const resolveAnthropicSubscriptionAuthConfig = normalizeAnthropicSubscriptionAuthConfig
-
-// OpenCode's internal dynamic-provider hook requires a real synchronous provider factory before
-// later user hooks can replace the SDK with the OAuth-aware implementation.
-export function createLimitlessAnthropicBootstrap(options: Parameters<typeof createAnthropic>[0]) {
-	return createAnthropic(options)
-}
 
 export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* (options: unknown) {
 	const notificationConfig = yield* normalizeNotificationConfig(options)
@@ -43,13 +31,11 @@ export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* 
 	const githubConfig = yield* normalizeGitHubPluginConfig(options)
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
 	const lspConfig = yield* decodeLspConfig(options)
-	const anthropicSubscriptionAuthConfig = yield* normalizeAnthropicSubscriptionAuthConfig(options)
 	return {
 		notifications,
 		githubConfig,
 		githubCloneRuntime,
 		lspConfig,
-		anthropicSubscriptionAuthConfig,
 	}
 })
 
@@ -103,11 +89,6 @@ export default Plugin.define({
 		const executeTool = makeToolExecutor(
 			makeSessionDirectoryResolver(ctx.session),
 			configs.lspConfig,
-		)
-		yield* registerAnthropicSubscriptionAuth(
-			ctx,
-			configs.anthropicSubscriptionAuthConfig,
-			`aisdk:${import.meta.url}`,
 		)
 		const tools = limitlessTools(executeTool, configs.githubConfig, configs.githubCloneRuntime)
 

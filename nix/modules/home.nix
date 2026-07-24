@@ -78,9 +78,6 @@ let
   repositoryPermissionRules = baseOpencodeConfig.permissions;
 
   limitlessPluginOptions = {
-    anthropicSubscriptionAuth = {
-      inherit (cfg.anthropicSubscriptionAuth) enable;
-    };
     github = {
       inherit (cfg.github)
         enable
@@ -312,16 +309,6 @@ in
         default = self.packages.${system}."opencode-agents";
         description = "Package containing OpenCode agent files.";
       };
-    };
-
-    anthropicSubscriptionAuth.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = ''
-        Register the native OpenCode 2 Claude Pro/Max subscription OAuth adapter.
-        Anthropic has stated that third-party subscription use may violate its terms;
-        disable this option to retain only OpenCode's normal Anthropic API-key support.
-      '';
     };
 
     plugins.limitless = {
