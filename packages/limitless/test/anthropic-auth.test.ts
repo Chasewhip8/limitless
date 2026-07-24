@@ -3,6 +3,7 @@ import type { Plugin } from '@opencode-ai/plugin/v2/effect'
 import type { AISDKHooks } from '@opencode-ai/plugin/v2/effect/aisdk'
 import type { CatalogDraft } from '@opencode-ai/plugin/v2/effect/catalog'
 import type { IntegrationDraft } from '@opencode-ai/plugin/v2/effect/integration'
+import type { SessionHooks } from '@opencode-ai/plugin/v2/effect/session'
 import { Effect, Stream } from 'effect'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { createLimitlessAnthropicBootstrap, resolvePluginConfigs } from '../index'
@@ -424,6 +425,7 @@ describe('Anthropic provider isolation', () => {
 				reload: () => Effect.void,
 			},
 			aisdk: { hook: () => Effect.void },
+			session: { hook: () => Effect.void },
 			event: { subscribe: () => Stream.never },
 		} as unknown as Plugin.Context
 
@@ -472,6 +474,7 @@ describe('Anthropic provider isolation', () => {
 					}),
 			},
 			aisdk: { hook: () => Effect.void },
+			session: { hook: () => Effect.void },
 			event: {
 				subscribe: () =>
 					Stream.fromEffect(Effect.promise(() => connectionUpdate)).pipe(
@@ -520,6 +523,7 @@ describe('published Anthropic loader and AI SDK integration', () => {
 		const providerPackage = 'aisdk:file:///nix/store/limitless-test/limitless.js'
 		let catalogTransform: ((draft: CatalogDraft) => void) | undefined
 		let sdkHook: ((event: AISDKHooks['sdk']) => Effect.Effect<void>) | undefined
+		let sessionHook: ((event: SessionHooks['context']) => Effect.Effect<void>) | undefined
 		let credentialResolutions = 0
 		const credential = validCredential()
 		const context = {
@@ -548,6 +552,12 @@ describe('published Anthropic loader and AI SDK integration', () => {
 				hook: (_name: string, hook: (event: AISDKHooks['sdk']) => Effect.Effect<void>) =>
 					Effect.sync(() => {
 						sdkHook = hook
+					}),
+			},
+			session: {
+				hook: (_name: string, hook: (event: SessionHooks['context']) => Effect.Effect<void>) =>
+					Effect.sync(() => {
+						sessionHook = hook
 					}),
 			},
 			event: { subscribe: () => Stream.never },
@@ -590,6 +600,21 @@ describe('published Anthropic loader and AI SDK integration', () => {
 
 					const sdk = event.sdk as ReturnType<typeof createAnthropic>
 					const language = sdk.languageModel('claude-test')
+					const malformedInputSchema = {
+						properties: { command: { type: 'string' } },
+						required: ['command'],
+						additionalProperties: false,
+					}
+					if (sessionHook === undefined) throw new Error('Session hook was not registered')
+					const sessionEvent = {
+						model: { providerID: 'anthropic' },
+						tools: {
+							bash: { description: 'Run a command', input: malformedInputSchema },
+						},
+					} as unknown as SessionHooks['context']
+					yield* sessionHook(sessionEvent)
+					const normalizedInputSchema = sessionEvent.tools.bash?.input
+					expect(normalizedInputSchema).toEqual(expect.objectContaining({ type: 'object' }))
 					const result = yield* Effect.promise(() =>
 						Promise.resolve(
 							language.doStream({
@@ -620,12 +645,7 @@ describe('published Anthropic loader and AI SDK integration', () => {
 										type: 'function',
 										name: 'bash',
 										description: 'Run a command',
-										inputSchema: {
-											type: 'object',
-											properties: { command: { type: 'string' } },
-											required: ['command'],
-											additionalProperties: false,
-										},
+										inputSchema: normalizedInputSchema,
 									},
 								],
 							}),
@@ -705,6 +725,7 @@ describe('published Anthropic loader and AI SDK integration', () => {
 						sdkHook = hook
 					}),
 			},
+			session: { hook: () => Effect.void },
 			event: { subscribe: () => Stream.never },
 		} as unknown as Plugin.Context
 

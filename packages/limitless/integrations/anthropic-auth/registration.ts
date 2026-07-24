@@ -3,6 +3,7 @@ import type { Plugin } from '@opencode-ai/plugin/v2/effect'
 import type { AISDKHooks } from '@opencode-ai/plugin/v2/effect/aisdk'
 import type { CatalogDraft } from '@opencode-ai/plugin/v2/effect/catalog'
 import type { IntegrationDraft } from '@opencode-ai/plugin/v2/effect/integration'
+import type { SessionHooks } from '@opencode-ai/plugin/v2/effect/session'
 import { Cause, Effect, Semaphore, Stream } from 'effect'
 import { DEFAULT_ANTHROPIC_SUBSCRIPTION_AUTH_CONFIG } from './config'
 import { ANTHROPIC_INTEGRATION_ID, ANTHROPIC_OAUTH_METHOD_ID, anthropicOAuthMethod } from './oauth'
@@ -118,6 +119,16 @@ function resolveSubscriptionCredential(resolveCredential: ResolveAnthropicCreden
 	)
 }
 
+function normalizeAnthropicToolInputSchemas(event: SessionHooks['context']): void {
+	if (event.model.providerID !== ANTHROPIC_INTEGRATION_ID) return
+	for (const tool of Object.values(event.tools)) {
+		const input = tool.input
+		if (typeof input !== 'object' || input === null || Array.isArray(input) || 'type' in input)
+			continue
+		tool.input = { ...input, type: 'object' }
+	}
+}
+
 function configureAnthropicSubscriptionSdk(
 	event: AISDKHooks['sdk'],
 	loader: AnthropicV1AuthLoader,
@@ -223,6 +234,15 @@ export const registerAnthropicSubscriptionAuth = Effect.fn('registerAnthropicSub
 			'sdk',
 			Effect.fn('configureAnthropicSubscriptionSdk')((event) =>
 				configureAnthropicSubscriptionSdk(event, loader, resolveCredential, providerPackage),
+			),
+		)
+		yield* ctx.session.hook(
+			'context',
+			Effect.fn('normalizeAnthropicSubscriptionToolSchemas')((event) =>
+				Effect.sync(() => {
+					if (!subscriptionConnected) return
+					normalizeAnthropicToolInputSchemas(event)
+				}),
 			),
 		)
 
