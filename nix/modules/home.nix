@@ -25,8 +25,21 @@ let
   enabledLinear = cfg.enable && cfg.mcp.linear.enable;
   enabledOpencodeService = cfg.enable && cfg.opencode.service.enable;
 
+  opencodePackage =
+    if cfg.opencode.disableClaudeCode then
+      pkgs.symlinkJoin {
+        name = "opencode-disable-claude-code";
+        paths = [ cfg.opencode.package ];
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        postBuild = ''
+          wrapProgram $out/bin/opencode --set OPENCODE_DISABLE_CLAUDE_CODE 1
+        '';
+      }
+    else
+      cfg.opencode.package;
+
   opencodeServiceUrl = "http://${cfg.opencode.service.hostname}:${toString cfg.opencode.service.port}";
-  opencodeAttachCommand = "${cfg.opencode.package}/bin/opencode attach ${opencodeServiceUrl} --dir \"$PWD\"";
+  opencodeAttachCommand = "${opencodePackage}/bin/opencode attach ${opencodeServiceUrl} --dir \"$PWD\"";
 
   defaultAgentBrowserPackage = self.packages.${system}."agent-browser";
   defaultEffectSolutionsPackage = self.packages.${system}."effect-solutions";
@@ -141,6 +154,12 @@ in
         type = lib.types.package;
         default = self.packages.${system}.opencode;
         description = "OpenCode package to install. Defaults to the Numtide llm-agents.nix OpenCode package.";
+      };
+
+      disableClaudeCode = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Disable OpenCode's Claude Code integration by setting OPENCODE_DISABLE_CLAUDE_CODE=1 for the CLI and server.";
       };
 
       permission = lib.mkOption {
@@ -700,7 +719,7 @@ in
         ];
 
         home = {
-          packages = [ cfg.opencode.package ];
+          packages = [ opencodePackage ];
           file = {
             "${opencodeDir}/opencode.json".text = builtins.toJSON opencodeConfig;
             "${opencodeDir}/AGENTS.md".text = agentsText;
@@ -778,8 +797,11 @@ in
           };
 
           Service = {
-            Environment = "OPENCODE_EXPERIMENTAL_WEBSOCKETS=true";
-            ExecStart = "${cfg.opencode.package}/bin/opencode serve --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
+            Environment = [
+              "OPENCODE_EXPERIMENTAL_WEBSOCKETS=true"
+            ]
+            ++ lib.optional cfg.opencode.disableClaudeCode "OPENCODE_DISABLE_CLAUDE_CODE=1";
+            ExecStart = "${opencodePackage}/bin/opencode serve --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
             Restart = "on-failure";
             RestartSec = "5s";
           };

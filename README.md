@@ -42,6 +42,7 @@ programs.limitless = {
   enable = true;
 
   opencode = {
+    disableClaudeCode = false;
     extraAgentsFile = null;
     settings = {};
     service = {
@@ -106,6 +107,8 @@ programs.limitless = {
 `tools.agentBrowser.enable` and `tools.effectSolutions.enable` default to `skills.enable`. Set either tool explicitly to install the CLI without installing skills.
 
 `git.ignoreStorage` enables Home Manager's Git module by default and adds `.limitless/` to the global ignore file. Set it to `false` if a repository should manage that directory itself.
+
+Set `opencode.disableClaudeCode = true` to launch both the installed OpenCode CLI and the optional server with `OPENCODE_DISABLE_CLAUDE_CODE=1`.
 
 The checked-in `opencode/opencode.json` is the base OpenCode configuration. Limitless deep-merges generated permissions and enabled language servers over that base, then deep-merges `opencode.settings` last. The `limitless` default agent remains enforced.
 
