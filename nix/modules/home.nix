@@ -43,11 +43,98 @@ let
 
   defaultAgentBrowserPackage = self.packages.${system}."agent-browser";
   defaultEffectSolutionsPackage = self.packages.${system}."effect-solutions";
+  defaultAcliPackage = pkgs.acli;
 
+  enabledAcli = cfg.enable && cfg.tools.acli.enable;
   enabledAgentBrowser = cfg.enable && cfg.tools.agentBrowser.enable;
   enabledEffectSolutions = cfg.enable && cfg.tools.effectSolutions.enable;
+  enabledAcliSkill = enabledSkills && enabledAcli;
   enabledAgentBrowserSkill = enabledSkills && enabledAgentBrowser;
   enabledEffectSolutionsSkill = enabledSkills && enabledEffectSolutions;
+
+  acliSkillPackage = pkgs.runCommand "limitless-atlassian-cli-skill" { } ''
+    mkdir -p $out/atlassian-cli
+    cp ${self}/nix/skills/atlassian-cli/SKILL.md $out/atlassian-cli/SKILL.md
+  '';
+
+  acliPackage =
+    if cfg.tools.acli.tokenFile == null then
+      cfg.tools.acli.package
+    else
+      let
+        realAcli = lib.getExe cfg.tools.acli.package;
+        site = lib.escapeShellArg (if cfg.tools.acli.site == null then "" else cfg.tools.acli.site);
+        email = lib.escapeShellArg (if cfg.tools.acli.email == null then "" else cfg.tools.acli.email);
+        tokenFile = lib.escapeShellArg cfg.tools.acli.tokenFile;
+      in
+      pkgs.writeShellScriptBin "acli" ''
+        set -eu
+
+        real_acli=${lib.escapeShellArg realAcli}
+        site=${site}
+        email=${email}
+        token_file=${tokenFile}
+
+        if [ "''${1:-}" = "jira" ]; then
+          if [ -z "''${XDG_RUNTIME_DIR:-}" ]; then
+            printf '%s\n' "acli: XDG_RUNTIME_DIR is required for token-file authentication" >&2
+            exit 1
+          fi
+
+          runtime_dir="$XDG_RUNTIME_DIR/limitless-acli"
+          ${pkgs.coreutils}/bin/install -d -m 0700 "$runtime_dir" "$runtime_dir/config"
+          export ACLI_CONFIG_DIR="$runtime_dir/config"
+
+          if [ "''${2:-}" = "auth" ] && [ "''${3:-}" = "logout" ]; then
+            set +e
+            "$real_acli" "$@"
+            status=$?
+            set -e
+            ${pkgs.coreutils}/bin/rm -f "$runtime_dir/identity"
+            exit "$status"
+          fi
+
+          if [ "''${2:-}" = "auth" ] && [ "''${3:-}" = "login" ]; then
+            exec -a acli "$real_acli" "$@"
+          fi
+
+          (
+            ${pkgs.util-linux}/bin/flock -x 9
+
+            if [ ! -r "$token_file" ]; then
+              printf 'acli: Jira API token file is not readable: %s\n' "$token_file" >&2
+              exit 1
+            fi
+
+            fingerprint="$({
+              printf '%s\0%s\0' "$site" "$email"
+              ${pkgs.coreutils}/bin/cat "$token_file"
+            } | ${pkgs.coreutils}/bin/sha256sum | ${pkgs.coreutils}/bin/cut -d ' ' -f 1)"
+
+            current_fingerprint=""
+            if [ -r "$runtime_dir/identity" ]; then
+              current_fingerprint="$(${pkgs.coreutils}/bin/cat "$runtime_dir/identity")"
+            fi
+
+            if [ "$fingerprint" != "$current_fingerprint" ]; then
+              if ! "$real_acli" jira auth login \
+                --site "$site" \
+                --email "$email" \
+                --token < "$token_file" 1>&2; then
+                printf '%s\n' "acli: Jira authentication failed; verify the site, email, and agenix token" >&2
+                exit 1
+              fi
+
+              identity_tmp="$runtime_dir/.identity.$$"
+              umask 077
+              printf '%s\n' "$fingerprint" > "$identity_tmp"
+              ${pkgs.coreutils}/bin/mv "$identity_tmp" "$runtime_dir/identity"
+            fi
+          ) 9> "$runtime_dir/auth.lock"
+        fi
+
+        exec -a acli "$real_acli" "$@"
+      '';
 
   enabledSkillsPackage = pkgs.runCommand "limitless-enabled-skills" { } ''
     copySkills() {
@@ -59,6 +146,7 @@ let
 
     mkdir -p $out
     copySkills ${cfg.skills.package}
+    ${lib.optionalString enabledAcliSkill "copySkills ${acliSkillPackage}"}
     ${lib.optionalString enabledAgentBrowserSkill "copySkills ${cfg.tools.agentBrowser.package}/share/skills"}
     ${lib.optionalString enabledEffectSolutionsSkill "copySkills ${cfg.tools.effectSolutions.package}/share/skills"}
   '';
@@ -279,6 +367,38 @@ in
     };
 
     tools = {
+      acli = {
+        enable = lib.mkEnableOption "Atlassian CLI and its companion Jira skill";
+
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = defaultAcliPackage;
+          defaultText = lib.literalExpression "pkgs.acli";
+          description = "Atlassian CLI package to install.";
+        };
+
+        site = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "^[A-Za-z0-9.-]+$");
+          default = null;
+          example = "company.atlassian.net";
+          description = "Jira Cloud hostname used for token-file authentication.";
+        };
+
+        email = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "agent@example.com";
+          description = "Atlassian account email used for token-file authentication.";
+        };
+
+        tokenFile = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "^/.*");
+          default = null;
+          example = "/run/agenix/atlassian-api-token";
+          description = "Optional runtime file containing an Atlassian API token. The token value is never written to generated configuration or passed in process arguments.";
+        };
+      };
+
       agentBrowser = {
         enable = lib.mkOption {
           type = lib.types.bool;
@@ -713,6 +833,16 @@ in
             message = "programs.limitless.notifications.command must be non-empty when notifications are enabled.";
           }
           {
+            assertion =
+              cfg.tools.acli.tokenFile == null
+              || (cfg.tools.acli.enable && cfg.tools.acli.site != null && cfg.tools.acli.email != null);
+            message = "programs.limitless.tools.acli token-file authentication requires enable = true plus non-null site and email values.";
+          }
+          {
+            assertion = cfg.tools.acli.tokenFile == null || pkgs.stdenv.isLinux;
+            message = "programs.limitless.tools.acli.tokenFile currently requires Linux and XDG_RUNTIME_DIR.";
+          }
+          {
             assertion = lib.attrByPath [ "agent" "limitless" "disable" ] false cfg.opencode.settings != true;
             message = "programs.limitless keeps the limitless default agent enabled; remove opencode.settings.agent.limitless.disable.";
           }
@@ -772,6 +902,9 @@ in
       })
       (lib.mkIf enabledAgentBrowser {
         home.packages = [ cfg.tools.agentBrowser.package ];
+      })
+      (lib.mkIf enabledAcli {
+        home.packages = [ acliPackage ];
       })
       (lib.mkIf enabledEffectSolutions {
         home.packages = [ cfg.tools.effectSolutions.package ];
