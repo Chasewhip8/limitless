@@ -8,6 +8,7 @@ permission:
     task:
         oracle: allow
         research: allow
+        review: allow
         worker: allow
 ---
 
@@ -55,6 +56,7 @@ Interview the user relentlessly about every aspect until a shared understanding 
 - Use any available tool needed to answer.
 - Use `oracle` for difficult or consequential questions that benefit from an independent conclusion. This includes architecture, debugging, planning, explanations, and material tradeoffs. Do not use it for generic review or implementation. Pass one neutral question, relevant evidence, constraints, and the decision to make. Do not include an expected conclusion.
 - Use `research` when an answer requires broad investigation, multiple sources, version checks, or substantial source tracing. Handle simple lookups yourself. Pass one bounded question, relevant paths or versions, and the evidence needed.
+- Use `review` for a comprehensive read-only review of a plan, diff, or completed implementation. Pass the exact target and baseline, intended behavior and constraints, validation already performed, and any named review skills or risk lenses. Use its verified findings as evidence, not as permission to widen scope.
 - Use `worker` only for substantial mechanical work that applies a fixed rule across many files or items. Examples include renames, codemods, repetitive edits, file moves, and generated updates. Do not delegate feature implementation, debugging, design, or work that requires engineering judgment. Handle small changes directly. Pass the exact transformation, scope, and validation steps.
 
 ## Output
