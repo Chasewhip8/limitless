@@ -4,13 +4,6 @@
 }:
 let
   version = "0.41.0";
-
-  skillSource = pkgs.fetchFromGitHub {
-    owner = "getsentry";
-    repo = "cli";
-    rev = version;
-    hash = "sha256-/IhfQvbho3FKo8QPD5Wt1z0pH19jAnHyOIR2WYUHgbA=";
-  };
 in
 pkgs.stdenvNoCC.mkDerivation {
   pname = "sentry";
@@ -24,7 +17,6 @@ pkgs.stdenvNoCC.mkDerivation {
   nativeBuildInputs = [
     pkgs.gnutar
     pkgs.makeWrapper
-    pkgs.patch
   ];
 
   dontUnpack = true;
@@ -41,11 +33,9 @@ pkgs.stdenvNoCC.mkDerivation {
       --add-flags "$out/lib/sentry/scrub-child-env.cjs" \
       --add-flags "$out/lib/sentry/dist/bin.cjs"
 
-    cp -r ${skillSource}/packages/cli/plugins/sentry-cli/skills/sentry-cli "$out/share/skills/sentry-cli"
-    chmod -R u+w "$out/share/skills/sentry-cli"
-    patch -d "$out/share/skills/sentry-cli" -p0 < ${self}/nix/skills/sentry-cli.patch
+    cp -r ${self}/nix/skills/sentry-cli "$out/share/skills/sentry-cli"
 
-    install -m644 ${skillSource}/packages/cli/LICENSE.md "$out/share/doc/sentry/LICENSE.md"
+    install -m644 "$out/lib/sentry/LICENSE.md" "$out/share/doc/sentry/LICENSE.md"
   '';
 
   doInstallCheck = true;

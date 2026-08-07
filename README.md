@@ -115,7 +115,7 @@ programs.limitless = {
 };
 ```
 
-`tools.agentBrowser.enable` and `tools.effectSolutions.enable` default to `skills.enable`. Set either tool explicitly to install the CLI without installing skills. `tools.acli.enable` is opt-in because Atlassian CLI is proprietary; enabling it also installs a brief Jira orientation skill when skills are enabled. `tools.sentry.enable` is also opt-in and installs Sentry's official `sentry` CLI plus its matching upstream skill when skills are enabled.
+`tools.agentBrowser.enable` and `tools.effectSolutions.enable` default to `skills.enable`. Set either tool explicitly to install the CLI without installing skills. `tools.acli.enable` is opt-in because Atlassian CLI is proprietary; enabling it also installs a brief Jira orientation skill when skills are enabled. `tools.sentry.enable` is also opt-in and installs Sentry's official `sentry` CLI plus a concise Limitless companion skill when skills are enabled.
 
 For non-interactive Jira Cloud authentication, set `tools.acli.site`, `tools.acli.email`, and `tools.acli.tokenFile`. The token file may be an agenix runtime path and is read lazily on the first Jira command without copying the value into the Nix store or process arguments. ACLI may retain its credential in the operating-system keyring; its generated profile configuration is kept under the per-user runtime directory. The wrapper reauthenticates after a reboot or token-file change. OpenCode shell permissions remain authoritative and Limitless does not add ACLI-specific prompts.
 
