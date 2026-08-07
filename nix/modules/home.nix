@@ -43,14 +43,17 @@ let
 
   defaultAgentBrowserPackage = self.packages.${system}."agent-browser";
   defaultEffectSolutionsPackage = self.packages.${system}."effect-solutions";
+  defaultSentryPackage = self.packages.${system}.sentry;
   defaultAcliPackage = pkgs.acli;
 
   enabledAcli = cfg.enable && cfg.tools.acli.enable;
   enabledAgentBrowser = cfg.enable && cfg.tools.agentBrowser.enable;
   enabledEffectSolutions = cfg.enable && cfg.tools.effectSolutions.enable;
+  enabledSentry = cfg.enable && cfg.tools.sentry.enable;
   enabledAcliSkill = enabledSkills && enabledAcli;
   enabledAgentBrowserSkill = enabledSkills && enabledAgentBrowser;
   enabledEffectSolutionsSkill = enabledSkills && enabledEffectSolutions;
+  enabledSentrySkill = enabledSkills && enabledSentry;
 
   acliSkillPackage = pkgs.runCommand "limitless-atlassian-cli-skill" { } ''
     mkdir -p $out/atlassian-cli
@@ -136,6 +139,38 @@ let
         exec -a acli "$real_acli" "$@"
       '';
 
+  sentryPackage =
+    if cfg.tools.sentry.tokenFile == null then
+      cfg.tools.sentry.package
+    else
+      let
+        realSentry = lib.getExe cfg.tools.sentry.package;
+        tokenFile = lib.escapeShellArg cfg.tools.sentry.tokenFile;
+      in
+      pkgs.writeShellScriptBin "sentry" ''
+        set -eu
+
+        real_sentry=${lib.escapeShellArg realSentry}
+        token_file=${tokenFile}
+
+        if [ ! -r "$token_file" ]; then
+          printf 'sentry: Sentry API token file is not readable: %s\n' "$token_file" >&2
+          exit 1
+        fi
+
+        SENTRY_AUTH_TOKEN="$(${pkgs.coreutils}/bin/cat "$token_file")"
+        if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+          printf 'sentry: Sentry API token file is empty: %s\n' "$token_file" >&2
+          exit 1
+        fi
+
+        export SENTRY_AUTH_TOKEN
+        export SENTRY_FORCE_ENV_TOKEN=1
+        export SENTRY_CLI_NO_UPDATE_CHECK=1
+
+        exec -a sentry "$real_sentry" "$@"
+      '';
+
   enabledSkillsPackage = pkgs.runCommand "limitless-enabled-skills" { } ''
     copySkills() {
       if [ -d "$1" ]; then
@@ -149,6 +184,7 @@ let
     ${lib.optionalString enabledAcliSkill "copySkills ${acliSkillPackage}"}
     ${lib.optionalString enabledAgentBrowserSkill "copySkills ${cfg.tools.agentBrowser.package}/share/skills"}
     ${lib.optionalString enabledEffectSolutionsSkill "copySkills ${cfg.tools.effectSolutions.package}/share/skills"}
+    ${lib.optionalString enabledSentrySkill "copySkills ${cfg.tools.sentry.package}/share/skills"}
   '';
 
   mkLspServer =
@@ -426,6 +462,23 @@ in
           type = lib.types.package;
           default = defaultEffectSolutionsPackage;
           description = "effect-solutions package to install.";
+        };
+      };
+
+      sentry = {
+        enable = lib.mkEnableOption "Sentry CLI and its companion agent skill";
+
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = defaultSentryPackage;
+          description = "Sentry CLI package to install.";
+        };
+
+        tokenFile = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "^/.*");
+          default = null;
+          example = "/run/agenix/sentry-api-token";
+          description = "Runtime file containing a Sentry API token. The token value is never written to generated configuration or passed in process arguments.";
         };
       };
     };
@@ -843,6 +896,10 @@ in
             message = "programs.limitless.tools.acli.tokenFile currently requires Linux and XDG_RUNTIME_DIR.";
           }
           {
+            assertion = !enabledSentry || cfg.tools.sentry.tokenFile != null;
+            message = "programs.limitless.tools.sentry.tokenFile must be set when Sentry CLI support is enabled.";
+          }
+          {
             assertion = lib.attrByPath [ "agent" "limitless" "disable" ] false cfg.opencode.settings != true;
             message = "programs.limitless keeps the limitless default agent enabled; remove opencode.settings.agent.limitless.disable.";
           }
@@ -908,6 +965,9 @@ in
       })
       (lib.mkIf enabledEffectSolutions {
         home.packages = [ cfg.tools.effectSolutions.package ];
+      })
+      (lib.mkIf enabledSentry {
+        home.packages = [ sentryPackage ];
       })
       (lib.mkIf enabledLsp {
         home.packages = lspPackages;

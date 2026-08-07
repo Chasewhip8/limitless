@@ -2,7 +2,7 @@
 description: Oracle question-answering subagent for difficult technical questions, architecture, debugging, planning, tradeoffs, and independent second opinions.
 mode: subagent
 model: anthropic/claude-fable-5
-reasoningEffort: high
+reasoningEffort: max
 permission:
     task:
         "*": deny

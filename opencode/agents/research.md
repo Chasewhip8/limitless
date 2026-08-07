@@ -2,7 +2,7 @@
 description: Research subagent for answering questions using repo code, local docs, external docs, APIs, standards, dependencies, migrations, and source evidence.
 mode: subagent
 model: openai/gpt-5.6-sol-fast
-reasoningEffort: medium
+reasoningEffort: xhigh
 permission:
     edit: deny
     artifact_create: deny

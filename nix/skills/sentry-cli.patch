@@ -1,0 +1,95 @@
+--- SKILL.md
++++ SKILL.md
+@@ -11,6 +11,10 @@
+ 
+ Help users interact with Sentry from the command line using the `sentry` CLI.
+ 
++When installed by Limitless, Home Manager owns the CLI installation and an
++agenix-backed wrapper provides authentication. Do not run authentication,
++setup, upgrade, or uninstall commands unless the user explicitly asks.
++
+ ## Agent Guidance
+ 
+ Best practices and operational guidance for AI coding agents using the Sentry CLI.
+@@ -17,7 +21,7 @@
+ 
+ ### Key Principles
+ 
+-- **Just run the command** — the CLI handles authentication and org/project detection automatically. Don't pre-authenticate or look up org/project before running commands. If auth is needed, the CLI prompts interactively.
++- **Just run the command** — the Limitless wrapper handles authentication and the CLI handles org/project detection automatically. Don't pre-authenticate or look up org/project before running commands. If authentication fails, report the failure instead of changing credentials.
+ - **Prefer CLI commands over raw API calls** — the CLI has dedicated commands for most tasks. Reach for `sentry issue view`, `sentry issue list`, `sentry trace view`, etc. before constructing API calls manually or fetching external documentation.
+ - **Use `sentry schema` to explore the API** — if you need to discover API endpoints, run `sentry schema` to browse interactively or `sentry schema <resource>` to search. This is faster than fetching OpenAPI specs externally.
+ - **Use `sentry issue view <id>` to investigate issues** — when asked about a specific issue (e.g., `CLI-G5`, `PROJECT-123`), use `sentry issue view` directly.
+@@ -41,9 +45,12 @@
+ 
+ ### Safety Rules
+ 
+-- Always confirm with the user before running destructive commands: `project delete`, `trial start`
+-- For mutations, verify the org/project context looks correct in the command output before proceeding with further changes
+-- Never store or log authentication tokens — the CLI manages credentials automatically
++- Run mutations only when the user explicitly requests them. Treat issue state changes, assignments, merges, Seer analysis or plan generation, event submission, releases, deploys, uploads, project or alert changes, and non-GET `sentry api` requests as mutations.
++- Read the exact target first and verify its organization and project before mutating it.
++- Confirm the selected targets and expected impact immediately before destructive or bulk operations, including `project delete`, `release delete`, issue merges, and `trial start`.
++- Never use a search, inferred project, or unverified list result to select mutation targets unless the user explicitly requests a bulk operation and the selected count has been verified.
++- Never run `sentry auth login`, `sentry auth logout`, or `sentry auth token` unless the user explicitly asks. Limitless provides token-file authentication.
++- Never store or log authentication tokens.
+ - If the CLI reports the wrong org/project, override with explicit `<org>/<project>` arguments
+ 
+ ### Exit Codes
+@@ -53,7 +60,7 @@
+ | Range | Meaning | Agent Action |
+ |-------|---------|-------------|
+ | 0 | Success | Proceed normally |
+-| 10–19 | Auth error | Prompt user to run `sentry auth login` |
++| 10–19 | Auth error | Report the token-file authentication failure; do not change credentials |
+ | 20–29 | Input error | Check command arguments and retry |
+ | 30–39 | API error | Retry or report to user |
+ | 40–49 | Feature unavailable | Inform user about plan/settings |
+@@ -73,9 +80,6 @@
+ # 2. Get details
+ sentry issue view PROJECT-123
+ 
+-# 3. Get AI root cause analysis
+-sentry issue explain PROJECT-123
+-
+-# 4. Get a fix plan
+-sentry issue plan PROJECT-123
++# Seer analysis and plans can create stored artifacts and consume quota.
++# Run them only when the user explicitly requests them.
+ ```
+@@ -257,7 +264,7 @@
+ ### Common Mistakes
+ 
+ - **Wrong issue ID format**: Use `PROJECT-123` (short ID), not the numeric ID `123456789`. The short ID includes the project prefix.
+-- **Pre-authenticating unnecessarily**: Don't run `sentry auth login` before every command. The CLI detects missing/expired auth and prompts automatically. Only run `sentry auth login` if you need to switch accounts.
++- **Changing managed authentication**: Limitless injects the configured agenix token for every command. Report authentication failures instead of running login, logout, refresh, or token-printing commands.
+ - **Missing `--json` for piping**: Human-readable output includes formatting. Use `--json` when parsing output programmatically.
+ - **Specifying org/project when not needed**: Auto-detection resolves org/project from `.sentryclirc` config files, DSNs, env vars, and directory names. Let it work first — only add `<org>/<project>` if the CLI says it can't detect the target or detects the wrong one.
+ - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
+@@ -270,24 +277,6 @@
+ ## Prerequisites
+ 
+-The CLI must be installed and authenticated before use.
+-
+-### Installation
+-
+-```bash
+-curl https://cli.sentry.dev/install -fsS | bash
+-curl https://cli.sentry.dev/install -fsS | bash -s -- --version nightly
+-
+-# Or install via npm/pnpm/bun
+-npm install -g sentry
+-```
+-
+-### Authentication
+-
+-```bash
+-sentry auth login
+-sentry auth login --token YOUR_SENTRY_API_TOKEN
+-sentry auth status
+-sentry auth logout
+-```
++Limitless installs the CLI through Home Manager and authenticates it from the
++configured agenix token file. If either is unavailable, report the failure.
+ 
+ ## Command Reference

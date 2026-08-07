@@ -23,9 +23,15 @@
       eachSystem = flake-utils.lib.eachDefaultSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfreePredicate = pkg: (pkg.pname or "") == "sentry";
+          };
           effectSolutionsPackage = import ./nix/packages/effect-solutions.nix {
             inherit pkgs self system;
+          };
+          sentryPackage = import ./nix/packages/sentry.nix {
+            inherit pkgs self;
           };
           linearMcpPackage = import ./nix/packages/linear-mcp.nix {
             inherit pkgs self;
@@ -57,6 +63,7 @@
           packages = {
             skills = skillsPackage;
             "effect-solutions" = effectSolutionsPackage;
+            sentry = sentryPackage;
             "linear-mcp" = linearMcpPackage;
             limitless = limitlessPackage;
             "agent-browser" = agentBrowserPackage;
@@ -94,6 +101,7 @@
         linear-mcp = self.packages.${final.stdenv.hostPlatform.system}."linear-mcp";
         agent-browser = self.packages.${final.stdenv.hostPlatform.system}."agent-browser";
         effect-solutions = self.packages.${final.stdenv.hostPlatform.system}."effect-solutions";
+        sentry = self.packages.${final.stdenv.hostPlatform.system}.sentry;
       };
     };
 }

@@ -23,7 +23,7 @@
 
 - **One module to enable**: `programs.limitless.enable = true` wires OpenCode, agents, skills, plugins, MCPs, and language servers together.
 - **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, and implementation.
-- **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed with their tools for Effect guidance and browser automation.
+- **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed alongside supported CLIs.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
 - **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces can be empty or hold notes, source files, assets, and generated outputs.
 - **Global Git hygiene**: Home Manager adds `.limitless/` to Git's global ignore file by default, so project-local clones and artifacts stay out of repository status.
@@ -31,6 +31,7 @@
 - **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional project-cached GitHub source research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **Optional Linear MCP**: Linear remains opt-in and reads `LINEAR_API_KEY` from the OpenCode process environment.
+- **Optional Sentry CLI**: install Sentry's agent-oriented CLI and companion skill with lazy agenix token-file authentication.
 - **Native attention hooks**: optionally run a system command when a session completes or the question tool prompts the user.
 - **Safer agent permissions**: common work is allowed, while credential access, destructive git operations, broad deletion, publishing, privilege escalation, and infrastructure mutations ask first.
 - **Optional service mode**: OpenCode can run as a user service with a shell alias that attaches from the current directory.
@@ -68,6 +69,10 @@ programs.limitless = {
     };
     agentBrowser.enable = true;
     effectSolutions.enable = true;
+    sentry = {
+      enable = false;
+      tokenFile = null;
+    };
   };
 
   github = {
@@ -110,9 +115,20 @@ programs.limitless = {
 };
 ```
 
-`tools.agentBrowser.enable` and `tools.effectSolutions.enable` default to `skills.enable`. Set either tool explicitly to install the CLI without installing skills. `tools.acli.enable` is opt-in because Atlassian CLI is proprietary; enabling it also installs a brief Jira orientation skill when skills are enabled.
+`tools.agentBrowser.enable` and `tools.effectSolutions.enable` default to `skills.enable`. Set either tool explicitly to install the CLI without installing skills. `tools.acli.enable` is opt-in because Atlassian CLI is proprietary; enabling it also installs a brief Jira orientation skill when skills are enabled. `tools.sentry.enable` is also opt-in and installs Sentry's official `sentry` CLI plus its matching upstream skill when skills are enabled.
 
 For non-interactive Jira Cloud authentication, set `tools.acli.site`, `tools.acli.email`, and `tools.acli.tokenFile`. The token file may be an agenix runtime path and is read lazily on the first Jira command without copying the value into the Nix store or process arguments. ACLI may retain its credential in the operating-system keyring; its generated profile configuration is kept under the per-user runtime directory. The wrapper reauthenticates after a reboot or token-file change. OpenCode shell permissions remain authoritative and Limitless does not add ACLI-specific prompts.
+
+Sentry support requires a runtime token file:
+
+```nix
+programs.limitless.tools.sentry = {
+  enable = true;
+  tokenFile = config.age.secrets.sentry-api-token.path;
+};
+```
+
+The wrapper reads the file for every `sentry` command, exports the value as `SENTRY_AUTH_TOKEN` in the CLI process, and forces that token to take precedence over stored OAuth credentials. The packaged CLI scrubs Sentry token variables from child-process environments. The value is never copied into the Nix store, generated configuration, or process arguments. Limitless sets no global organization or project; the CLI still applies its normal precedence across ambient environment variables, global and repository `.sentryclirc` files, persistent defaults, and DSN detection. Keep global defaults clear when relying on repository detection, and provision the token with the least privileges those repositories need. The companion skill permits routine investigation but requires explicit user intent and verified targets for mutations, including Seer analysis or plan generation. Sentry's CLI is distributed under FSL-1.1-Apache-2.0, which Nixpkgs classifies as unfree; this flake allowlists only its own `sentry` derivation rather than enabling unfree packages generally.
 
 `git.ignoreStorage` enables Home Manager's Git module by default and adds `.limitless/` to the global ignore file. Set it to `false` if a repository should manage that directory itself.
 
