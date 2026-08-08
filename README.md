@@ -33,6 +33,7 @@
 - **Optional Linear MCP**: Linear remains opt-in and reads `LINEAR_API_KEY` from the OpenCode process environment.
 - **Optional Sentry CLI**: install Sentry's agent-oriented CLI and companion skill with lazy agenix token-file authentication.
 - **Native attention hooks**: optionally run a system command when a session completes or the question tool prompts the user.
+- **Optional Slack bridge**: connect one repository and configurable agent to mentioned Slack channel threads over Socket Mode, including progress updates, images, and cancellation.
 - **Safer agent permissions**: common work is allowed, while credential access, destructive git operations, broad deletion, publishing, privilege escalation, and infrastructure mutations ask first.
 - **Optional service mode**: OpenCode can run as a user service with a shell alias that attaches from the current directory.
 
@@ -92,6 +93,15 @@ programs.limitless = {
       complete = true;
       question = true;
     };
+  };
+
+  slack = {
+    enable = false;
+    repository = null;
+    agent = "gary";
+    botTokenEnv = "SLACK_BOT_TOKEN";
+    appTokenEnv = "SLACK_APP_TOKEN";
+    environmentFile = null;
   };
 
   lsp = {
@@ -184,6 +194,42 @@ programs.limitless.notifications = {
 ```
 
 The command is executed directly, without a shell. Completion notifications fire when a top-level OpenCode session becomes idle; question notifications fire before the OpenCode `question` tool prompts the user. Child/subagent completion notifications are skipped by default.
+
+## Slack bridge
+
+The optional Slack bridge runs inside the persistent OpenCode service and maps one deployment to one repository and one configured agent. It uses Slack Socket Mode, so the VM needs outbound network access but no public HTTP endpoint. Enable it with:
+
+```nix
+programs.limitless = {
+  opencode.service.enable = true;
+
+  slack = {
+    enable = true;
+    repository = "/home/me/workspace";
+    agent = "gary";
+    environmentFile = "/run/agenix/limitless-slack-environment";
+  };
+};
+```
+
+The optional environment file is read by the systemd user service at runtime and is not copied into generated OpenCode configuration or the Nix store. It must define the configured token variables, which default to:
+
+```sh
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+```
+
+Create an internal Slack app with Socket Mode enabled. Subscribe to the `app_mention` bot event and grant the app-level token `connections:write`. The bot token needs `app_mentions:read`, `chat:write`, `channels:history`, `groups:history` for private channels, and `files:read`. Install the bot to the workspace and invite it to every channel where it should respond.
+
+Slack turns use the hidden `gary` primary agent by default. Gary mirrors the normal Limitless agent but carries the Slack transport, clarification, shared-checkout, and transcript-trust instructions in its own prompt. The bridge still disables the blocking `question` tool as a transport safety constraint. Set `slack.agent` explicitly to select a different agent.
+
+Every turn requires an explicit bot mention. On each mention the bridge imports all unseen thread messages, including unmentioned intervening replies, into the thread's OpenCode session. The bridge supports message text and up to four Slack-hosted PNG, JPEG, WebP, or GIF images per turn, with a 10 MiB limit per image. Unsupported and excess attachments are represented by omission notes in agent context.
+
+The bridge posts one `Working…` placeholder. The selected agent can edit it through `slack_status`; when the OpenCode session becomes idle, the bridge replaces it with the final response and splits Markdown responses that exceed Slack's 12,000-character field limit. Mention `@bot cancel` or `@bot stop` to abort the active turn in that thread. The built-in OpenCode question tool is disabled for Slack turns; the agent asks for clarification in its final reply and continues after the next mention. Permission prompts raised by a Slack turn or its child sessions are denied rather than left waiting for a nonexistent local UI.
+
+Turns in the same Slack thread are serialized. Different threads intentionally run concurrently against the same checkout, so the configured agent must account for shared mutable repository state. Thread-to-session mappings are process-local: after a service restart, the next mention creates a fresh OpenCode session and re-imports the visible Slack transcript. Direct messages, durable intermediate sends, arbitrary files, channel/user allowlists, worktrees, and per-thread runtime isolation are not included.
+
+Slack performs transport authentication, but Limitless intentionally accepts every mention the installed bot can receive. A broadly privileged configured agent therefore grants repository and VM command authority to those Slack users. Isolate the VM, limit its credentials and repository access, and configure the selected agent with deliberate allow/deny permissions. Slack support currently requires Linux because it depends on the managed systemd user service.
 
 ## Artifacts and documents
 

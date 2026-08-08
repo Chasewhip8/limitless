@@ -24,6 +24,7 @@ let
   enabledLsp = cfg.enable && cfg.lsp.enable;
   enabledLinear = cfg.enable && cfg.mcp.linear.enable;
   enabledOpencodeService = cfg.enable && cfg.opencode.service.enable;
+  enabledSlack = cfg.enable && cfg.slack.enable;
 
   opencodePackage =
     if cfg.opencode.disableClaudeCode then
@@ -40,6 +41,45 @@ let
 
   opencodeServiceUrl = "http://${cfg.opencode.service.hostname}:${toString cfg.opencode.service.port}";
   opencodeAttachCommand = "${opencodePackage}/bin/opencode attach ${opencodeServiceUrl} --dir \"$PWD\"";
+  slackRepository = if cfg.slack.repository == null then "/" else cfg.slack.repository;
+  slackPrepare = pkgs.writeShellScript "limitless-slack-prepare" ''
+    set -eu
+    : "''${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
+    ${pkgs.coreutils}/bin/rm -f "$XDG_RUNTIME_DIR/limitless-slack-ready"
+  '';
+  slackBootstrap = pkgs.writeShellScript "limitless-slack-bootstrap" ''
+    set -eu
+    : "''${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
+    ready_file="$XDG_RUNTIME_DIR/limitless-slack-ready"
+
+    while ! ${pkgs.curl}/bin/curl --fail --silent --show-error \
+      ${lib.escapeShellArg "${opencodeServiceUrl}/global/health"} >/dev/null 2>&1; do
+      ${pkgs.coreutils}/bin/sleep 0.1
+    done
+
+    probe_response="$(${pkgs.curl}/bin/curl --fail --silent --show-error \
+      --request POST \
+      --header ${lib.escapeShellArg "x-opencode-directory: ${slackRepository}"} \
+      --header 'content-type: application/json' \
+      --data '{"title":"Limitless Slack startup probe"}' \
+      ${lib.escapeShellArg "${opencodeServiceUrl}/session"})"
+    probe_id="$(printf '%s' "$probe_response" | ${pkgs.jq}/bin/jq --exit-status --raw-output '.id')"
+
+    cleanup_probe() {
+      ${pkgs.curl}/bin/curl --fail --silent --show-error \
+        --request DELETE \
+        --header ${lib.escapeShellArg "x-opencode-directory: ${slackRepository}"} \
+        ${lib.escapeShellArg "${opencodeServiceUrl}/session"}/"$probe_id" >/dev/null || true
+    }
+    trap cleanup_probe EXIT
+
+    while [ ! -s "$ready_file" ]; do
+      ${pkgs.coreutils}/bin/sleep 0.1
+    done
+
+    cleanup_probe
+    trap - EXIT
+  '';
 
   defaultAgentBrowserPackage = self.packages.${system}."agent-browser";
   defaultEffectSolutionsPackage = self.packages.${system}."effect-solutions";
@@ -247,6 +287,17 @@ let
       events = {
         inherit (cfg.notifications.events) complete question;
       };
+    };
+    slack = {
+      inherit (cfg.slack)
+        enable
+        agent
+        botTokenEnv
+        appTokenEnv
+        ;
+    }
+    // lib.optionalAttrs (cfg.slack.repository != null) {
+      inherit (cfg.slack) repository;
     };
   };
 
@@ -580,6 +631,42 @@ in
       };
     };
 
+    slack = {
+      enable = lib.mkEnableOption "the repository-scoped Slack bridge for OpenCode";
+
+      repository = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "^/.*");
+        default = null;
+        example = "/home/me/workspace";
+        description = "Absolute repository directory used for every Slack-backed OpenCode session.";
+      };
+
+      agent = lib.mkOption {
+        type = lib.types.strMatching ".+";
+        default = "gary";
+        description = "OpenCode agent selected for Slack-backed turns.";
+      };
+
+      botTokenEnv = lib.mkOption {
+        type = lib.types.strMatching "^[A-Za-z_][A-Za-z0-9_]*$";
+        default = "SLACK_BOT_TOKEN";
+        description = "Environment variable containing the Slack bot token.";
+      };
+
+      appTokenEnv = lib.mkOption {
+        type = lib.types.strMatching "^[A-Za-z_][A-Za-z0-9_]*$";
+        default = "SLACK_APP_TOKEN";
+        description = "Environment variable containing the Slack Socket Mode app token.";
+      };
+
+      environmentFile = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "^/.*");
+        default = null;
+        example = "/run/agenix/limitless-slack-environment";
+        description = "Optional runtime EnvironmentFile that supplies Slack tokens to the OpenCode user service without copying values into the Nix store.";
+      };
+    };
+
     lsp = {
       enable = lib.mkOption {
         type = lib.types.bool;
@@ -886,6 +973,18 @@ in
             message = "programs.limitless.notifications.command must be non-empty when notifications are enabled.";
           }
           {
+            assertion = !enabledSlack || cfg.opencode.service.enable;
+            message = "programs.limitless.slack.enable requires programs.limitless.opencode.service.enable.";
+          }
+          {
+            assertion = !enabledSlack || cfg.slack.repository != null;
+            message = "programs.limitless.slack.repository must be set when Slack support is enabled.";
+          }
+          {
+            assertion = !enabledSlack || pkgs.stdenv.isLinux;
+            message = "programs.limitless Slack service integration currently requires Linux.";
+          }
+          {
             assertion =
               cfg.tools.acli.tokenFile == null
               || (cfg.tools.acli.enable && cfg.tools.acli.site != null && cfg.tools.acli.email != null);
@@ -925,6 +1024,7 @@ in
                 const github = object(base.github);
                 const notifications = object(base.notifications);
                 const notificationEvents = object(notifications.events);
+                const slack = object(base.slack);
                 return plugin(input, {
                   ...base,
                   github: {
@@ -938,6 +1038,10 @@ in
                       ...generatedOptions.notifications.events,
                       ...notificationEvents,
                     },
+                  },
+                  slack: {
+                    ...generatedOptions.slack,
+                    ...slack,
                   },
                 });
               };
@@ -993,10 +1097,20 @@ in
             Environment = [
               "OPENCODE_EXPERIMENTAL_WEBSOCKETS=true"
             ]
-            ++ lib.optional cfg.opencode.disableClaudeCode "OPENCODE_DISABLE_CLAUDE_CODE=1";
+            ++ lib.optional cfg.opencode.disableClaudeCode "OPENCODE_DISABLE_CLAUDE_CODE=1"
+            ++ lib.optional enabledSlack "LIMITLESS_SLACK_SERVICE=1";
             ExecStart = "${opencodePackage}/bin/opencode serve --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
             Restart = "on-failure";
             RestartSec = "5s";
+          }
+          // lib.optionalAttrs enabledSlack {
+            WorkingDirectory = slackRepository;
+            ExecStartPre = slackPrepare;
+            ExecStartPost = slackBootstrap;
+            TimeoutStartSec = "90s";
+          }
+          // lib.optionalAttrs (enabledSlack && cfg.slack.environmentFile != null) {
+            EnvironmentFile = [ cfg.slack.environmentFile ];
           };
 
           Install.WantedBy = [ "default.target" ];

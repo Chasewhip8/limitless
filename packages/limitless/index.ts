@@ -5,6 +5,7 @@ import {
 	DISABLED_NOTIFICATION_CONFIG,
 	normalizeNotificationConfig,
 } from './integrations/notifications/index'
+import { createSlackRunner, normalizeSlackConfig, slackTools } from './integrations/slack/index'
 import { artifactTools } from './tools/artifacts/index'
 import { astGrepTools } from './tools/ast-grep'
 import { diagnosticsTools } from './tools/diagnostics'
@@ -45,16 +46,17 @@ export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* 
 ) {
 	const notificationConfig = yield* resolveNotificationConfig(options)
 	const notifications = yield* createNotificationRunner(notificationConfig)
+	const slackConfig = yield* normalizeSlackConfig(options)
 	const githubConfig = yield* resolveGitHubConfig(options)
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
-	return { notifications, githubConfig, githubCloneRuntime }
+	return { notifications, slackConfig, githubConfig, githubCloneRuntime }
 })
 
-function runNotificationHook(name: string, effect: Effect.Effect<unknown>) {
+function runPluginHook(name: string, effect: Effect.Effect<unknown>) {
 	return Effect.runPromise(
 		effect.pipe(
 			Effect.catchDefect((defect) =>
-				Effect.logError(`[limitless] notification hook ${name} failed`, defect),
+				Effect.logError(`[limitless] plugin hook ${name} failed`, defect),
 			),
 			Effect.asVoid,
 		),
@@ -63,13 +65,41 @@ function runNotificationHook(name: string, effect: Effect.Effect<unknown>) {
 
 export function createLimitless(): Plugin {
 	return async (pluginInput, options) => {
-		const { githubCloneRuntime, githubConfig, notifications } = await Effect.runPromise(
-			resolvePluginConfigs(options),
-		)
+		const { githubCloneRuntime, githubConfig, notifications, slackConfig } =
+			await Effect.runPromise(resolvePluginConfigs(options))
+		const slack = await Effect.runPromise(createSlackRunner(slackConfig, pluginInput))
+		const dispatchSlackMention = (input: unknown) => {
+			setImmediate(() => {
+				void runPluginHook('slack.app_mention', slack.handleMention(input))
+			})
+			return Promise.resolve()
+		}
+		let slackStart: Promise<void> | undefined
+		const ensureSlackStarted = () => {
+			slackStart ??= Effect.runPromise(
+				slack
+					.start(dispatchSlackMention)
+					.pipe(
+						Effect.catch((error) =>
+							Effect.logError(`[limitless] ${error.operation}: ${error.message}`),
+						),
+					),
+			)
+			return slackStart
+		}
 		return {
-			event: ({ event }) => runNotificationHook('event', notifications.handleEvent(event)),
+			dispose: () => runPluginHook('dispose', slack.stop),
+			event: async ({ event }) => {
+				await ensureSlackStarted()
+				return runPluginHook(
+					'event',
+					Effect.all([notifications.handleEvent(event), slack.handleOpenCodeEvent(event)], {
+						discard: true,
+					}),
+				)
+			},
 			'tool.execute.before': (input) =>
-				runNotificationHook(
+				runPluginHook(
 					'tool.execute.before',
 					input.tool === 'question' ? notifications.notify('question') : Effect.void,
 				),
@@ -79,6 +109,7 @@ export function createLimitless(): Plugin {
 				...diagnosticsTools(),
 				...lspTools(pluginInput),
 				...githubTools(githubConfig, githubCloneRuntime),
+				...slackTools(slack),
 			},
 		}
 	}

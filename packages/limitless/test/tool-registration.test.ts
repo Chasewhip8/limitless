@@ -221,4 +221,13 @@ describe('OpenCode tool transport parity', () => {
 			}
 		}
 	})
+
+	test('registers slack_status only when the Slack bridge is configured', async () => {
+		const pluginInput = Object.create(null) as PluginInput
+		const hooks = await createLimitless()(pluginInput, {
+			slack: { enable: true, repository: '/workspace' },
+		})
+
+		expect(Object.keys(hooks.tool ?? {})).toContain('slack_status')
+	})
 })

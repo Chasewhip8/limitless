@@ -82,12 +82,41 @@ const allowedLayout = new Map<string, ReadonlySet<string>>([
 		'integrations/notifications',
 		new Set(['config.ts', 'events.ts', 'index.ts', 'runner.ts', 'schema.ts']),
 	],
+	[
+		'integrations/slack',
+		new Set([
+			'config.ts',
+			'errors.ts',
+			'history.ts',
+			'index.ts',
+			'runner.ts',
+			'runtime.ts',
+			'schema.ts',
+			'tools.ts',
+		]),
+	],
 ])
 
 const operationalTypes = new Map([
 	['core/command.ts', new Set(['RunOptions'])],
 	['tools/github/runtime.ts', new Set(['GitRuntime', 'GitHubCloneRuntime'])],
 	['tools/lsp/runtime.ts', new Set(['LspRuntimeState', 'LspConnectionRuntime'])],
+	[
+		'integrations/slack/runtime.ts',
+		new Set([
+			'SlackMentionDispatcher',
+			'SlackAppHandle',
+			'SlackAppFactory',
+			'SlackRunnerOptions',
+			'SlackThreadState',
+			'SlackPendingTurn',
+			'SlackActiveTurn',
+			'SlackRuntimeState',
+			'SlackPluginContext',
+			'SlackRunnerConfig',
+		]),
+	],
+	['integrations/slack/runner.ts', new Set(['SlackRunner'])],
 ])
 
 const operationSchemas = new Map<string, ReadonlySet<string>>([
@@ -269,6 +298,32 @@ const barrelSurfaces = new Map<string, ReadonlySet<string>>([
 			'NotificationConfigError',
 			'createNotificationRunner',
 			'normalizeNotificationConfig',
+		]),
+	],
+	[
+		'integrations/slack/index.ts',
+		new Set([
+			'DEFAULT_SLACK_AGENT',
+			'DEFAULT_SLACK_APP_TOKEN_ENV',
+			'DEFAULT_SLACK_BOT_TOKEN_ENV',
+			'DISABLED_SLACK_CONFIG',
+			'MAX_SLACK_IMAGE_BYTES',
+			'MAX_SLACK_IMAGES_PER_TURN',
+			'MAX_SLACK_MARKDOWN_CHARS',
+			'MAX_SLACK_STATUS_CHARS',
+			'SLACK_SERVICE_ACTIVATION_ENV',
+			'SlackConfig',
+			'SlackConfigError',
+			'SlackRunner',
+			'SlackStatusInput',
+			'chunkSlackMarkdown',
+			'createSlackRunner',
+			'isSlackCancelCommand',
+			'normalizeSlackConfig',
+			'selectSlackImageIDs',
+			'slackThreadKey',
+			'slackTools',
+			'stripSlackBotMention',
 		]),
 	],
 ])
@@ -650,7 +705,7 @@ describe('production architecture', () => {
 
 			if (relative.endsWith('/index.ts') && relative !== 'index.ts') continue
 			const featureRoot = relative.match(
-				/^(tools\/(?:artifacts|github|lsp)|integrations\/notifications)\//u,
+				/^(tools\/(?:artifacts|github|lsp)|integrations\/(?:notifications|slack))\//u,
 			)?.[1]
 			if (
 				featureRoot !== undefined &&
@@ -706,6 +761,7 @@ describe('production architecture', () => {
 		)
 		for (const featureIndex of [
 			'./integrations/notifications/index',
+			'./integrations/slack/index',
 			'./tools/artifacts/index',
 			'./tools/github/index',
 			'./tools/lsp/index',

@@ -29,7 +29,7 @@ let
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
     '';
 
-    outputHash = "sha256-ZyKsbMrgeGxosWx2ifgjH5ObFzFrboiF1lJpmd+41Sw=";
+    outputHash = "sha256-VdET4ft5fa8RZIfD/bIWHZXKuf/y49NcJZXHkP1SlZI=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -68,7 +68,7 @@ pkgs.stdenvNoCC.mkDerivation {
   '';
 
   meta = with pkgs.lib; {
-    description = "OpenCode plugin that adds local code-intelligence tools";
+    description = "OpenCode plugin that adds local code-intelligence tools and integrations";
     platforms = platforms.all;
   };
 }
