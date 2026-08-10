@@ -34,16 +34,19 @@ async function makeHarness(
 	histories: Map<string, Array<SlackMessage>>,
 	behavior: {
 		assistantError?: string
-		assistantParentID?: string
+		assistantParentID?:
+			| string
+			| ((input: { call: number; latestPromptID: string | undefined; sessionID: string }) => string)
 		assistantText?: string
 		fetch?: typeof globalThis.fetch
 		create?: (args: { signal?: AbortSignal }) => Promise<{ data: { id: string } }>
 		promptAsync?: (args: {
+			path: { id: string }
 			body: {
 				agent: string
 				messageID: string
 				tools: Record<string, boolean>
-				parts: Array<{ type: string }>
+				parts: Array<{ type: string; text?: string }>
 			}
 		}) => Promise<{ data: undefined }>
 		update?: (args: Record<string, unknown>) => Promise<{ ok: boolean }>
@@ -51,6 +54,7 @@ async function makeHarness(
 ) {
 	let sessionCounter = 0
 	let slackMessageCounter = 0
+	const latestPromptBySession = new Map<string, string>()
 	const create = vi.fn(
 		(args: { signal?: AbortSignal }) =>
 			behavior.create?.(args).then((response) => {
@@ -61,25 +65,37 @@ async function makeHarness(
 	const prompt = vi.fn(() => Promise.resolve({ data: {} }))
 	const promptAsync = vi.fn(
 		(_args: {
+			path: { id: string }
 			body: {
 				agent: string
 				messageID: string
 				tools: Record<string, boolean>
-				parts: Array<{ type: string }>
+				parts: Array<{ type: string; text?: string }>
 			}
-		}) => behavior.promptAsync?.(_args) ?? Promise.resolve({ data: undefined }),
+		}) => {
+			latestPromptBySession.set(_args.path.id, _args.body.messageID)
+			return behavior.promptAsync?.(_args) ?? Promise.resolve({ data: undefined })
+		},
 	)
 	const abort = vi.fn(() => Promise.resolve({ data: true }))
 	const rejectPermission = vi.fn(() => Promise.resolve({ data: true }))
-	const messages = vi.fn(() => {
-		const parentID = promptAsync.mock.calls.at(-1)?.[0].body.messageID
+	const messages = vi.fn((args: { path: { id: string } }) => {
+		const parentID = latestPromptBySession.get(args.path.id)
+		const configuredParent =
+			typeof behavior.assistantParentID === 'function'
+				? behavior.assistantParentID({
+						call: messages.mock.calls.length,
+						latestPromptID: parentID,
+						sessionID: args.path.id,
+					})
+				: behavior.assistantParentID
 		return Promise.resolve({
 			data: [
 				{
 					info: {
 						id: 'msg_ffffffffffffffffffffffffff',
 						role: 'assistant',
-						parentID: behavior.assistantParentID ?? parentID,
+						parentID: configuredParent ?? parentID,
 						time: { created: Date.now() + 1_000 },
 						...(behavior.assistantError === undefined
 							? {}
@@ -309,7 +325,7 @@ describe('Slack bridge runner', () => {
 		)
 
 		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
-		expect(mocks.prompt).toHaveBeenCalledTimes(1)
+		expect(mocks.prompt).not.toHaveBeenCalled()
 		const promptBody = mocks.promptAsync.mock.calls[0]?.[0].body
 		if (promptBody === undefined) throw new Error('missing OpenCode prompt body')
 		expect(promptBody.agent).toBe('slack-agent')
@@ -325,26 +341,177 @@ describe('Slack bridge runner', () => {
 		)
 
 		await runEffect(runner.updateStatus('session-1', 'Running tests'))
+		await runEffect(runner.updateStatus('session-1', 'Running tests'))
 		expect(mocks.update).toHaveBeenCalledWith(
-			expect.objectContaining({ text: 'Running tests', ts: 'status-1' }),
+			expect.objectContaining({
+				markdown_text: '🧠 *Thinking…*\n> Running tests\n> Running tests',
+				ts: 'status-1',
+			}),
 		)
 		await runEffect(
 			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
 		)
 		await running
 		expect(mocks.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ markdown_text: '**Final answer**', ts: 'status-1' }),
+			expect.objectContaining({
+				markdown_text: '🧠 *Thinking…*\n> Running tests\n> Running tests',
+				ts: 'status-1',
+			}),
+		)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: '**Final answer**' }),
 		)
 		await runEffect(runner.stop)
 		expect(mocks.clearReady).toHaveBeenCalledTimes(2)
 	})
 
-	test('serializes turns in one thread while allowing different threads to start in parallel', async () => {
+	test('imports messages before a mention from oldest to newest', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			[
+				'C1',
+				[
+					{ ts: '4.000001', thread_ts: '1.000001', user: 'U1', text: '<@UBOT> respond' },
+					{ ts: '3.000001', thread_ts: '1.000001', user: 'U3', text: 'third' },
+					{ ts: '1.000001', user: 'U1', text: 'first' },
+					{ ts: '2.000001', thread_ts: '1.000001', user: 'U2', text: 'second' },
+				],
+			],
+		])
+		const { runner, mocks } = await makeHarness(histories)
+		const running = runEffect(runner.handleMention(mention('E1', '4.000001', '<@UBOT> respond')))
+
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		const imported = mocks.promptAsync.mock.calls[0]?.[0].body.parts
+			.filter((part) => part.type === 'text')
+			.map((part) => part.text?.split('\n')[1])
+		expect(imported).toEqual(['first', 'second', 'third', 'respond'])
+		expect(mocks.prompt).not.toHaveBeenCalled()
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		await runEffect(runner.stop)
+	})
+
+	test('retries a batched human message when a later prompt launch fails', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' }]],
+		])
+		let launches = 0
+		const { runner, mocks } = await makeHarness(histories, {
+			promptAsync: () => {
+				launches += 1
+				return launches === 2
+					? Promise.reject(new Error('prompt unavailable'))
+					: Promise.resolve({ data: undefined })
+			},
+		})
+		const first = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> first', 'C1', '1.0')),
+		)
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await first
+
+		histories.set('C1', [
+			{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' },
+			{ ts: '3.0', thread_ts: '1.0', user: 'U2', text: 'do not lose this' },
+			{ ts: '4.0', thread_ts: '1.0', user: 'UBOT', text: 'prior bot output' },
+			{ ts: '5.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> second' },
+		])
+		await runEffect(runner.handleMention(mention('E2', '5.0', '<@UBOT> second', 'C1', '1.0')))
+
+		histories.get('C1')?.push({
+			ts: '6.0',
+			thread_ts: '1.0',
+			user: 'U1',
+			text: '<@UBOT> retry',
+		})
+		const retry = runEffect(
+			runner.handleMention(mention('E3', '6.0', '<@UBOT> retry', 'C1', '1.0')),
+		)
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(3))
+		const retriedParts = mocks.promptAsync.mock.calls[2]?.[0].body.parts
+		expect(retriedParts?.some((part) => part.text?.includes('do not lose this'))).toBe(true)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await retry
+		await runEffect(runner.stop)
+	})
+
+	test('keeps the previous trace intact when a continuation post fails', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> work' }]],
+		])
+		const { runner, mocks } = await makeHarness(histories)
+		const running = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> work', 'C1', '1.0')),
+		)
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		for (let index = 0; index < 11; index += 1)
+			await runEffect(runner.updateStatus('session-1', `${index}-${'x'.repeat(995)}`))
+
+		mocks.postMessage.mockRejectedValueOnce(new Error('temporary Slack failure'))
+		const failed = await runEffect(
+			runner.updateStatus('session-1', `11-${'x'.repeat(995)}`).pipe(Effect.flip),
+		)
+		expect(failed._tag).toBe('SlackIntegrationError')
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		const trace = mocks.update.mock.calls.at(-1)?.[0].markdown_text
+		expect(trace).toContain(`> 10-${'x'.repeat(995)}`)
+		expect(trace).not.toContain(`> 11-${'x'.repeat(995)}`)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: '**Final answer**' }),
+		)
+		await runEffect(runner.stop)
+	})
+
+	test('continues a full thinking trace and appends the final answer to its latest message', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> work' }]],
+		])
+		const { runner, mocks } = await makeHarness(histories, {
+			assistantText: `**Final answer** ${'y'.repeat(13_000)}`,
+		})
+		const running = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> work', 'C1', '1.0')),
+		)
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+
+		for (let index = 0; index < 13; index += 1)
+			await runEffect(runner.updateStatus('session-1', `${index}-${'x'.repeat(995)}`))
+
+		expect(mocks.postMessage).toHaveBeenCalledTimes(2)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				markdown_text: expect.stringMatching(/^🧠 \*Thinking…\*\n> /u),
+			}),
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		expect(mocks.update).toHaveBeenLastCalledWith(expect.objectContaining({ ts: 'status-2' }))
+		expect(mocks.postMessage).toHaveBeenCalledTimes(4)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: expect.stringContaining('y') }),
+		)
+		await runEffect(runner.stop)
+	})
+
+	test('steers same-thread mentions while allowing different threads to run in parallel', async () => {
 		const histories = new Map<string, Array<SlackMessage>>([
 			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' }]],
 			['C2', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> other' }]],
 		])
 		const { runner, mocks } = await makeHarness(histories)
+		const fixedClock = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
 		const first = runEffect(
 			runner.handleMention(mention('E1', '2.0', '<@UBOT> first', 'C1', '1.0')),
 		)
@@ -352,29 +519,197 @@ describe('Slack bridge runner', () => {
 
 		histories.set('C1', [
 			{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' },
+			{ ts: '2.5', thread_ts: '1.0', user: 'U2', text: 'between mentions' },
 			{ ts: '3.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> second' },
 		])
 		const second = runEffect(
 			runner.handleMention(mention('E2', '3.0', '<@UBOT> second', 'C1', '1.0')),
 		)
+		await second
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(2))
+		expect(
+			(mocks.promptAsync.mock.calls[1]?.[0].body.messageID ?? '') >
+				(mocks.promptAsync.mock.calls[0]?.[0].body.messageID ?? ''),
+		).toBe(true)
+		expect(
+			mocks.promptAsync.mock.calls[1]?.[0].body.parts
+				.filter((part) => part.type === 'text')
+				.map((part) => part.text?.split('\n')[1]),
+		).toEqual(['between mentions', 'second'])
+		fixedClock.mockRestore()
+		expect(mocks.create).toHaveBeenCalledTimes(1)
+		await runEffect(runner.updateStatus('session-1', 'Read the follow-up'))
+		expect(mocks.update).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				markdown_text: '🧠 *Thinking…*\n> Read the follow-up',
+				ts: 'status-2',
+			}),
+		)
 		const other = runEffect(
 			runner.handleMention(mention('E3', '2.0', '<@UBOT> other', 'C2', '1.0')),
 		)
-		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(2))
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(3))
 		expect(mocks.create).toHaveBeenCalledTimes(2)
 
 		await runEffect(
 			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
 		)
 		await first
-		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(3))
 		await runEffect(
 			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-2' } }),
 		)
 		await runEffect(
 			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
 		)
-		await Promise.all([second, other])
+		await other
+		await runEffect(runner.stop)
+	})
+
+	test('restarts an idle run when its latest steering message was not consumed', async () => {
+		let resolveWake!: (response: { data: undefined }) => void
+		const wakeResponse = new Promise<{ data: undefined }>((resolve) => {
+			resolveWake = resolve
+		})
+		let promptCalls = 0
+		const histories = new Map<string, Array<SlackMessage>>([
+			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' }]],
+		])
+		const { runner, mocks } = await makeHarness(histories, {
+			assistantParentID: ({ call, latestPromptID }) =>
+				call === 1 ? 'msg_00000000000100000000000000' : (latestPromptID ?? 'missing'),
+			promptAsync: () => {
+				promptCalls += 1
+				return promptCalls === 3 ? wakeResponse : Promise.resolve({ data: undefined })
+			},
+		})
+		await runEffect(runner.handleMention(mention('E1', '2.0', '<@UBOT> first', 'C1', '1.0')))
+		histories.set('C1', [
+			{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' },
+			{ ts: '3.0', thread_ts: '1.0', user: 'U2', text: 'new context' },
+			{ ts: '4.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> follow up' },
+		])
+		await runEffect(runner.handleMention(mention('E2', '4.0', '<@UBOT> follow up', 'C1', '1.0')))
+		expect(mocks.promptAsync).toHaveBeenCalledTimes(2)
+
+		const firstIdle = runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(3))
+		const staleIdle = runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({
+				type: 'session.status',
+				properties: { sessionID: 'session-1', status: { type: 'busy' } },
+			}),
+		)
+		resolveWake({ data: undefined })
+		await Promise.all([firstIdle, staleIdle])
+		expect(mocks.promptAsync).toHaveBeenCalledTimes(3)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(2)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: '**Final answer**' }),
+		)
+		await runEffect(runner.stop)
+	})
+
+	test('starts a new turn for a mention that arrives during final publication', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' }]],
+		])
+		const { runner, mocks } = await makeHarness(histories)
+		await runEffect(runner.handleMention(mention('E1', '2.0', '<@UBOT> first', 'C1', '1.0')))
+		let resolveFinal!: (response: { ok: boolean; ts: string }) => void
+		const finalPost = new Promise<{ ok: boolean; ts: string }>((resolve) => {
+			resolveFinal = resolve
+		})
+		mocks.postMessage.mockImplementationOnce(() => finalPost)
+		const finalizing = runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await vi.waitFor(() => expect(mocks.postMessage).toHaveBeenCalledTimes(2))
+
+		histories.set('C1', [
+			{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' },
+			{ ts: '3.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> next' },
+		])
+		const next = runEffect(runner.handleMention(mention('E2', '3.0', '<@UBOT> next', 'C1', '1.0')))
+		resolveFinal({ ok: true, ts: 'final-1' })
+		await finalizing
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(2))
+		await next
+		expect(mocks.create).toHaveBeenCalledTimes(1)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: '🧠 *Thinking…*' }),
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await runEffect(runner.stop)
+	})
+
+	test('ignores an idle invalidated by busy during response retrieval', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' }]],
+		])
+		const { runner, mocks } = await makeHarness(histories)
+		await runEffect(runner.handleMention(mention('E1', '2.0', '<@UBOT> first', 'C1', '1.0')))
+		histories.set('C1', [
+			{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' },
+			{ ts: '3.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> follow up' },
+		])
+		await runEffect(runner.handleMention(mention('E2', '3.0', '<@UBOT> follow up', 'C1', '1.0')))
+		const parentID = mocks.promptAsync.mock.calls[1]?.[0].body.messageID
+		let resolveMessages!: (response: {
+			data: Array<{
+				info: { id: string; parentID: string | undefined; role: string; time: { created: number } }
+				parts: Array<{ ignored: boolean; text: string; type: string }>
+			}>
+		}) => void
+		const delayedMessages = new Promise<{
+			data: Array<{
+				info: { id: string; parentID: string | undefined; role: string; time: { created: number } }
+				parts: Array<{ ignored: boolean; text: string; type: string }>
+			}>
+		}>((resolve) => {
+			resolveMessages = resolve
+		})
+		mocks.messages.mockImplementationOnce(() => delayedMessages)
+		const staleIdle = runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await vi.waitFor(() => expect(mocks.messages).toHaveBeenCalledTimes(1))
+		await runEffect(
+			runner.handleOpenCodeEvent({
+				type: 'session.status',
+				properties: { sessionID: 'session-1', status: { type: 'busy' } },
+			}),
+		)
+		resolveMessages({
+			data: [
+				{
+					info: {
+						id: 'msg_ffffffffffffffffffffffffff',
+						parentID,
+						role: 'assistant',
+						time: { created: Date.now() },
+					},
+					parts: [{ ignored: false, text: '**Final answer**', type: 'text' }],
+				},
+			],
+		})
+		await staleIdle
+		expect(mocks.postMessage).toHaveBeenCalledTimes(2)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: '**Final answer**' }),
+		)
 		await runEffect(runner.stop)
 	})
 
@@ -421,8 +756,10 @@ describe('Slack bridge runner', () => {
 		)
 		await running
 		expect(mocks.abort).toHaveBeenCalledTimes(1)
-		expect(mocks.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ text: 'Cancelled by <@U1>.' }),
+		expect(mocks.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				markdown_text: expect.stringContaining('Cancelled by <@U1>.'),
+			}),
 		)
 		expect(await runEffect(runner.shouldDenyPermission('child-1'))).toBe(false)
 		await runEffect(runner.stop)
@@ -465,8 +802,10 @@ describe('Slack bridge runner', () => {
 		await running
 		expect(mocks.promptAsync).not.toHaveBeenCalled()
 		expect(mocks.abort).not.toHaveBeenCalled()
-		expect(mocks.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ text: 'Cancelled by <@U1>.' }),
+		expect(mocks.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				markdown_text: expect.stringContaining('Cancelled by <@U1>.'),
+			}),
 		)
 		resolveFetch(
 			new Response(new Uint8Array([1, 2, 3]), {
@@ -474,6 +813,22 @@ describe('Slack bridge runner', () => {
 				headers: { 'content-length': '3' },
 			}),
 		)
+		await runEffect(runner.stop)
+	})
+
+	test('aborts and settles even when the cancellation notice cannot be posted', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> work' }]],
+		])
+		const { runner, mocks } = await makeHarness(histories)
+		await runEffect(runner.handleMention(mention('E1', '2.0', '<@UBOT> work', 'C1', '1.0')))
+		mocks.postMessage.mockRejectedValueOnce(new Error('Slack unavailable'))
+		await runEffect(runner.handleMention(mention('E2', '3.0', '<@UBOT> cancel', 'C1', '1.0')))
+		expect(mocks.abort).toHaveBeenCalledTimes(1)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		expect(await runEffect(runner.shouldDenyPermission('session-1'))).toBe(false)
 		await runEffect(runner.stop)
 	})
 
@@ -494,8 +849,28 @@ describe('Slack bridge runner', () => {
 		await runEffect(runner.handleMention(mention('E2', '2.1', '<@UBOT> cancel', 'C1', '1.0')))
 		await running
 		expect(mocks.promptAsync).not.toHaveBeenCalled()
+		expect(mocks.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				markdown_text: 'Cancelled by <@U1>.',
+			}),
+		)
+		await runEffect(runner.stop)
+	})
+
+	test('preserves the thinking trace when initial session setup fails', async () => {
+		const histories = new Map<string, Array<SlackMessage>>()
+		const { runner, mocks } = await makeHarness(histories, {
+			create: () => Promise.reject(new Error('session unavailable')),
+		})
+
+		await runEffect(runner.handleMention(mention('E1', '2.0', '<@UBOT> work', 'C1', '1.0')))
+		expect(mocks.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({ markdown_text: '🧠 *Thinking…*' }),
+		)
 		expect(mocks.postMessage).toHaveBeenLastCalledWith(
-			expect.objectContaining({ text: 'Cancelled by <@U1>.' }),
+			expect.objectContaining({
+				markdown_text: expect.stringMatching(/^OpenCode could not create a session/u),
+			}),
 		)
 		await runEffect(runner.stop)
 	})
@@ -539,15 +914,17 @@ describe('Slack bridge runner', () => {
 			}),
 		)
 		await running
-		expect(mocks.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ text: 'Cancelled by <@U1>.' }),
+		expect(mocks.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				markdown_text: expect.stringContaining('Cancelled by <@U1>.'),
+			}),
 		)
 		const rejected = await runEffect(runner.updateStatus('session-1', 'Too late').pipe(Effect.flip))
 		expect(rejected._tag).toBe('SlackIntegrationError')
 		await runEffect(runner.stop)
 	})
 
-	test('aborts a turn cancelled while OpenCode is accepting the prompt', async () => {
+	test('aborts an accepting prompt and clears a same-thread pending mention', async () => {
 		let resolvePrompt!: (response: { data: undefined }) => void
 		const promptResponse = new Promise<{ data: undefined }>((resolve) => {
 			resolvePrompt = resolve
@@ -562,11 +939,23 @@ describe('Slack bridge runner', () => {
 			runner.handleMention(mention('E1', '2.0', '<@UBOT> work', 'C1', '1.0')),
 		)
 		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		histories.set('C1', [
+			{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> work' },
+			{ ts: '3.0', thread_ts: '1.0', user: 'U2', text: '<@UBOT> more work' },
+		])
+		const queued = runEffect(
+			runner.handleMention(mention('E2', '3.0', '<@UBOT> more work', 'C1', '1.0')),
+		)
 		const cancelling = runEffect(
-			runner.handleMention(mention('E2', '2.1', '<@UBOT> cancel', 'C1', '1.0')),
+			runner.handleMention(mention('E3', '4.0', '<@UBOT> cancel', 'C1', '1.0')),
 		)
 		resolvePrompt({ data: undefined })
-		await cancelling
+		await Promise.all([running, queued, cancelling])
+		expect(mocks.promptAsync).toHaveBeenCalledTimes(1)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(2)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: 'Cancelled by <@U1>.' }),
+		)
 		await runEffect(
 			runner.handleOpenCodeEvent({
 				type: 'session.status',
@@ -579,10 +968,30 @@ describe('Slack bridge runner', () => {
 				properties: { sessionID: 'session-1', status: { type: 'idle' } },
 			}),
 		)
-		await running
-		expect(mocks.abort).toHaveBeenCalledTimes(1)
-		expect(mocks.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ text: 'Cancelled by <@U1>.' }),
+		expect(mocks.abort).toHaveBeenCalledTimes(3)
+		expect(mocks.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				markdown_text: expect.stringContaining('Cancelled by <@U1>.'),
+			}),
+		)
+		await runEffect(runner.handleMention(mention('E-old', '3.5', '<@UBOT> cancel', 'C1', '1.0')))
+		histories.set('C1', [
+			{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> work' },
+			{ ts: '3.0', thread_ts: '1.0', user: 'U2', text: '<@UBOT> more work' },
+			{ ts: '3.8', thread_ts: '1.0', user: 'U2', text: 'must stay cancelled' },
+			{ ts: '4.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> cancel' },
+			{ ts: '5.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> fresh request' },
+		])
+		await runEffect(
+			runner.handleMention(mention('E4', '5.0', '<@UBOT> fresh request', 'C1', '1.0')),
+		)
+		const freshParts = mocks.promptAsync.mock.calls[1]?.[0].body.parts
+		expect(freshParts?.some((part) => part.text?.includes('more work'))).toBe(false)
+		expect(freshParts?.some((part) => part.text?.includes('must stay cancelled'))).toBe(false)
+		expect(freshParts?.some((part) => part.text?.includes('fresh request'))).toBe(true)
+		expect(mocks.create).toHaveBeenCalledTimes(1)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
 		)
 		await runEffect(runner.stop)
 	})
@@ -686,8 +1095,8 @@ describe('Slack bridge runner', () => {
 				properties: { sessionID: 'session-1', error: { name: 'ContextOverflowError' } },
 			}),
 		)
-		expect(mocks.update).not.toHaveBeenCalledWith(
-			expect.objectContaining({ text: expect.stringContaining('reported an error') }),
+		expect(mocks.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({ markdown_text: expect.stringContaining('reported an error') }),
 		)
 		await runEffect(
 			runner.handleOpenCodeEvent({
@@ -696,8 +1105,8 @@ describe('Slack bridge runner', () => {
 			}),
 		)
 		await running
-		expect(mocks.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ markdown_text: '**Final answer**' }),
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: expect.stringContaining('**Final answer**') }),
 		)
 		await runEffect(runner.stop)
 	})
@@ -718,8 +1127,8 @@ describe('Slack bridge runner', () => {
 			}),
 		)
 		await running
-		expect(mocks.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ text: expect.stringContaining('reported an error') }),
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: expect.stringContaining('reported an error') }),
 		)
 		await runEffect(runner.stop)
 	})
@@ -745,8 +1154,8 @@ describe('Slack bridge runner', () => {
 			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
 		)
 		await running
-		expect(mocks.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ text: expect.stringContaining('reported an error') }),
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: expect.stringContaining('reported an error') }),
 		)
 		await runEffect(runner.stop)
 	})
@@ -767,8 +1176,8 @@ describe('Slack bridge runner', () => {
 			}),
 		)
 		await first
-		expect(mocks.update).toHaveBeenLastCalledWith(
-			expect.objectContaining({ text: expect.stringContaining('was deleted') }),
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: expect.stringContaining('was deleted') }),
 		)
 
 		histories.set('C1', [

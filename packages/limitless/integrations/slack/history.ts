@@ -16,17 +16,26 @@ import {
 	SlackRepliesResponse,
 } from './schema'
 
-function messageTime(value: string): number {
-	const parsed = Number(value)
-	return Number.isFinite(parsed) ? parsed : 0
+function compareTimestampText(left: string, right: string): number {
+	const timestamp = /^(\d+)(?:\.(\d+))?$/u
+	const leftMatch = timestamp.exec(left)
+	const rightMatch = timestamp.exec(right)
+	if (leftMatch === null || rightMatch === null) return left.localeCompare(right)
+	const leftSeconds = BigInt(leftMatch[1] as string)
+	const rightSeconds = BigInt(rightMatch[1] as string)
+	if (leftSeconds !== rightSeconds) return leftSeconds < rightSeconds ? -1 : 1
+	const leftFraction = leftMatch[2] ?? ''
+	const rightFraction = rightMatch[2] ?? ''
+	const width = Math.max(leftFraction.length, rightFraction.length)
+	return leftFraction.padEnd(width, '0').localeCompare(rightFraction.padEnd(width, '0'))
 }
 
 export function compareSlackMessages(left: SlackMessage, right: SlackMessage): number {
-	return messageTime(left.ts) - messageTime(right.ts)
+	return compareTimestampText(left.ts, right.ts)
 }
 
 export function isAfterSlackTimestamp(candidate: string, previous: string | undefined): boolean {
-	return previous === undefined || messageTime(candidate) > messageTime(previous)
+	return previous === undefined || compareTimestampText(candidate, previous) > 0
 }
 
 function slackApiError(operation: string, error: unknown): SlackIntegrationError {
@@ -291,18 +300,28 @@ export const prepareSlackMessageParts = Effect.fn('prepareSlackMessageParts')(fu
 	return [{ type: 'text' as const, text }, ...images] satisfies ReadonlyArray<SlackPromptPart>
 })
 
-export function chunkSlackMarkdown(text: string): ReadonlyArray<string> {
+export function chunkSlackMarkdown(
+	text: string,
+	firstChunkChars = MAX_SLACK_MARKDOWN_CHARS,
+): ReadonlyArray<string> {
 	const normalized =
 		text.trim().length === 0 ? 'Completed without a textual response.' : text.trim()
 	const chunks: Array<string> = []
 	let remaining = normalized
-	while (remaining.length > MAX_SLACK_MARKDOWN_CHARS) {
-		const window = remaining.slice(0, MAX_SLACK_MARKDOWN_CHARS)
+	while (remaining.length > 0) {
+		const limit =
+			chunks.length === 0
+				? Math.max(1, Math.min(firstChunkChars, MAX_SLACK_MARKDOWN_CHARS))
+				: MAX_SLACK_MARKDOWN_CHARS
+		if (remaining.length <= limit) {
+			chunks.push(remaining)
+			break
+		}
+		const window = remaining.slice(0, limit)
 		const newline = window.lastIndexOf('\n')
-		const split = newline >= MAX_SLACK_MARKDOWN_CHARS / 2 ? newline : MAX_SLACK_MARKDOWN_CHARS
+		const split = newline >= limit / 2 ? newline : limit
 		chunks.push(remaining.slice(0, split).trimEnd())
 		remaining = remaining.slice(split).trimStart()
 	}
-	chunks.push(remaining)
 	return chunks
 }

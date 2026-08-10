@@ -11,7 +11,7 @@ export function slackTools(runner: SlackRunner) {
 	return {
 		slack_status: tool({
 			description:
-				'Update the single mutable progress message for the active Slack turn. Use only for concise, meaningful milestones; the final response is delivered automatically.',
+				'Append a concise, meaningful milestone to the thinking trace for the active Slack turn. The final response is delivered automatically.',
 			args: {
 				text: tool.schema.string().trim().min(1).max(MAX_SLACK_STATUS_CHARS),
 			},

@@ -32,11 +32,13 @@ export type SlackRunnerOptions = {
 export type SlackThreadState = {
 	readonly sessionID: string
 	lastImportedTs: string | undefined
+	lastMessageID: string | undefined
 }
 
 export type SlackPendingTurn = {
 	cancelled: boolean
 	readonly abort: AbortController
+	readonly cancelRequested: Deferred.Deferred<void>
 }
 
 export type SlackActiveTurn = {
@@ -44,16 +46,20 @@ export type SlackActiveTurn = {
 	readonly threadKey: string
 	readonly channel: string
 	readonly threadTs: string
-	readonly statusTs: string
+	statusTs: string
+	traceText: string
 	readonly done: Deferred.Deferred<void>
-	readonly launchSettled: Deferred.Deferred<void>
-	readonly cancelRequested: Deferred.Deferred<void>
-	readonly preparationAbort: AbortController
 	readonly statusSemaphore: Semaphore.Semaphore
-	readonly messageID: string
+	messageID: string | null
+	latestMessageID: string | null
 	launchState: 'not-started' | 'starting' | 'started'
 	busyObserved: boolean
-	lastStatus: string
+	waitingForBusy: boolean
+	abortSent: boolean
+	steered: boolean
+	generation: number
+	busyVersion: number
+	inFlightAdmissions: number
 	cancelled: boolean
 	finishing: boolean
 }
@@ -65,9 +71,10 @@ export type SlackRuntimeState = {
 	teamID: string | null
 	readyFileOwned: boolean
 	readonly threads: Map<string, SlackThreadState>
-	readonly pendingTurns: Map<string, SlackPendingTurn>
+	readonly pendingTurns: Map<string, Set<SlackPendingTurn>>
 	readonly activeTurns: Map<string, SlackActiveTurn>
 	readonly childToRoot: Map<string, string>
+	readonly cancelledThroughTs: Map<string, string>
 	readonly seenEventIDs: Set<string>
 	readonly seenEventOrder: Array<string>
 	readonly threadSemaphores: Map<string, Semaphore.Semaphore>
@@ -106,6 +113,7 @@ export const makeSlackRuntimeState = Effect.sync(() => {
 		pendingTurns: new Map(),
 		activeTurns: new Map(),
 		childToRoot: new Map(),
+		cancelledThroughTs: new Map(),
 		seenEventIDs: new Set(),
 		seenEventOrder: [],
 		threadSemaphores: new Map(),
