@@ -60,6 +60,8 @@ export type SlackActiveTurn = {
 	generation: number
 	busyVersion: number
 	inFlightAdmissions: number
+	readonly deliveredAssistantIDs: Set<string>
+	readonly assistantChunkProgress: Map<string, number>
 	cancelled: boolean
 	finishing: boolean
 }

@@ -34,6 +34,7 @@ async function makeHarness(
 	histories: Map<string, Array<SlackMessage>>,
 	behavior: {
 		assistantError?: string
+		assistantID?: string | ((input: { call: number; sessionID: string }) => string)
 		assistantParentID?:
 			| string
 			| ((input: { call: number; latestPromptID: string | undefined; sessionID: string }) => string)
@@ -81,6 +82,10 @@ async function makeHarness(
 	const rejectPermission = vi.fn(() => Promise.resolve({ data: true }))
 	const messages = vi.fn((args: { path: { id: string } }) => {
 		const parentID = latestPromptBySession.get(args.path.id)
+		const configuredID =
+			typeof behavior.assistantID === 'function'
+				? behavior.assistantID({ call: messages.mock.calls.length, sessionID: args.path.id })
+				: behavior.assistantID
 		const configuredParent =
 			typeof behavior.assistantParentID === 'function'
 				? behavior.assistantParentID({
@@ -93,10 +98,11 @@ async function makeHarness(
 			data: [
 				{
 					info: {
-						id: 'msg_ffffffffffffffffffffffffff',
+						id: configuredID ?? 'msg_ffffffffffffffffffffffffff',
 						role: 'assistant',
 						parentID: configuredParent ?? parentID,
-						time: { created: Date.now() + 1_000 },
+						finish: 'stop',
+						time: { created: Date.now() + 1_000, completed: Date.now() + 2_000 },
 						...(behavior.assistantError === undefined
 							? {}
 							: { error: { name: behavior.assistantError, data: {} } }),
@@ -575,6 +581,7 @@ describe('Slack bridge runner', () => {
 			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' }]],
 		])
 		const { runner, mocks } = await makeHarness(histories, {
+			assistantID: ({ call }) => `msg_ffffffffffff${call.toString().padStart(14, '0')}`,
 			assistantParentID: ({ call, latestPromptID }) =>
 				call === 1 ? 'msg_00000000000100000000000000' : (latestPromptID ?? 'missing'),
 			promptAsync: () => {
@@ -607,13 +614,115 @@ describe('Slack bridge runner', () => {
 		resolveWake({ data: undefined })
 		await Promise.all([firstIdle, staleIdle])
 		expect(mocks.promptAsync).toHaveBeenCalledTimes(3)
-		expect(mocks.postMessage).toHaveBeenCalledTimes(2)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(3)
 		await runEffect(
 			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
 		)
 		expect(mocks.postMessage).toHaveBeenLastCalledWith(
 			expect.objectContaining({ markdown_text: '**Final answer**' }),
 		)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(4)
+		await runEffect(runner.stop)
+	})
+
+	test('delivers the response before a steering response without waiting for session idle', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' }]],
+		])
+		const { runner, mocks } = await makeHarness(histories)
+		await runEffect(runner.handleMention(mention('E1', '2.0', '<@UBOT> first', 'C1', '1.0')))
+		const firstPromptID = mocks.promptAsync.mock.calls[0]?.[0].body.messageID
+		if (firstPromptID === undefined) throw new Error('missing first prompt ID')
+		histories.set('C1', [
+			{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' },
+			{ ts: '3.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> follow up' },
+		])
+		await runEffect(runner.handleMention(mention('E2', '3.0', '<@UBOT> follow up', 'C1', '1.0')))
+		const secondPromptID = mocks.promptAsync.mock.calls[1]?.[0].body.messageID
+		if (secondPromptID === undefined) throw new Error('missing second prompt ID')
+		const firstAssistant = {
+			info: {
+				finish: 'stop',
+				id: 'msg_ffffffffffff00000000000001',
+				parentID: firstPromptID,
+				role: 'assistant',
+				time: { completed: 2, created: 1 },
+			},
+			parts: [{ ignored: false, text: 'First response', type: 'text' }],
+		}
+		const secondAssistant = {
+			info: {
+				finish: 'stop',
+				id: 'msg_ffffffffffff00000000000002',
+				parentID: secondPromptID,
+				role: 'assistant',
+				time: { completed: 4, created: 3 },
+			},
+			parts: [{ ignored: false, text: 'Second response', type: 'text' }],
+		}
+		mocks.messages.mockImplementation(() => Promise.resolve({ data: [firstAssistant] }))
+		await runEffect(
+			runner.handleOpenCodeEvent({
+				type: 'message.updated',
+				properties: {
+					info: {
+						finish: 'stop',
+						id: firstAssistant.info.id,
+						parentID: firstPromptID,
+						role: 'assistant',
+						sessionID: 'session-1',
+						time: { completed: 2 },
+					},
+				},
+			}),
+		)
+		expect(mocks.messages).toHaveBeenCalledTimes(1)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: 'First response' }),
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({
+				type: 'message.updated',
+				properties: {
+					info: {
+						finish: 'stop',
+						id: firstAssistant.info.id,
+						parentID: firstPromptID,
+						role: 'assistant',
+						sessionID: 'session-1',
+						time: { completed: 2 },
+					},
+				},
+			}),
+		)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(3)
+
+		mocks.messages.mockImplementation(() =>
+			Promise.resolve({ data: [firstAssistant, secondAssistant] }),
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({
+				type: 'message.updated',
+				properties: {
+					info: {
+						finish: 'stop',
+						id: secondAssistant.info.id,
+						parentID: secondPromptID,
+						role: 'assistant',
+						sessionID: 'session-1',
+						time: { completed: 4 },
+					},
+				},
+			}),
+		)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: 'Second response' }),
+		)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(4)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(4)
 		await runEffect(runner.stop)
 	})
 
@@ -652,6 +761,64 @@ describe('Slack bridge runner', () => {
 		await runEffect(runner.stop)
 	})
 
+	test('does not publish a completed response after cancellation wins reconciliation', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> work' }]],
+		])
+		const { runner, mocks } = await makeHarness(histories)
+		await runEffect(runner.handleMention(mention('E1', '2.0', '<@UBOT> work', 'C1', '1.0')))
+		const promptID = mocks.promptAsync.mock.calls[0]?.[0].body.messageID
+		if (promptID === undefined) throw new Error('missing prompt ID')
+		let resolveMessages!: (response: ReturnType<typeof completedMessagesResponse>) => void
+		function completedMessagesResponse() {
+			return {
+				data: [
+					{
+						info: {
+							finish: 'stop',
+							id: 'msg_ffffffffffff00000000000001',
+							parentID: promptID,
+							role: 'assistant',
+							time: { completed: 2, created: 1 },
+						},
+						parts: [{ ignored: false, text: 'Should not be posted', type: 'text' }],
+					},
+				],
+			}
+		}
+		const delayedMessages = new Promise<ReturnType<typeof completedMessagesResponse>>((resolve) => {
+			resolveMessages = resolve
+		})
+		mocks.messages.mockImplementationOnce(() => delayedMessages)
+		const reconciling = runEffect(
+			runner.handleOpenCodeEvent({
+				type: 'message.updated',
+				properties: {
+					info: {
+						finish: 'stop',
+						id: 'msg_ffffffffffff00000000000001',
+						parentID: promptID,
+						role: 'assistant',
+						sessionID: 'session-1',
+						time: { completed: 2 },
+					},
+				},
+			}),
+		)
+		await vi.waitFor(() => expect(mocks.messages).toHaveBeenCalledTimes(1))
+		await runEffect(runner.handleMention(mention('E2', '3.0', '<@UBOT> cancel', 'C1', '1.0')))
+		resolveMessages(completedMessagesResponse())
+		await reconciling
+		expect(mocks.postMessage).toHaveBeenCalledTimes(2)
+		expect(mocks.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({ markdown_text: 'Cancelled by <@U1>.' }),
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await runEffect(runner.stop)
+	})
+
 	test('ignores an idle invalidated by busy during response retrieval', async () => {
 		const histories = new Map<string, Array<SlackMessage>>([
 			['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> first' }]],
@@ -666,13 +833,25 @@ describe('Slack bridge runner', () => {
 		const parentID = mocks.promptAsync.mock.calls[1]?.[0].body.messageID
 		let resolveMessages!: (response: {
 			data: Array<{
-				info: { id: string; parentID: string | undefined; role: string; time: { created: number } }
+				info: {
+					finish: string
+					id: string
+					parentID: string | undefined
+					role: string
+					time: { completed: number; created: number }
+				}
 				parts: Array<{ ignored: boolean; text: string; type: string }>
 			}>
 		}) => void
 		const delayedMessages = new Promise<{
 			data: Array<{
-				info: { id: string; parentID: string | undefined; role: string; time: { created: number } }
+				info: {
+					finish: string
+					id: string
+					parentID: string | undefined
+					role: string
+					time: { completed: number; created: number }
+				}
 				parts: Array<{ ignored: boolean; text: string; type: string }>
 			}>
 		}>((resolve) => {
@@ -693,23 +872,25 @@ describe('Slack bridge runner', () => {
 			data: [
 				{
 					info: {
+						finish: 'stop',
 						id: 'msg_ffffffffffffffffffffffffff',
 						parentID,
 						role: 'assistant',
-						time: { created: Date.now() },
+						time: { completed: Date.now(), created: Date.now() },
 					},
 					parts: [{ ignored: false, text: '**Final answer**', type: 'text' }],
 				},
 			],
 		})
 		await staleIdle
-		expect(mocks.postMessage).toHaveBeenCalledTimes(2)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(3)
 		await runEffect(
 			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
 		)
 		expect(mocks.postMessage).toHaveBeenLastCalledWith(
 			expect.objectContaining({ markdown_text: '**Final answer**' }),
 		)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(3)
 		await runEffect(runner.stop)
 	})
 

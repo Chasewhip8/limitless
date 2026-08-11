@@ -24,6 +24,7 @@ import {
 import {
 	type SlackAppMentionInput,
 	SlackAppMentionInput as SlackAppMentionInputSchema,
+	type SlackAssistantResult,
 	SlackMessage,
 	SlackOpenCodeEvent,
 	SlackOpenCodeEventEnvelope,
@@ -293,11 +294,11 @@ const rejectOpenCodePermission = Effect.fn('rejectOpenCodePermission')(function*
 	})
 })
 
-const latestAssistantResult = Effect.fn('latestAssistantResult')(function* (
+const completedAssistantResults = Effect.fn('completedAssistantResults')(function* (
 	context: SlackPluginContext,
 	turn: SlackActiveTurn,
 ) {
-	if (turn.messageID === null) return { failed: true, parentID: null, text: '' }
+	if (turn.messageID === null) return [] as ReadonlyArray<SlackAssistantResult>
 	const response = yield* Effect.tryPromise({
 		try: () =>
 			context.client.session.messages({
@@ -306,20 +307,30 @@ const latestAssistantResult = Effect.fn('latestAssistantResult')(function* (
 			}),
 		catch: (error) => integrationFailure('OpenCode response retrieval', error),
 	})
-	for (const message of [...response.data].reverse()) {
+	const results: Array<SlackAssistantResult> = []
+	for (const message of response.data) {
 		if (message.info.role !== 'assistant') continue
 		if (message.info.id <= turn.messageID) continue
+		if (message.info.summary === true || message.info.time.completed === undefined) continue
+		if (
+			message.info.error === undefined &&
+			(message.info.finish === undefined ||
+				message.info.finish === 'tool-calls' ||
+				message.info.finish === 'unknown')
+		)
+			continue
 		const textParts: Array<string> = []
 		for (const part of message.parts)
 			if (part.type === 'text' && part.ignored !== true) textParts.push(part.text)
 		const text = textParts.join('\n').trim()
-		return {
+		results.push({
+			id: message.info.id,
 			failed: message.info.error !== undefined,
 			parentID: message.info.parentID ?? null,
 			text,
-		}
+		})
 	}
-	return { failed: true, parentID: null, text: '' }
+	return results.sort((left, right) => left.id.localeCompare(right.id))
 })
 
 function quotedTraceStatus(status: string): string {
@@ -336,6 +347,34 @@ const publishTerminalText = Effect.fn('publishTerminalText')(function* (
 ) {
 	for (const chunk of chunkSlackMarkdown(text))
 		yield* postSlackMessage(state, turn.channel, turn.threadTs, chunk, true)
+})
+
+const drainAssistantResults = Effect.fn('drainAssistantResults')(function* (
+	context: SlackPluginContext,
+	state: SlackRuntimeState,
+	turn: SlackActiveTurn,
+) {
+	const results = yield* completedAssistantResults(context, turn)
+	for (const result of results) {
+		if (state.activeTurns.get(turn.rootSessionID) !== turn || turn.cancelled || turn.finishing)
+			return results
+		if (turn.deliveredAssistantIDs.has(result.id)) continue
+		const text = result.failed || result.text.length === 0 ? SLACK_TURN_ERROR_MESSAGE : result.text
+		const chunks = chunkSlackMarkdown(text)
+		let index = turn.assistantChunkProgress.get(result.id) ?? 0
+		while (index < chunks.length) {
+			if (state.activeTurns.get(turn.rootSessionID) !== turn || turn.cancelled || turn.finishing)
+				return results
+			const chunk = chunks[index]
+			if (chunk === undefined) break
+			yield* postSlackMessage(state, turn.channel, turn.threadTs, chunk, true)
+			index += 1
+			turn.assistantChunkProgress.set(result.id, index)
+		}
+		turn.assistantChunkProgress.delete(result.id)
+		turn.deliveredAssistantIDs.add(result.id)
+	}
+	return results
 })
 
 const finishTurn = Effect.fn('finishTurn')(function* (
@@ -501,6 +540,8 @@ const processSlackMention = Effect.fn('processSlackMention')(function* (
 			generation: 0,
 			busyVersion: 0,
 			inFlightAdmissions: 0,
+			deliveredAssistantIDs: new Set(),
+			assistantChunkProgress: new Map(),
 			cancelled: pending.cancelled,
 			finishing: false,
 		}
@@ -875,6 +916,7 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 				'session.status',
 				'session.error',
 				'permission.asked',
+				'message.updated',
 			].includes(envelope.value.type)
 		)
 			return
@@ -887,6 +929,36 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 		)
 		if (decoded === undefined) return
 		switch (decoded.type) {
+			case 'message.updated': {
+				if (
+					decoded.properties.info.role !== 'assistant' ||
+					decoded.properties.info.summary === true ||
+					decoded.properties.info.time.completed === undefined
+				)
+					return
+				const turn = state.activeTurns.get(decoded.properties.info.sessionID)
+				if (turn === undefined || turn.cancelled || turn.finishing) return
+				yield* semaphoreForThread(state, turn.threadKey)
+					.withPermits(1)(
+						Effect.gen(function* () {
+							if (
+								state.activeTurns.get(turn.rootSessionID) !== turn ||
+								turn.cancelled ||
+								turn.finishing
+							)
+								return
+							yield* drainAssistantResults(plugin, state, turn)
+						}),
+					)
+					.pipe(
+						Effect.catch((error) =>
+							Effect.logError(
+								`[limitless] failed to deliver completed Slack response: ${error.message}`,
+							),
+						),
+					)
+				return
+			}
 			case 'session.created':
 			case 'session.updated': {
 				const parent = decoded.properties.info.parentID
@@ -947,13 +1019,22 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 						}
 						if (turn.finishing) return
 						if (decoded.properties.error?.name === 'ContextOverflowError') return
+						const results = yield* drainAssistantResults(plugin, state, turn).pipe(
+							Effect.catch((error) =>
+								Effect.logError(
+									`[limitless] failed to drain Slack responses before terminal error: ${error.message}`,
+								).pipe(Effect.andThen(Effect.succeed<ReadonlyArray<SlackAssistantResult>>([]))),
+							),
+						)
 						turn.finishing = true
 						yield* finishTurn(
 							state,
 							turn,
-							turn.statusSemaphore.withPermits(1)(
-								publishTerminalText(state, turn, SLACK_TURN_ERROR_MESSAGE),
-							),
+							results.at(-1)?.failed === true
+								? Effect.void
+								: turn.statusSemaphore.withPermits(1)(
+										publishTerminalText(state, turn, SLACK_TURN_ERROR_MESSAGE),
+									),
 						)
 					}),
 				)
@@ -988,7 +1069,7 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 								return
 							}
 							if (turn.finishing || turn.waitingForBusy) return
-							const result = yield* latestAssistantResult(plugin, turn)
+							const results = yield* drainAssistantResults(plugin, state, turn)
 							if (
 								state.activeTurns.get(turn.rootSessionID) !== turn ||
 								turn.cancelled ||
@@ -1000,7 +1081,7 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 							if (
 								turn.steered &&
 								turn.latestMessageID !== null &&
-								result.parentID !== turn.latestMessageID
+								(results.at(-1)?.parentID ?? null) !== turn.latestMessageID
 							) {
 								const thread = state.threads.get(turn.threadKey)
 								if (thread === undefined) return
@@ -1025,9 +1106,9 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 							yield* finishTurn(
 								state,
 								turn,
-								result.failed || result.text.length === 0
+								results.length === 0
 									? publishTerminalText(state, turn, SLACK_TURN_ERROR_MESSAGE)
-									: publishTerminalText(state, turn, result.text),
+									: Effect.void,
 							)
 						}),
 					)

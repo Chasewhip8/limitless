@@ -87,6 +87,14 @@ export const SlackStatusResult = Schema.Struct({
 })
 export type SlackStatusResult = typeof SlackStatusResult.Type
 
+export const SlackAssistantResult = Schema.Struct({
+	id: Schema.NonEmptyString,
+	parentID: Schema.NullOr(Schema.NonEmptyString),
+	failed: Schema.Boolean,
+	text: Schema.String,
+})
+export type SlackAssistantResult = typeof SlackAssistantResult.Type
+
 export const SlackOpenCodeEventEnvelope = Schema.Struct({ type: Schema.String })
 
 export const SlackSessionLifecycleEvent = Schema.Struct({
@@ -135,6 +143,22 @@ export const SlackSessionStatusEvent = Schema.Struct({
 	}),
 })
 
+export const SlackMessageUpdatedEvent = Schema.Struct({
+	type: Schema.Literal('message.updated'),
+	properties: Schema.Struct({
+		info: Schema.Struct({
+			id: Schema.NonEmptyString,
+			sessionID: Schema.NonEmptyString,
+			role: Schema.String,
+			parentID: Schema.optional(Schema.NonEmptyString),
+			summary: Schema.optional(Schema.Boolean),
+			finish: Schema.optional(Schema.String),
+			error: Schema.optional(Schema.Unknown),
+			time: Schema.Struct({ completed: Schema.optional(Schema.Number) }),
+		}),
+	}),
+})
+
 export const SlackOpenCodeEvent = Schema.Union([
 	SlackSessionLifecycleEvent,
 	SlackSessionDeletedEvent,
@@ -142,5 +166,6 @@ export const SlackOpenCodeEvent = Schema.Union([
 	SlackSessionErrorEvent,
 	SlackPermissionAskedEvent,
 	SlackSessionStatusEvent,
+	SlackMessageUpdatedEvent,
 ])
 export type SlackOpenCodeEvent = typeof SlackOpenCodeEvent.Type
