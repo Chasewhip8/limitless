@@ -22,13 +22,13 @@
 ## Features
 
 - **One module to enable**: `programs.limitless.enable = true` wires OpenCode, agents, skills, plugins, MCPs, and language servers together.
-- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, and implementation.
+- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; reasoning and planning stay in the main context while specialist subagents gather evidence, provide Oracle second opinions, and perform mechanical work.
 - **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed alongside supported CLIs.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
 - **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces can be empty or hold notes, source files, assets, and generated outputs.
 - **Global Git hygiene**: Home Manager adds `.limitless/` to Git's global ignore file by default, so project-local clones and artifacts stay out of repository status.
 - **Typst document generation**: create artifacts from built-in Typst templates and compile them to PDF with the packaged Typst binary.
-- **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional project-cached GitHub source research in one place.
+- **Evidence librarian**: the read-only `librarian` gathers local repository evidence, docs, APIs, current references, and optional project-cached GitHub source without taking over analysis or decisions.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **Optional Linear MCP**: Linear remains opt-in and reads `LINEAR_API_KEY` from the OpenCode process environment.
 - **Optional Sentry CLI**: install Sentry's agent-oriented CLI and companion skill with lazy agenix token-file authentication.
@@ -150,11 +150,11 @@ The packaged GPT-5.6 Luna, Sol, and Terra models use the 400k short-context limi
 
 Limitless raises OpenCode's OpenAI response-header timeout from 10 seconds to 60 seconds. Large auto-compaction requests can take longer than the upstream default to be accepted; timing them out leaves a pending compaction that is only retried when the session runs again. Override `provider.openai.options.headerTimeout` through `opencode.settings` if a different bound is needed.
 
-## Research and remote source code
+## Evidence gathering and remote source code
 
-`research` is read-only and researches local code, tests, docs, configuration, APIs, standards, current external facts, implementation source, official examples, and configured private GitHub repositories. It does not edit files or run shell commands.
+`librarian` is a read-only evidence-gathering subagent for broad investigations across local code, tests, docs, configuration, APIs, standards, current external facts, implementation source, official examples, and configured private GitHub repositories. It reports sourced facts, source quality, conflicts, and gaps without answering the underlying question or making recommendations. Limitless retains analysis, synthesis, and decisions.
 
-`oracle` is the high-reasoning question-answering subagent. Limitless uses it for difficult architecture, debugging, planning, explanation, and tradeoff questions that benefit from an independent second opinion; Oracle may delegate broad evidence gathering to `research`. It inherits the normal broad tool access but cannot use the standard edit or structured-replacement tools.
+`oracle` is the high-reasoning question-answering subagent. Limitless uses it for difficult architecture, debugging, planning, explanation, and tradeoff questions that benefit from an independent second opinion; Oracle may delegate broad evidence gathering to `librarian`. It inherits the normal broad tool access but cannot use the standard edit or structured-replacement tools.
 
 Enable the optional `github_clone` source tool with:
 

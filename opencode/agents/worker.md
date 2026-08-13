@@ -4,6 +4,7 @@ mode: subagent
 model: openai/gpt-5.6-sol-fast
 reasoningEffort: xhigh
 permission:
+    question: deny
     task:
         "*": deny
 ---

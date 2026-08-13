@@ -2,8 +2,9 @@
 description: Comprehensive read-only review subagent that traces changed behavior across the repository and reports only verified, actionable findings.
 mode: subagent
 model: openai/gpt-5.6-sol-fast
-reasoningEffort: max
+reasoningEffort: xhigh
 permission:
+    question: deny
     edit: deny
     artifact_create: deny
     ast_grep_replace: deny
