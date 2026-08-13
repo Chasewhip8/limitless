@@ -2,7 +2,7 @@
 description: Execution subagent for substantial mechanical work that applies a fixed rule across files or items.
 mode: subagent
 model: openai/gpt-5.6-sol-fast
-reasoningEffort: xhigh
+reasoningEffort: high
 permission:
     question: deny
     task:
