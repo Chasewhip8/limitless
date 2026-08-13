@@ -2,8 +2,15 @@ import { realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { PluginInput } from '@opencode-ai/plugin'
 import { App } from '@slack/bolt'
-import { type Deferred, Effect, type Semaphore } from 'effect'
+import { WebClient } from '@slack/web-api'
+import { type Deferred, Effect, Semaphore } from 'effect'
 import type { SlackConfig } from './config'
+
+export type SlackQueuedFile = {
+	readonly path: string
+	readonly filename: string
+	readonly bytes: Buffer
+}
 
 export type SlackMentionDispatcher = (input: unknown) => Promise<void>
 
@@ -24,6 +31,7 @@ export type SlackRunnerOptions = {
 	readonly resolveDirectory: (directory: string) => Promise<string>
 	readonly fetch: typeof globalThis.fetch
 	readonly makeApp: SlackAppFactory
+	readonly makeUploadClient: (botToken: string) => WebClient
 	readonly readyFile: string | null
 	readonly markReady: (filePath: string, directory: string) => Promise<void>
 	readonly clearReady: (filePath: string) => Promise<void>
@@ -62,12 +70,15 @@ export type SlackActiveTurn = {
 	inFlightAdmissions: number
 	readonly deliveredAssistantIDs: Set<string>
 	readonly assistantChunkProgress: Map<string, number>
+	readonly queuedFiles: Map<string, SlackQueuedFile>
+	queuedFileBytes: number
 	cancelled: boolean
 	finishing: boolean
 }
 
 export type SlackRuntimeState = {
 	app: SlackAppHandle | null
+	uploadClient: WebClient | null
 	botToken: string | null
 	botUserID: string | null
 	teamID: string | null
@@ -80,6 +91,9 @@ export type SlackRuntimeState = {
 	readonly seenEventIDs: Set<string>
 	readonly seenEventOrder: Array<string>
 	readonly threadSemaphores: Map<string, Semaphore.Semaphore>
+	readonly outboundFilesSemaphore: Semaphore.Semaphore
+	readonly outboundUploadSemaphore: Semaphore.Semaphore
+	queuedOutboundBytes: number
 }
 
 export const DEFAULT_SLACK_RUNNER_OPTIONS: SlackRunnerOptions = {
@@ -102,11 +116,19 @@ export const DEFAULT_SLACK_RUNNER_OPTIONS: SlackRunnerOptions = {
 			stop: () => app.stop(),
 		}
 	},
+	makeUploadClient: (botToken) =>
+		new WebClient(botToken, {
+			fetch: globalThis.fetch,
+			retryConfig: { retries: 0 },
+			rejectRateLimitedCalls: true,
+			timeout: 10 * 60 * 1000,
+		}),
 }
 
 export const makeSlackRuntimeState = Effect.sync(() => {
 	const state: SlackRuntimeState = {
 		app: null,
+		uploadClient: null,
 		botToken: null,
 		botUserID: null,
 		teamID: null,
@@ -119,6 +141,9 @@ export const makeSlackRuntimeState = Effect.sync(() => {
 		seenEventIDs: new Set(),
 		seenEventOrder: [],
 		threadSemaphores: new Map(),
+		outboundFilesSemaphore: Semaphore.makeUnsafe(1),
+		outboundUploadSemaphore: Semaphore.makeUnsafe(1),
+		queuedOutboundBytes: 0,
 	}
 	return state
 })

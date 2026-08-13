@@ -1,6 +1,16 @@
+import { open } from 'node:fs/promises'
+import path from 'node:path'
 import { Deferred, Effect, Option, Schema, Semaphore } from 'effect'
 import { describeUnknown, schemaErrorMessage } from '../../lib/guards'
-import { MAX_SLACK_MARKDOWN_CHARS, SLACK_SERVICE_ACTIVATION_ENV, type SlackConfig } from './config'
+import {
+	MAX_SLACK_MARKDOWN_CHARS,
+	MAX_SLACK_OUTBOUND_BYTES_PER_TURN,
+	MAX_SLACK_OUTBOUND_BYTES_PROCESS,
+	MAX_SLACK_OUTBOUND_FILE_BYTES,
+	MAX_SLACK_OUTBOUND_FILES_PER_TURN,
+	SLACK_SERVICE_ACTIVATION_ENV,
+	type SlackConfig,
+} from './config'
 import { type SlackIntegrationError, slackIntegrationError } from './errors'
 import {
 	chunkSlackMarkdown,
@@ -8,7 +18,8 @@ import {
 	fetchSlackThread,
 	isAfterSlackTimestamp,
 	prepareSlackMessageParts,
-	selectSlackImageIDs,
+	resolveSlackFiles,
+	selectSlackAttachmentIDs,
 } from './history'
 import {
 	DEFAULT_SLACK_RUNNER_OPTIONS,
@@ -25,6 +36,8 @@ import {
 	type SlackAppMentionInput,
 	SlackAppMentionInput as SlackAppMentionInputSchema,
 	type SlackAssistantResult,
+	SlackAttachFileResult,
+	type SlackAttachFileResult as SlackAttachFileResultType,
 	SlackMessage,
 	SlackOpenCodeEvent,
 	SlackOpenCodeEventEnvelope,
@@ -32,6 +45,7 @@ import {
 	SlackStatusResult,
 	type SlackStatusResult as SlackStatusResultType,
 } from './schema'
+import { uploadSlackFiles } from './upload'
 
 const MAX_SEEN_SLACK_EVENTS = 1_000
 const SLACK_TURN_ERROR_MESSAGE =
@@ -152,6 +166,9 @@ function openCodeParts(parts: ReadonlyArray<SlackPromptPart>) {
 }
 
 function cleanupTurn(state: SlackRuntimeState, turn: SlackActiveTurn): void {
+	state.queuedOutboundBytes -= turn.queuedFileBytes
+	turn.queuedFiles.clear()
+	turn.queuedFileBytes = 0
 	if (state.activeTurns.get(turn.rootSessionID) === turn)
 		state.activeTurns.delete(turn.rootSessionID)
 	for (const [child, root] of state.childToRoot) {
@@ -240,7 +257,7 @@ const startOpenCodeTurn = Effect.fn('startOpenCodeTurn')(function* (
 				body: {
 					messageID,
 					agent: config.agent,
-					tools: { question: false, slack_status: true },
+					tools: { question: false, slack_attach_file: true, slack_status: true },
 					parts: openCodeParts(parts),
 				},
 				...(signal === undefined ? {} : { signal }),
@@ -347,6 +364,41 @@ const publishTerminalText = Effect.fn('publishTerminalText')(function* (
 ) {
 	for (const chunk of chunkSlackMarkdown(text))
 		yield* postSlackMessage(state, turn.channel, turn.threadTs, chunk, true)
+})
+
+const publishQueuedFiles = Effect.fn('publishQueuedFiles')(function* (
+	state: SlackRuntimeState,
+	turn: SlackActiveTurn,
+	options: SlackRunnerOptions,
+) {
+	if (turn.queuedFiles.size === 0) return
+	const uploadClient = state.uploadClient
+	if (uploadClient === null)
+		return yield* slackIntegrationError('Slack file upload', 'Slack is not active in this process')
+	const files = [...turn.queuedFiles.values()]
+	const reservedBytes = turn.queuedFileBytes
+	turn.queuedFiles.clear()
+	turn.queuedFileBytes = 0
+	yield* state.outboundUploadSemaphore
+		.withPermits(1)(uploadSlackFiles(uploadClient, options, turn.channel, turn.threadTs, files))
+		.pipe(
+			Effect.catch((error) =>
+				Effect.logError(`[limitless] ${error.operation}: ${error.message}`).pipe(
+					Effect.andThen(
+						publishTerminalText(
+							state,
+							turn,
+							`⚠️ I could not attach ${files.map((file) => `\`${file.filename}\``).join(', ')}. Check the Limitless service logs.`,
+						),
+					),
+				),
+			),
+			Effect.ensuring(
+				Effect.sync(() => {
+					state.queuedOutboundBytes -= reservedBytes
+				}),
+			),
+		)
 })
 
 const drainAssistantResults = Effect.fn('drainAssistantResults')(function* (
@@ -542,6 +594,8 @@ const processSlackMention = Effect.fn('processSlackMention')(function* (
 			inFlightAdmissions: 0,
 			deliveredAssistantIDs: new Set(),
 			assistantChunkProgress: new Map(),
+			queuedFiles: new Map(),
+			queuedFileBytes: 0,
 			cancelled: pending.cancelled,
 			finishing: false,
 		}
@@ -573,7 +627,7 @@ const processSlackMention = Effect.fn('processSlackMention')(function* (
 		const fetched = fetchedResult.value
 		const byTimestamp = new Map(fetched.map((message) => [message.ts, message]))
 		if (!byTimestamp.has(input.event.ts)) byTimestamp.set(input.event.ts, mentionAsMessage(input))
-		const messages = [...byTimestamp.values()]
+		const unresolvedMessages = [...byTimestamp.values()]
 			.filter(
 				(message) =>
 					isAfterSlackTimestamp(message.ts, oldest) &&
@@ -581,8 +635,19 @@ const processSlackMention = Effect.fn('processSlackMention')(function* (
 					message.ts !== statusTs,
 			)
 			.sort(compareSlackMessages)
-		const selectedImages = selectSlackImageIDs(messages, input.event.ts)
-		const consumedImages = new Set<string>()
+		const resolvedMessages = yield* duringPending(
+			pending,
+			resolveSlackFiles(
+				unresolvedMessages,
+				input.event.ts,
+				state.app as NonNullable<SlackRuntimeState['app']>,
+			),
+		)
+		if (Option.isNone(resolvedMessages)) return
+		const messages = resolvedMessages.value
+		const selectedAttachments = selectSlackAttachmentIDs(messages, input.event.ts)
+		const consumedAttachments = new Set<string>()
+		const consumedTextBytes = new Map<string, number>()
 		const botUserID = state.botUserID as string
 		const botToken = state.botToken as string
 		let triggerAvailable = false
@@ -598,8 +663,10 @@ const processSlackMention = Effect.fn('processSlackMention')(function* (
 				pending,
 				prepareSlackMessageParts(
 					message,
-					selectedImages,
-					consumedImages,
+					selectedAttachments,
+					consumedAttachments,
+					consumedTextBytes,
+					state.app as NonNullable<SlackRuntimeState['app']>,
 					botUserID,
 					botToken,
 					options,
@@ -724,6 +791,11 @@ export type SlackRunner = {
 		sessionID: string,
 		text: string,
 	) => Effect.Effect<SlackStatusResultType, SlackIntegrationError>
+	readonly attachFile: (
+		sessionID: string,
+		filePath: string,
+		directory: string,
+	) => Effect.Effect<SlackAttachFileResultType, SlackIntegrationError>
 	readonly shouldDenyPermission: (sessionID: string) => Effect.Effect<boolean>
 }
 
@@ -778,6 +850,7 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 					'Slack authentication did not return bot user and workspace IDs',
 				)
 			state.app = app
+			state.uploadClient = options.makeUploadClient(botToken)
 			state.botToken = botToken
 			state.botUserID = auth.user_id
 			state.teamID = auth.team_id
@@ -795,6 +868,7 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 			Effect.catch((error) =>
 				Effect.sync(() => {
 					state.app = null
+					state.uploadClient = null
 					state.botToken = null
 					state.botUserID = null
 					state.teamID = null
@@ -835,6 +909,7 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 		state.cancelledThroughTs.clear()
 		const app = state.app
 		state.app = null
+		state.uploadClient = null
 		state.botToken = null
 		state.botUserID = null
 		state.teamID = null
@@ -1108,7 +1183,9 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 								turn,
 								results.length === 0
 									? publishTerminalText(state, turn, SLACK_TURN_ERROR_MESSAGE)
-									: Effect.void,
+									: results.at(-1)?.failed === true
+										? Effect.void
+										: publishQueuedFiles(state, turn, options),
 							)
 						}),
 					)
@@ -1188,6 +1265,101 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 		)
 	})
 
+	const attachFile = Effect.fn('SlackRunner.attachFile')(function* (
+		sessionID: string,
+		filePath: string,
+		directory: string,
+	) {
+		const root = activeRootForSession(state, sessionID)
+		const turn = root === undefined ? undefined : state.activeTurns.get(root)
+		if (turn === undefined || turn.cancelled || turn.finishing)
+			return yield* slackIntegrationError(
+				'Slack file attachment',
+				'slack_attach_file is only available during an active Slack turn',
+			)
+		const absolutePath = path.resolve(directory, filePath)
+		return yield* state.outboundFilesSemaphore.withPermits(1)(
+			Effect.gen(function* () {
+				const handle = yield* Effect.tryPromise({
+					try: () => open(absolutePath, 'r'),
+					catch: (error) => integrationFailure('Slack file attachment open', error),
+				})
+				const stat = yield* Effect.acquireUseRelease(
+					Effect.succeed(handle),
+					(file) =>
+						Effect.gen(function* () {
+							const stat = yield* Effect.tryPromise({
+								try: () => file.stat(),
+								catch: (error) => integrationFailure('Slack file attachment stat', error),
+							})
+							if (!stat.isFile())
+								return yield* slackIntegrationError(
+									'Slack file attachment',
+									'Only regular files can be attached to Slack',
+								)
+							if (stat.size === 0 || stat.size > MAX_SLACK_OUTBOUND_FILE_BYTES)
+								return yield* slackIntegrationError(
+									'Slack file attachment',
+									`File size must be between 1 and ${MAX_SLACK_OUTBOUND_FILE_BYTES} bytes`,
+								)
+							const previous = turn.queuedFiles.get(absolutePath)
+							if (
+								previous === undefined &&
+								turn.queuedFiles.size >= MAX_SLACK_OUTBOUND_FILES_PER_TURN
+							)
+								return yield* slackIntegrationError(
+									'Slack file attachment',
+									`At most ${MAX_SLACK_OUTBOUND_FILES_PER_TURN} files can be attached to one response`,
+								)
+							const reservation = stat.size - (previous?.bytes.byteLength ?? 0)
+							if (turn.queuedFileBytes + reservation > MAX_SLACK_OUTBOUND_BYTES_PER_TURN)
+								return yield* slackIntegrationError(
+									'Slack file attachment',
+									`Queued files exceed the ${MAX_SLACK_OUTBOUND_BYTES_PER_TURN}-byte aggregate limit`,
+								)
+							if (state.queuedOutboundBytes + reservation > MAX_SLACK_OUTBOUND_BYTES_PROCESS)
+								return yield* slackIntegrationError(
+									'Slack file attachment',
+									'Limitless has reached the process-wide Slack attachment memory limit',
+								)
+							const bytes = yield* Effect.tryPromise({
+								try: () => file.readFile(),
+								catch: (error) => integrationFailure('Slack file attachment read', error),
+							})
+							if (
+								bytes.byteLength !== stat.size ||
+								bytes.byteLength > MAX_SLACK_OUTBOUND_FILE_BYTES
+							)
+								return yield* slackIntegrationError(
+									'Slack file attachment',
+									'File changed while it was being attached; attach it again',
+								)
+							return { bytes, previous }
+						}),
+					(file) => Effect.promise(() => file.close()).pipe(Effect.ignore),
+				)
+				if (state.activeTurns.get(turn.rootSessionID) !== turn || turn.cancelled || turn.finishing)
+					return yield* slackIntegrationError(
+						'Slack file attachment',
+						'slack_attach_file is only available during an active Slack turn',
+					)
+				const nextBytes =
+					turn.queuedFileBytes - (stat.previous?.bytes.byteLength ?? 0) + stat.bytes.byteLength
+				const filename = path.basename(absolutePath)
+				turn.queuedFiles.set(absolutePath, { path: absolutePath, filename, bytes: stat.bytes })
+				state.queuedOutboundBytes += stat.bytes.byteLength - (stat.previous?.bytes.byteLength ?? 0)
+				turn.queuedFileBytes = nextBytes
+				return SlackAttachFileResult.make({
+					ok: true,
+					path: absolutePath,
+					filename,
+					bytes: stat.bytes.byteLength,
+					status: stat.previous === undefined ? 'queued' : 'replaced',
+				})
+			}),
+		)
+	})
+
 	return {
 		enabled: config.enabled,
 		start,
@@ -1195,6 +1367,7 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 		handleMention,
 		handleOpenCodeEvent,
 		updateStatus,
+		attachFile,
 		shouldDenyPermission: (sessionID: string) =>
 			Effect.sync(() => activeRootForSession(state, sessionID) !== undefined),
 	} satisfies SlackRunner

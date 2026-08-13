@@ -9,13 +9,24 @@ export const SlackImageMime = Schema.Union([
 ])
 export type SlackImageMime = typeof SlackImageMime.Type
 
+export const SlackAttachmentMime = Schema.Union([
+	SlackImageMime,
+	Schema.Literal('application/pdf'),
+	Schema.Literal('text/plain'),
+])
+export type SlackAttachmentMime = typeof SlackAttachmentMime.Type
+
 export const SlackFile = Schema.Struct({
 	id: Schema.NonEmptyString,
-	name: Schema.optional(Schema.String),
-	title: Schema.optional(Schema.String),
+	name: Schema.optional(Schema.NullOr(Schema.String)),
+	title: Schema.optional(Schema.NullOr(Schema.String)),
 	mimetype: Schema.optional(Schema.String),
+	filetype: Schema.optional(Schema.String),
 	size: Schema.optional(Schema.Number),
 	url_private: Schema.optional(Schema.String),
+	url_private_download: Schema.optional(Schema.String),
+	mode: Schema.optional(Schema.String),
+	file_access: Schema.optional(Schema.String),
 	alt_txt: Schema.optional(Schema.String),
 })
 export type SlackFile = typeof SlackFile.Type
@@ -37,6 +48,11 @@ export const SlackRepliesResponse = Schema.Struct({
 	response_metadata: Schema.optional(
 		Schema.Struct({ next_cursor: Schema.optional(Schema.String) }),
 	),
+})
+
+export const SlackFileInfoResponse = Schema.Struct({
+	ok: Schema.optional(Schema.Boolean),
+	file: Schema.optional(SlackFile),
 })
 
 export const SlackAppMentionInput = Schema.Struct({
@@ -62,7 +78,7 @@ export const SlackPromptTextPart = Schema.Struct({
 })
 export const SlackPromptFilePart = Schema.Struct({
 	type: Schema.Literal('file'),
-	mime: SlackImageMime,
+	mime: SlackAttachmentMime,
 	filename: Schema.String,
 	url: Schema.String,
 })
@@ -86,6 +102,20 @@ export const SlackStatusResult = Schema.Struct({
 	status: Schema.String,
 })
 export type SlackStatusResult = typeof SlackStatusResult.Type
+
+export const SlackAttachFileInput = Schema.Struct({
+	path: Schema.NonEmptyString,
+})
+export type SlackAttachFileInput = typeof SlackAttachFileInput.Type
+
+export const SlackAttachFileResult = Schema.Struct({
+	ok: Schema.Literal(true),
+	path: Schema.NonEmptyString,
+	filename: Schema.NonEmptyString,
+	bytes: Schema.Number,
+	status: Schema.Literals(['queued', 'replaced']),
+})
+export type SlackAttachFileResult = typeof SlackAttachFileResult.Type
 
 export const SlackAssistantResult = Schema.Struct({
 	id: Schema.NonEmptyString,

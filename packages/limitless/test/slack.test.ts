@@ -1,5 +1,9 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { Effect } from 'effect'
 import { describe, expect, test, vi } from 'vitest'
+import { validateSlackImage } from '../integrations/slack/image'
 import {
 	chunkSlackMarkdown,
 	createSlackRunner,
@@ -15,6 +19,14 @@ import type { SlackAppFactory, SlackAppHandle } from '../integrations/slack/runt
 import type { SlackMessage } from '../integrations/slack/schema'
 
 const runEffect = Effect.runPromise
+const VALID_PNG = Buffer.from(
+	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+	'base64',
+)
+
+type TestPromptPart =
+	| { type: 'text'; text: string; mime?: undefined; filename?: undefined; url?: undefined }
+	| { type: 'file'; text?: undefined; mime: string; filename: string; url: string }
 
 function mention(eventID: string, ts: string, text: string, channel = 'C1', threadTs = '1.000001') {
 	return {
@@ -40,6 +52,10 @@ async function makeHarness(
 			| ((input: { call: number; latestPromptID: string | undefined; sessionID: string }) => string)
 		assistantText?: string
 		fetch?: typeof globalThis.fetch
+		filesUploadV2?: (args: Record<string, unknown>) => Promise<unknown>
+		getUploadURLExternal?: (args: Record<string, unknown>) => Promise<unknown>
+		completeUploadExternal?: (args: Record<string, unknown>) => Promise<unknown>
+		fileInfo?: (args: { file: string }) => Promise<unknown>
 		create?: (args: { signal?: AbortSignal }) => Promise<{ data: { id: string } }>
 		promptAsync?: (args: {
 			path: { id: string }
@@ -47,7 +63,7 @@ async function makeHarness(
 				agent: string
 				messageID: string
 				tools: Record<string, boolean>
-				parts: Array<{ type: string; text?: string }>
+				parts: Array<TestPromptPart>
 			}
 		}) => Promise<{ data: undefined }>
 		update?: (args: Record<string, unknown>) => Promise<{ ok: boolean }>
@@ -71,7 +87,7 @@ async function makeHarness(
 				agent: string
 				messageID: string
 				tools: Record<string, boolean>
-				parts: Array<{ type: string; text?: string }>
+				parts: Array<TestPromptPart>
 			}
 		}) => {
 			latestPromptBySession.set(_args.path.id, _args.body.messageID)
@@ -125,10 +141,33 @@ async function makeHarness(
 			response_metadata: { next_cursor: '' },
 		}),
 	)
+	const fileInfo = vi.fn(
+		behavior.fileInfo ?? (() => Promise.resolve({ ok: false, error: 'file_not_found' })),
+	)
+	const filesUploadV2 = vi.fn(
+		behavior.filesUploadV2 ?? (() => Promise.resolve({ ok: true, files: [] })),
+	)
+	let uploadTicket = 0
+	const getUploadURLExternal = vi.fn(
+		behavior.getUploadURLExternal ??
+			(() =>
+				Promise.resolve({
+					ok: true,
+					file_id: `F-OUT-${++uploadTicket}`,
+					upload_url: `https://files.slack.com/upload/${uploadTicket}`,
+				})),
+	)
+	const completeUploadExternal = vi.fn(
+		behavior.completeUploadExternal ?? (() => Promise.resolve({ ok: true, files: [] })),
+	)
 	const slackClient = {
 		auth: { test: () => Promise.resolve({ ok: true, user_id: 'UBOT', team_id: 'T1' }) },
 		chat: { postMessage, update },
 		conversations: { replies },
+		files: { info: fileInfo, uploadV2: filesUploadV2 },
+	}
+	const uploadClient = {
+		files: { completeUploadExternal, getUploadURLExternal, uploadV2: filesUploadV2 },
 	}
 	const handle: SlackAppHandle = {
 		client: slackClient as unknown as SlackAppHandle['client'],
@@ -142,9 +181,9 @@ async function makeHarness(
 		behavior.fetch ??
 			(() =>
 				Promise.resolve(
-					new Response(new Uint8Array([1, 2, 3]), {
+					new Response(VALID_PNG, {
 						status: 200,
-						headers: { 'content-length': '3' },
+						headers: { 'content-length': String(VALID_PNG.byteLength) },
 					}),
 				)),
 	) as unknown as typeof globalThis.fetch
@@ -171,6 +210,7 @@ async function makeHarness(
 				},
 				resolveDirectory: (directory) => Promise.resolve(directory),
 				makeApp,
+				makeUploadClient: () => uploadClient as never,
 				fetch,
 				readyFile: '/tmp/limitless-slack-test-ready',
 				markReady,
@@ -186,6 +226,10 @@ async function makeHarness(
 			clearReady,
 			create,
 			fetch,
+			fileInfo,
+			filesUploadV2,
+			getUploadURLExternal,
+			completeUploadExternal,
 			messages,
 			markReady,
 			postMessage,
@@ -224,7 +268,7 @@ describe('Slack message helpers', () => {
 		expect(chunks.every((chunk) => chunk.length <= MAX_SLACK_MARKDOWN_CHARS)).toBe(true)
 	})
 
-	test('prioritizes triggering images and enforces count and metadata size limits', () => {
+	test('prioritizes triggering attachments and enforces count and metadata size limits', () => {
 		const messages: Array<SlackMessage> = [
 			{
 				ts: '1.0',
@@ -258,9 +302,185 @@ describe('Slack message helpers', () => {
 
 		expect([...selectSlackImageIDs(messages, '2.0')]).toEqual(['a', 'b', 'c', 'd'])
 	})
+
+	test('reserves the aggregate text budget for triggering attachments first', () => {
+		const textFile = (id: string) => ({
+			id,
+			name: `${id}.md`,
+			mimetype: 'text/markdown',
+			size: 512 * 1024,
+			url_private: `https://files.slack.com/${id}.md`,
+		})
+		const messages: Array<SlackMessage> = [
+			{ ts: '1.0', files: [textFile('old-one'), textFile('old-two')] },
+			{ ts: '2.0', files: [textFile('trigger')] },
+		]
+
+		expect([...selectSlackImageIDs(messages, '2.0')]).toEqual(['trigger', 'old-one'])
+	})
+
+	test('rejects oversized decoded image dimensions before attachment', async () => {
+		const oversized = Buffer.from(VALID_PNG)
+		oversized.writeUInt32BE(10_001, 16)
+		expect(
+			await runEffect(validateSlackImage(oversized, 'image/png', new AbortController().signal)),
+		).toBe(false)
+	})
+
+	test('rejects image bytes that contradict the declared MIME type', async () => {
+		expect(
+			await runEffect(validateSlackImage(VALID_PNG, 'image/jpeg', new AbortController().signal)),
+		).toBe(false)
+	})
 })
 
 describe('Slack bridge runner', () => {
+	test('queues a readable file snapshot and uploads it after the final text', async () => {
+		const directory = await mkdtemp(path.join(os.tmpdir(), 'limitless-slack-outbound-'))
+		const filePath = path.join(directory, 'report.md')
+		await writeFile(filePath, 'first version')
+		try {
+			const histories = new Map<string, Array<SlackMessage>>([
+				['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> send it' }]],
+			])
+			const { runner, mocks } = await makeHarness(histories)
+			const running = runEffect(
+				runner.handleMention(mention('E1', '2.0', '<@UBOT> send it', 'C1', '1.0')),
+			)
+			await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+
+			const queued = await runEffect(runner.attachFile('session-1', filePath, directory))
+			expect(queued).toMatchObject({
+				ok: true,
+				filename: 'report.md',
+				bytes: 13,
+				status: 'queued',
+			})
+			await writeFile(filePath, 'second version')
+			await runEffect(
+				runner.handleOpenCodeEvent({
+					type: 'session.idle',
+					properties: { sessionID: 'session-1' },
+				}),
+			)
+			await running
+
+			expect(mocks.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ markdown_text: '**Final answer**' }),
+			)
+			expect(mocks.getUploadURLExternal).toHaveBeenCalledWith({
+				filename: 'report.md',
+				length: 13,
+			})
+			expect(mocks.fetch).toHaveBeenCalledWith(
+				'https://files.slack.com/upload/1',
+				expect.objectContaining({ method: 'POST', body: Buffer.from('first version') }),
+			)
+			expect(mocks.completeUploadExternal).toHaveBeenCalledWith(
+				expect.objectContaining({ channel_id: 'C1', thread_ts: '1.0' }),
+			)
+			await runEffect(runner.stop)
+		} finally {
+			await rm(directory, { recursive: true, force: true })
+		}
+	})
+
+	test('reattaching a path replaces its queued snapshot', async () => {
+		const directory = await mkdtemp(path.join(os.tmpdir(), 'limitless-slack-outbound-'))
+		const filePath = path.join(directory, 'report.txt')
+		try {
+			await writeFile(filePath, 'one')
+			const histories = new Map<string, Array<SlackMessage>>([
+				['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> send it' }]],
+			])
+			const { runner, mocks } = await makeHarness(histories)
+			const running = runEffect(
+				runner.handleMention(mention('E1', '2.0', '<@UBOT> send it', 'C1', '1.0')),
+			)
+			await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+			await runEffect(runner.attachFile('session-1', filePath, directory))
+			await writeFile(filePath, 'two')
+			expect(await runEffect(runner.attachFile('session-1', filePath, directory))).toMatchObject({
+				status: 'replaced',
+			})
+			await runEffect(
+				runner.handleOpenCodeEvent({
+					type: 'session.idle',
+					properties: { sessionID: 'session-1' },
+				}),
+			)
+			await running
+			expect(mocks.fetch).toHaveBeenCalledWith(
+				'https://files.slack.com/upload/1',
+				expect.objectContaining({ body: Buffer.from('two') }),
+			)
+			await runEffect(runner.stop)
+		} finally {
+			await rm(directory, { recursive: true, force: true })
+		}
+	})
+
+	test('discards queued files when a Slack turn is cancelled', async () => {
+		const directory = await mkdtemp(path.join(os.tmpdir(), 'limitless-slack-outbound-'))
+		const filePath = path.join(directory, 'cancelled.txt')
+		await writeFile(filePath, 'do not send')
+		try {
+			const histories = new Map<string, Array<SlackMessage>>([
+				['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> work' }]],
+			])
+			const { runner, mocks } = await makeHarness(histories)
+			void runEffect(runner.handleMention(mention('E1', '2.0', '<@UBOT> work', 'C1', '1.0')))
+			await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+			await runEffect(runner.attachFile('session-1', filePath, directory))
+			await runEffect(runner.handleMention(mention('E2', '3.0', '<@UBOT> cancel', 'C1', '1.0')))
+			await runEffect(
+				runner.handleOpenCodeEvent({
+					type: 'session.idle',
+					properties: { sessionID: 'session-1' },
+				}),
+			)
+			expect(mocks.getUploadURLExternal).not.toHaveBeenCalled()
+			await runEffect(runner.stop)
+		} finally {
+			await rm(directory, { recursive: true, force: true })
+		}
+	})
+
+	test('posts an explicit warning when a queued file upload fails', async () => {
+		const directory = await mkdtemp(path.join(os.tmpdir(), 'limitless-slack-outbound-'))
+		const filePath = path.join(directory, 'failed.txt')
+		await writeFile(filePath, 'cannot upload')
+		try {
+			const histories = new Map<string, Array<SlackMessage>>([
+				['C1', [{ ts: '2.0', thread_ts: '1.0', user: 'U1', text: '<@UBOT> send it' }]],
+			])
+			const { runner, mocks } = await makeHarness(histories, {
+				getUploadURLExternal: () => Promise.reject(new Error('upload unavailable')),
+			})
+			const running = runEffect(
+				runner.handleMention(mention('E1', '2.0', '<@UBOT> send it', 'C1', '1.0')),
+			)
+			await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+			await runEffect(runner.attachFile('session-1', filePath, directory))
+			await runEffect(
+				runner.handleOpenCodeEvent({
+					type: 'session.idle',
+					properties: { sessionID: 'session-1' },
+				}),
+			)
+			await running
+			expect(mocks.getUploadURLExternal).toHaveBeenCalledTimes(1)
+			expect(mocks.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					markdown_text: expect.stringContaining('could not attach `failed.txt`'),
+				}),
+			)
+			await runEffect(runner.stop)
+		} finally {
+			await rm(directory, { recursive: true, force: true })
+		}
+	})
+
 	test('starts only in the activated service and configured repository instance', async () => {
 		const config = await runEffect(
 			normalizeSlackConfig({ slack: { enable: true, repository: '/repo' } }),
@@ -337,7 +557,11 @@ describe('Slack bridge runner', () => {
 		expect(promptBody.agent).toBe('slack-agent')
 		expect(promptBody).not.toHaveProperty('system')
 		expect(promptBody.messageID).toMatch(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/u)
-		expect(promptBody.tools).toEqual({ question: false, slack_status: true })
+		expect(promptBody.tools).toEqual({
+			question: false,
+			slack_attach_file: true,
+			slack_status: true,
+		})
 		expect(promptBody.parts.filter((part: { type: string }) => part.type === 'file')).toHaveLength(
 			1,
 		)
@@ -369,6 +593,360 @@ describe('Slack bridge runner', () => {
 		)
 		await runEffect(runner.stop)
 		expect(mocks.clearReady).toHaveBeenCalledTimes(2)
+	})
+
+	test('attaches unread Markdown and PDF files to their imported Slack messages', async () => {
+		const markdown = Buffer.from('# Design\n\nUse the bounded pipeline.\n')
+		const pdf = Buffer.from('%PDF-1.7\nmock document')
+		const histories = new Map<string, Array<SlackMessage>>([
+			[
+				'C1',
+				[
+					{
+						ts: '1.0',
+						user: 'U2',
+						text: 'Design document',
+						files: [
+							{
+								id: 'F-MD',
+								name: 'design.md',
+								mimetype: 'text/markdown; charset=utf-8',
+								filetype: 'markdown',
+								size: markdown.byteLength,
+								url_private_download: 'https://files.slack.com/design.md',
+							},
+						],
+					},
+					{
+						ts: '2.0',
+						thread_ts: '1.0',
+						user: 'U1',
+						text: '<@UBOT> review both files',
+						files: [
+							{
+								id: 'F-PDF',
+								name: 'requirements.pdf',
+								mimetype: 'application/pdf',
+								size: pdf.byteLength,
+								url_private: 'https://files.slack.com/requirements.pdf',
+							},
+						],
+					},
+				],
+			],
+		])
+		const { runner, mocks } = await makeHarness(histories, {
+			fetch: (input) =>
+				Promise.resolve(
+					new Response(String(input).endsWith('.md') ? markdown : pdf, { status: 200 }),
+				),
+		})
+		const running = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> review both files', 'C1', '1.0')),
+		)
+
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		const parts = mocks.promptAsync.mock.calls[0]?.[0].body.parts
+		if (parts === undefined) throw new Error('missing OpenCode prompt parts')
+		expect(parts.map((part) => part.type)).toEqual(['text', 'file', 'text', 'file'])
+		const files = parts.filter((part) => part.type === 'file')
+		expect(files[0]).toMatchObject({ filename: 'design.md', mime: 'text/plain' })
+		expect(files[0]?.url).toBe(`data:text/plain;base64,${markdown.toString('base64')}`)
+		expect(files[1]).toMatchObject({ filename: 'requirements.pdf', mime: 'application/pdf' })
+		expect(files[1]?.url).toBe(`data:application/pdf;base64,${pdf.toString('base64')}`)
+		expect(parts[0]?.text).toContain('Slack file attached: design.md (text/plain)')
+		expect(parts[2]?.text).toContain('Slack file attached: requirements.pdf (application/pdf)')
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		await runEffect(runner.stop)
+	})
+
+	test('resolves incomplete Slack file metadata before attaching a text file', async () => {
+		const markdown = Buffer.from('# Retrieved through files.info\n')
+		const histories = new Map<string, Array<SlackMessage>>([
+			[
+				'C1',
+				[
+					{
+						ts: '2.0',
+						thread_ts: '1.0',
+						user: 'U1',
+						text: '<@UBOT> inspect',
+						files: [{ id: 'F1', name: null, title: 'notes.md', file_access: 'check_file_info' }],
+					},
+				],
+			],
+		])
+		const { runner, mocks } = await makeHarness(histories, {
+			fileInfo: () =>
+				Promise.resolve({
+					ok: true,
+					file: {
+						id: 'F1',
+						name: null,
+						title: 'notes.md',
+						mimetype: 'text/plain',
+						filetype: 'markdown',
+						size: markdown.byteLength,
+						url_private: 'https://files.slack.com/notes.md',
+					},
+				}),
+			fetch: () => Promise.resolve(new Response(markdown, { status: 200 })),
+		})
+		const running = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> inspect', 'C1', '1.0')),
+		)
+
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		expect(mocks.fileInfo).toHaveBeenCalledWith({ file: 'F1' })
+		expect(mocks.promptAsync.mock.calls[0]?.[0].body.parts).toContainEqual(
+			expect.objectContaining({ type: 'file', mime: 'text/plain', filename: 'notes.md' }),
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		await runEffect(runner.stop)
+	})
+
+	test('resolves fallback metadata before reserving text budget for the triggering file', async () => {
+		const content = Buffer.alloc(512 * 1024, 0x61)
+		const fallback = (id: string) => ({ id, file_access: 'check_file_info' })
+		const histories = new Map<string, Array<SlackMessage>>([
+			[
+				'C1',
+				[
+					{
+						ts: '1.0',
+						user: 'U2',
+						text: 'Older files',
+						files: [fallback('old-one'), fallback('old-two')],
+					},
+					{
+						ts: '2.0',
+						thread_ts: '1.0',
+						user: 'U1',
+						text: '<@UBOT> inspect mine',
+						files: [fallback('trigger')],
+					},
+				],
+			],
+		])
+		const { runner, mocks } = await makeHarness(histories, {
+			fileInfo: ({ file }) =>
+				Promise.resolve({
+					ok: true,
+					file: {
+						id: file,
+						name: `${file}.md`,
+						mimetype: 'text/markdown',
+						size: content.byteLength,
+						url_private: `https://files.slack.com/${file}.md`,
+					},
+				}),
+			fetch: () => Promise.resolve(new Response(content, { status: 200 })),
+		})
+		const running = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> inspect mine', 'C1', '1.0')),
+		)
+
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		expect(mocks.fileInfo.mock.calls.map(([input]) => input.file)).toEqual([
+			'trigger',
+			'old-one',
+			'old-two',
+		])
+		const files = mocks.promptAsync.mock.calls[0]?.[0].body.parts.filter(
+			(part) => part.type === 'file',
+		)
+		expect(files?.map((file) => file.filename)).toEqual(['old-one.md', 'trigger.md'])
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		await runEffect(runner.stop)
+	})
+
+	test('bounds metadata lookups without letting resolved unsupported stubs consume slots', async () => {
+		const ids = ['U1', 'U2', 'U3', 'U4', 'VALID', 'U6', 'U7', 'U8', 'U9', 'U10']
+		const histories = new Map<string, Array<SlackMessage>>([
+			[
+				'C1',
+				[
+					{
+						ts: '2.0',
+						thread_ts: '1.0',
+						user: 'U1',
+						text: '<@UBOT> inspect',
+						files: ids.map((id) => ({ id, file_access: 'check_file_info' })),
+					},
+				],
+			],
+		])
+		const { runner, mocks } = await makeHarness(histories, {
+			fileInfo: ({ file }) =>
+				Promise.resolve({
+					ok: true,
+					file: {
+						id: file,
+						name: file === 'VALID' ? 'valid.png' : `${file}.bin`,
+						mimetype: file === 'VALID' ? 'image/png' : 'application/octet-stream',
+						size: VALID_PNG.byteLength,
+						url_private: `https://files.slack.com/${file}`,
+					},
+				}),
+		})
+		const running = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> inspect', 'C1', '1.0')),
+		)
+
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		expect(mocks.fileInfo).toHaveBeenCalledTimes(8)
+		const files = mocks.promptAsync.mock.calls[0]?.[0].body.parts.filter(
+			(part) => part.type === 'file',
+		)
+		expect(files?.map((file) => file.filename)).toEqual(['valid.png'])
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		await runEffect(runner.stop)
+	})
+
+	test('omits text attachments that are not valid UTF-8', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			[
+				'C1',
+				[
+					{
+						ts: '2.0',
+						thread_ts: '1.0',
+						user: 'U1',
+						text: '<@UBOT> inspect',
+						files: [
+							{
+								id: 'F1',
+								name: 'invalid.md',
+								mimetype: 'text/markdown',
+								url_private: 'https://files.slack.com/invalid.md',
+							},
+						],
+					},
+				],
+			],
+		])
+		const { runner, mocks } = await makeHarness(histories, {
+			fetch: () => Promise.resolve(new Response(new Uint8Array([0xff, 0xfe]), { status: 200 })),
+		})
+		const running = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> inspect', 'C1', '1.0')),
+		)
+
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		const parts = mocks.promptAsync.mock.calls[0]?.[0].body.parts
+		if (parts === undefined) throw new Error('missing OpenCode prompt parts')
+		expect(parts.filter((part) => part.type === 'file')).toHaveLength(0)
+		expect(parts[0]?.text).toContain(
+			'Attachment omitted: Slack file invalid.md could not be imported',
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		await runEffect(runner.stop)
+	})
+
+	test('omits signature-valid images that cannot be decoded', async () => {
+		const histories = new Map<string, Array<SlackMessage>>([
+			[
+				'C1',
+				[
+					{
+						ts: '2.0',
+						thread_ts: '1.0',
+						user: 'U1',
+						text: '<@UBOT> inspect',
+						files: [
+							{
+								id: 'F1',
+								name: 'truncated.png',
+								mimetype: 'image/png',
+								url_private: 'https://files.slack.com/truncated.png',
+							},
+						],
+					},
+				],
+			],
+		])
+		const { runner, mocks } = await makeHarness(histories, {
+			fetch: () =>
+				Promise.resolve(
+					new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), {
+						status: 200,
+					}),
+				),
+		})
+		const running = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> inspect', 'C1', '1.0')),
+		)
+
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		const parts = mocks.promptAsync.mock.calls[0]?.[0].body.parts
+		if (parts === undefined) throw new Error('missing OpenCode prompt parts')
+		expect(parts.filter((part) => part.type === 'file')).toHaveLength(0)
+		expect(parts[0]?.text).toContain(
+			'Attachment omitted: Slack file truncated.png could not be imported',
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		await runEffect(runner.stop)
+	})
+
+	test('enforces the aggregate text attachment limit', async () => {
+		const content = Buffer.alloc(400 * 1024, 0x61)
+		const histories = new Map<string, Array<SlackMessage>>([
+			[
+				'C1',
+				[
+					{
+						ts: '2.0',
+						thread_ts: '1.0',
+						user: 'U1',
+						text: '<@UBOT> inspect',
+						files: ['one', 'two', 'three'].map((name) => ({
+							id: name,
+							name: `${name}.md`,
+							mimetype: 'text/markdown',
+							size: content.byteLength,
+							url_private: `https://files.slack.com/${name}.md`,
+						})),
+					},
+				],
+			],
+		])
+		const { runner, mocks } = await makeHarness(histories, {
+			fetch: () => Promise.resolve(new Response(content, { status: 200 })),
+		})
+		const running = runEffect(
+			runner.handleMention(mention('E1', '2.0', '<@UBOT> inspect', 'C1', '1.0')),
+		)
+
+		await vi.waitFor(() => expect(mocks.promptAsync).toHaveBeenCalledTimes(1))
+		const parts = mocks.promptAsync.mock.calls[0]?.[0].body.parts
+		if (parts === undefined) throw new Error('missing OpenCode prompt parts')
+		expect(parts.filter((part) => part.type === 'file')).toHaveLength(2)
+		expect(parts[0]?.text).toContain(
+			'Slack attachment three.md beyond the per-turn attachment limits',
+		)
+		await runEffect(
+			runner.handleOpenCodeEvent({ type: 'session.idle', properties: { sessionID: 'session-1' } }),
+		)
+		await running
+		await runEffect(runner.stop)
 	})
 
 	test('imports messages before a mention from oldest to newest', async () => {
