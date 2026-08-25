@@ -9,6 +9,7 @@ import {
 	createNotificationRunner,
 	DEFAULT_NOTIFICATION_TIMEOUT_MS,
 	type NotificationConfigError,
+	NotificationSessionLookupError,
 	normalizeNotificationConfig,
 } from '../integrations/notifications/index'
 
@@ -41,6 +42,16 @@ describe('normalizeNotificationConfig', () => {
 		expect(isNotificationEventEnabled(config, 'complete')).toBe(true)
 		expect(isNotificationEventEnabled(config, 'permission')).toBe(true)
 		expect(isNotificationEventEnabled(config, 'question')).toBe(true)
+	})
+
+	test('accepts the legacy enabled spelling', async () => {
+		const config = await runEffect(
+			normalizeNotificationConfig({
+				notifications: { enabled: true, command: ['notify-send'] },
+			}),
+		)
+
+		expect(config.enabled).toBe(true)
 	})
 
 	test.each([
@@ -112,15 +123,15 @@ describe('notification runner', () => {
 					yield* runner.handleEvent({ type: 'unrelated', data: {} }, lookupSession)
 					yield* runner.handleEvent(
 						{
-							type: 'permission.v2.asked',
+							type: 'permission.asked',
 							data: { sessionID: 'child', action: 'shell', resource: 'git push' },
 						},
 						lookupSession,
 					)
 					yield* runner.handleEvent(
 						{
-							type: 'question.v2.asked',
-							data: { sessionID: 'parent' },
+							type: 'form.created',
+							data: { form: { sessionID: 'parent' } },
 						},
 						lookupSession,
 					)
@@ -156,6 +167,38 @@ describe('notification runner', () => {
 			)
 
 			expect(readFileSync(marker, 'utf8')).toBe('xxxxx')
+		} finally {
+			rmSync(directory, { recursive: true, force: true })
+		}
+	})
+
+	test('does not report completion when the session lookup fails', async () => {
+		const directory = mkdtempSync(join(tmpdir(), 'limitless-notifications-'))
+		const marker = join(directory, 'notifications')
+		const config = await runEffect(
+			normalizeNotificationConfig({
+				notifications: {
+					enable: true,
+					command: [
+						process.execPath,
+						'-e',
+						"require('node:fs').writeFileSync(process.argv[1], 'x')",
+						marker,
+					],
+				},
+			}),
+		)
+		const runner = await runEffect(createNotificationRunner(config))
+
+		try {
+			await runEffect(
+				runner.handleEvent(
+					{ type: 'session.execution.succeeded', data: { sessionID: 'missing' } },
+					() =>
+						Effect.fail(new NotificationSessionLookupError({ message: 'session is unavailable' })),
+				),
+			)
+			expect(() => readFileSync(marker, 'utf8')).toThrow()
 		} finally {
 			rmSync(directory, { recursive: true, force: true })
 		}

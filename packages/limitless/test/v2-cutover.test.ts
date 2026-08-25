@@ -14,6 +14,7 @@ const PermissionRule = Schema.Struct({
 const CheckedConfig = Schema.Struct({
 	$schema: Schema.String,
 	default_agent: Schema.String,
+	experimental: Schema.Struct({ subagent_depth: Schema.Number }),
 	permissions: Schema.Array(PermissionRule),
 	providers: Schema.Record(Schema.String, Schema.Unknown),
 })
@@ -48,17 +49,9 @@ const PluginManifest = Schema.Struct({
 		effect: Schema.String,
 	}),
 })
-const AnthropicAuthManifest = Schema.Struct({
-	dependencies: Schema.Struct({
-		'@opencode-ai/ai': Schema.String,
-		'@opencode-ai/plugin': Schema.String,
-		effect: Schema.String,
-	}),
-})
-
 function readJson<A, I>(filePath: string, schema: Schema.Codec<A, I>) {
 	return Effect.promise(() => readFile(filePath, 'utf8')).pipe(
-		Effect.flatMap(Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)),
+		Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
 		Effect.flatMap(Schema.decodeUnknownEffect(schema)),
 	)
 }
@@ -73,6 +66,7 @@ describe('decisive OpenCode 2 cutover', () => {
 
 		expect(config.$schema).toBe('https://opencode.ai/config.json')
 		expect(config.default_agent).toBe('limitless')
+		expect(config.experimental.subagent_depth).toBe(2)
 		expect(Object.keys(config.providers)).toContain('openai')
 		expect(config.permissions.at(-1)).toEqual({
 			action: 'edit',
@@ -103,17 +97,19 @@ describe('decisive OpenCode 2 cutover', () => {
 		}
 		for (const [name, model] of Object.entries({
 			'limitless.md': 'openai/gpt-5.6-sol-fast-long#max',
-			'limitless-focus.md': 'openai/gpt-5.6-sol-fast-long#max',
-			'engineer.md': 'openai/gpt-5.6-sol-fast#xhigh',
-			'frontend.md': 'openai/gpt-5.6-sol-fast#xhigh',
-			'research.md': 'openai/gpt-5.6-sol-fast#medium',
+			'gary.md': 'openai/gpt-5.6-sol-fast-long#xhigh',
 			'oracle.md': 'anthropic/claude-fable-5#high',
+			'research.md': 'openai/gpt-5.6-sol-fast#medium',
+			'review.md': 'openai/gpt-5.6-sol-fast#xhigh',
+			'worker.md': 'openai/gpt-5.6-sol-fast#xhigh',
 		})) {
 			expect(sources.get(name), name).toContain(`model: ${model}`)
 			expect(sources.get(name), name).not.toMatch(/^request:/mu)
 		}
 		expect(sources.get('limitless.md')).toContain('color: "#F8BBD0"')
-		expect(sources.get('limitless-focus.md')).toContain('color: "#FFD700"')
+		expect(sources.get('limitless.md')).not.toMatch(/resource: (?:engineer|frontend)/u)
+		expect(sources.get('review.md')).not.toContain('disabled: true')
+		expect(sources.get('gary.md')).toMatch(/action: question\s+resource: "\*"\s+effect: deny/mu)
 		expect([...sources.values()].join('\n')).toContain('permissions:')
 	})
 
@@ -144,39 +140,44 @@ describe('decisive OpenCode 2 cutover', () => {
 	})
 
 	test('pins the runtime-facing packages and Effect together', async () => {
-		const [rootManifest, pluginManifest, anthropicAuthManifest, flake, lock] = await Promise.all([
+		const [
+			rootManifest,
+			pluginManifest,
+			flake,
+			flakeLock,
+			bunLock,
+			opencodePackage,
+			anthropicAuthPackage,
+		] = await Promise.all([
 			Effect.runPromise(readJson(path.join(root, 'package.json'), PackageManifest)),
 			Effect.runPromise(
 				readJson(path.join(root, 'packages', 'limitless', 'package.json'), PluginManifest),
 			),
-			Effect.runPromise(
-				readJson(
-					path.join(root, 'packages', 'anthropic-auth', 'package.json'),
-					AnthropicAuthManifest,
-				),
-			),
 			readFile(path.join(root, 'flake.nix'), 'utf8'),
+			readFile(path.join(root, 'flake.lock'), 'utf8'),
 			readFile(path.join(root, 'bun.lock'), 'utf8'),
+			readFile(path.join(root, 'nix', 'packages', 'opencode2.nix'), 'utf8'),
+			readFile(path.join(root, 'nix', 'packages', 'anthropic-auth.nix'), 'utf8'),
 		])
 
-		expect(rootManifest.devDependencies.effect).toBe('4.0.0-beta.98')
+		expect(rootManifest.devDependencies.effect).toBe('4.0.0-rc.111')
 		expect(pluginManifest.dependencies).toEqual(
 			expect.objectContaining({
-				'@opencode-ai/plugin': '0.0.0-next-16040',
-				'@opencode-ai/schema': '0.0.0-next-16040',
-				effect: '4.0.0-beta.98',
+				'@opencode-ai/plugin': '0.0.0-beta-18050',
+				'@opencode-ai/schema': '0.0.0-beta-18050',
+				effect: '4.0.0-rc.111',
 			}),
 		)
-		expect(anthropicAuthManifest.dependencies).toEqual(
-			expect.objectContaining({
-				'@opencode-ai/ai': '0.0.0-next-16040',
-				'@opencode-ai/plugin': '0.0.0-next-16040',
-				effect: '4.0.0-beta.98',
-			}),
-		)
-		expect(flake).toMatch(/llm-agents\.packages\.\$\{system\}\.opencode2/u)
+		expect(flake).toContain('import ./nix/packages/opencode2.nix')
+		expect(flake).not.toContain('llm-agents')
+		expect(flakeLock).not.toContain('llm-agents')
 		expect(flake).toContain('/bin/opencode2 --version')
-		expect(lock).toContain('@opencode-ai/plugin@0.0.0-next-16040')
+		expect(bunLock).toContain('@opencode-ai/plugin@0.0.0-beta-18050')
+		expect(opencodePackage).toContain('version = "0.0.0-beta-18050"')
+		expect(opencodePackage).toContain('x86_64-darwin')
+		expect(anthropicAuthPackage).toContain('rev = "f043583c24085c60fc7f95059f2d6f36f44f4a8e"')
+		expect(anthropicAuthPackage).toContain('owner = "CasualDeveloper"')
+		expect(anthropicAuthPackage).toContain('id !== "ex-machina.anthropic-auth"')
 	})
 
 	test('generates native plugin, LSP, skills, Linear, and service configuration', async () => {
@@ -198,5 +199,9 @@ describe('decisive OpenCode 2 cutover', () => {
 		expect(home).not.toContain('anthropic-auth.js".text')
 		expect(home).not.toContain('/bin/opencode2 --server')
 		expect(home).toContain('/bin/opencode2 serve --service')
+		expect(home).toContain('LIMITLESS_SLACK_SERVICE=1')
+		expect(home).toContain('cfg.opencode.disableClaudeCode')
+		expect(home).toContain('cfg.tools.acli.tokenFile')
+		expect(home).toContain('cfg.tools.sentry.tokenFile')
 	})
 })

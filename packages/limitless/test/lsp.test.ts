@@ -142,7 +142,7 @@ function runLspTool(
 		const result = yield* Effect.result(
 			settleTestTool(lspTools(testToolExecutor(ctx, config.servers))[name], input, ctx),
 		)
-		if (Result.isSuccess(result)) return result.success.structured
+		if (Result.isSuccess(result)) return result.success.output
 		return (
 			result.failure.metadata ?? {
 				error: result.failure._tag,

@@ -27,7 +27,7 @@ export const LspServerConfig = Schema.Struct({
 })
 export type LspServerConfig = typeof LspServerConfig.Type
 
-export class LspConfigError extends Schema.TaggedErrorClass<LspConfigError>()('LspConfigError', {
+export class LspConfigError extends Schema.TaggedError<LspConfigError>()('LspConfigError', {
 	message: Schema.String,
 }) {}
 

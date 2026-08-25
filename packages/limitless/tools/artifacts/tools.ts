@@ -1,5 +1,8 @@
-import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
-import { encodeToolFailure, type ToolExecutor, toolModelOutput } from '../../plugin/tool-boundary'
+import {
+	defineLimitlessTool,
+	encodeToolFailure,
+	type ToolExecutor,
+} from '../../plugin/tool-boundary'
 import { ArtifactCreateInput, ArtifactCreateResult, artifactCreate } from './create'
 import { ArtifactListInput, ArtifactListResult, artifactList } from './list'
 import {
@@ -14,29 +17,29 @@ import { TypstCompileInput, TypstCompileResult, typstCompile } from './typst'
 
 export function artifactTools(executeTool: ToolExecutor) {
 	return {
-		artifact_create: Tool.make({
+		artifact_create: defineLimitlessTool({
+			name: 'artifact_create',
 			description:
 				'Create an empty durable project-scoped artifact workspace or instantiate one from a built-in artifact template.',
 			input: ArtifactCreateInput,
 			output: ArtifactCreateResult,
-			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool('artifact_create', args, context, artifactCreate, encodeToolFailure),
 		}),
-		artifact_list: Tool.make({
+		artifact_list: defineLimitlessTool({
+			name: 'artifact_list',
 			description:
 				'List durable project-scoped artifact workspaces, optionally filtered by template.',
 			input: ArtifactListInput,
 			output: ArtifactListResult,
-			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool('artifact_list', args, context, artifactList, encodeToolFailure),
 		}),
-		artifact_templates_list: Tool.make({
+		artifact_templates_list: defineLimitlessTool({
+			name: 'artifact_templates_list',
 			description: 'List built-in artifact templates available to artifact_create.',
 			input: ArtifactTemplatesListInput,
 			output: ArtifactTemplatesListResult,
-			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool(
 					'artifact_templates_list',
@@ -46,12 +49,12 @@ export function artifactTools(executeTool: ToolExecutor) {
 					encodeToolFailure,
 				),
 		}),
-		artifact_template_read: Tool.make({
+		artifact_template_read: defineLimitlessTool({
+			name: 'artifact_template_read',
 			description:
 				'Read a text file from a built-in artifact template without creating an artifact (for example the sphere-showcase authoring reference).',
 			input: ArtifactTemplateReadInput,
 			output: ArtifactTemplateReadResult,
-			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool(
 					'artifact_template_read',
@@ -61,11 +64,11 @@ export function artifactTools(executeTool: ToolExecutor) {
 					encodeToolFailure,
 				),
 		}),
-		typst_compile: Tool.make({
+		typst_compile: defineLimitlessTool({
+			name: 'typst_compile',
 			description: 'Compile a Typst document artifact to PDF using the packaged Typst binary.',
 			input: TypstCompileInput,
 			output: TypstCompileResult,
-			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool('typst_compile', args, context, typstCompile, encodeToolFailure),
 		}),

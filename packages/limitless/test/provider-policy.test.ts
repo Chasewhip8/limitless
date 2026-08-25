@@ -1,5 +1,6 @@
-import type { CatalogDraft, CatalogProviderRecord } from '@opencode-ai/plugin/v2/effect/catalog'
-import { Effect } from 'effect'
+import type { CatalogDraft, CatalogProviderRecord } from '@opencode-ai/plugin/effect/catalog'
+import { Provider } from '@opencode-ai/schema/provider'
+import { Effect, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 import {
 	applyProviderPolicy,
@@ -13,7 +14,12 @@ function catalog(...providerIDs: ReadonlyArray<string>) {
 		providerIDs.map((id) => [
 			id,
 			{
-				provider: { id, name: id, package: `aisdk:${id}` },
+				provider: Schema.decodeUnknownSync(Provider.Info)({
+					id,
+					name: id,
+					activation: 'auto',
+					package: `aisdk:${id}`,
+				}),
 				models: new Map(),
 			},
 		]),
@@ -46,9 +52,9 @@ describe('provider policy', () => {
 		applyProviderPolicy(state.draft, config)
 
 		expect(config.disabled).toEqual(DEFAULT_DISABLED_PROVIDERS)
-		expect(state.records.get('google')?.provider.disabled).toBeUndefined()
-		expect(state.records.get('google-vertex')?.provider.disabled).toBe(true)
-		expect(state.records.get('google-vertex-anthropic')?.provider.disabled).toBe(true)
+		expect(state.records.get('google')?.provider.activation).toBe('auto')
+		expect(state.records.has('google-vertex')).toBe(false)
+		expect(state.records.has('google-vertex-anthropic')).toBe(false)
 	})
 
 	test('supports an explicit provider list and deduplicates it', async () => {

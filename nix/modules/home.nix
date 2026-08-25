@@ -24,18 +24,174 @@ let
   enabledLinear = cfg.enable && cfg.mcp.linear.enable;
   enabledOpencodeService = cfg.enable && cfg.opencode.service.enable;
   enabledAnthropicAuth = cfg.enable && cfg.plugins.anthropicAuth.enable;
+  enabledSlack = cfg.enable && cfg.slack.enable;
 
-  opencodeAttachCommand = "${cfg.opencode.package}/bin/opencode2 \"$PWD\"";
+  opencodePackage =
+    if cfg.opencode.disableClaudeCode then
+      pkgs.symlinkJoin {
+        name = "opencode2-disable-claude-code";
+        paths = [ cfg.opencode.package ];
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        postBuild = ''
+          wrapProgram $out/bin/opencode2 --set OPENCODE_DISABLE_CLAUDE_CODE 1
+        '';
+      }
+    else
+      cfg.opencode.package;
+
+  opencodeAttachCommand = "${opencodePackage}/bin/opencode2 \"$PWD\"";
+  slackRepository = if cfg.slack.repository == null then "/" else cfg.slack.repository;
+  slackPrepare = pkgs.writeShellScript "limitless-slack-prepare" ''
+    set -eu
+    : "''${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
+    ${pkgs.coreutils}/bin/rm -f "$XDG_RUNTIME_DIR/limitless-slack-ready"
+  '';
+  slackBootstrap = pkgs.writeShellScript "limitless-slack-bootstrap" ''
+    set -eu
+    : "''${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
+    ready_file="$XDG_RUNTIME_DIR/limitless-slack-ready"
+
+    until ${opencodePackage}/bin/opencode2 api plugin.list \
+      --param ${lib.escapeShellArg "location.directory=${slackRepository}"} >/dev/null 2>&1; do
+      ${pkgs.coreutils}/bin/sleep 0.1
+    done
+
+    while [ ! -s "$ready_file" ]; do
+      ${pkgs.coreutils}/bin/sleep 0.1
+    done
+  '';
 
   permissionRule = action: resource: effect: { inherit action resource effect; };
 
   defaultAgentBrowserPackage = self.packages.${system}."agent-browser";
   defaultEffectSolutionsPackage = self.packages.${system}."effect-solutions";
+  defaultSentryPackage = self.packages.${system}.sentry;
+  defaultAcliPackage = pkgs.acli;
 
+  enabledAcli = cfg.enable && cfg.tools.acli.enable;
   enabledAgentBrowser = cfg.enable && cfg.tools.agentBrowser.enable;
   enabledEffectSolutions = cfg.enable && cfg.tools.effectSolutions.enable;
+  enabledSentry = cfg.enable && cfg.tools.sentry.enable;
+  enabledAcliSkill = enabledSkills && enabledAcli;
   enabledAgentBrowserSkill = enabledSkills && enabledAgentBrowser;
   enabledEffectSolutionsSkill = enabledSkills && enabledEffectSolutions;
+  enabledSentrySkill = enabledSkills && enabledSentry;
+
+  acliSkillPackage = pkgs.runCommand "limitless-atlassian-cli-skill" { } ''
+    mkdir -p $out/atlassian-cli
+    cp ${self}/nix/skills/atlassian-cli/SKILL.md $out/atlassian-cli/SKILL.md
+  '';
+
+  acliPackage =
+    if cfg.tools.acli.tokenFile == null then
+      cfg.tools.acli.package
+    else
+      let
+        realAcli = lib.getExe cfg.tools.acli.package;
+        site = lib.escapeShellArg (if cfg.tools.acli.site == null then "" else cfg.tools.acli.site);
+        email = lib.escapeShellArg (if cfg.tools.acli.email == null then "" else cfg.tools.acli.email);
+        tokenFile = lib.escapeShellArg cfg.tools.acli.tokenFile;
+      in
+      pkgs.writeShellScriptBin "acli" ''
+        set -eu
+
+        real_acli=${lib.escapeShellArg realAcli}
+        site=${site}
+        email=${email}
+        token_file=${tokenFile}
+
+        if [ "''${1:-}" = "jira" ]; then
+          if [ -z "''${XDG_RUNTIME_DIR:-}" ]; then
+            printf '%s\n' "acli: XDG_RUNTIME_DIR is required for token-file authentication" >&2
+            exit 1
+          fi
+
+          runtime_dir="$XDG_RUNTIME_DIR/limitless-acli"
+          ${pkgs.coreutils}/bin/install -d -m 0700 "$runtime_dir" "$runtime_dir/config"
+          export ACLI_CONFIG_DIR="$runtime_dir/config"
+
+          if [ "''${2:-}" = "auth" ] && [ "''${3:-}" = "logout" ]; then
+            set +e
+            "$real_acli" "$@"
+            status=$?
+            set -e
+            ${pkgs.coreutils}/bin/rm -f "$runtime_dir/identity"
+            exit "$status"
+          fi
+
+          if [ "''${2:-}" = "auth" ] && [ "''${3:-}" = "login" ]; then
+            exec -a acli "$real_acli" "$@"
+          fi
+
+          (
+            ${pkgs.util-linux}/bin/flock -x 9
+
+            if [ ! -r "$token_file" ]; then
+              printf 'acli: Jira API token file is not readable: %s\n' "$token_file" >&2
+              exit 1
+            fi
+
+            fingerprint="$({
+              printf '%s\0%s\0' "$site" "$email"
+              ${pkgs.coreutils}/bin/cat "$token_file"
+            } | ${pkgs.coreutils}/bin/sha256sum | ${pkgs.coreutils}/bin/cut -d ' ' -f 1)"
+
+            current_fingerprint=""
+            if [ -r "$runtime_dir/identity" ]; then
+              current_fingerprint="$(${pkgs.coreutils}/bin/cat "$runtime_dir/identity")"
+            fi
+
+            if [ "$fingerprint" != "$current_fingerprint" ]; then
+              if ! "$real_acli" jira auth login \
+                --site "$site" \
+                --email "$email" \
+                --token < "$token_file" 1>&2; then
+                printf '%s\n' "acli: Jira authentication failed; verify the site, email, and agenix token" >&2
+                exit 1
+              fi
+
+              identity_tmp="$runtime_dir/.identity.$$"
+              umask 077
+              printf '%s\n' "$fingerprint" > "$identity_tmp"
+              ${pkgs.coreutils}/bin/mv "$identity_tmp" "$runtime_dir/identity"
+            fi
+          ) 9> "$runtime_dir/auth.lock"
+        fi
+
+        exec -a acli "$real_acli" "$@"
+      '';
+
+  sentryPackage =
+    if cfg.tools.sentry.tokenFile == null then
+      cfg.tools.sentry.package
+    else
+      let
+        realSentry = lib.getExe cfg.tools.sentry.package;
+        tokenFile = lib.escapeShellArg cfg.tools.sentry.tokenFile;
+      in
+      pkgs.writeShellScriptBin "sentry" ''
+        set -eu
+
+        real_sentry=${lib.escapeShellArg realSentry}
+        token_file=${tokenFile}
+
+        if [ ! -r "$token_file" ]; then
+          printf 'sentry: Sentry API token file is not readable: %s\n' "$token_file" >&2
+          exit 1
+        fi
+
+        SENTRY_AUTH_TOKEN="$(${pkgs.coreutils}/bin/cat "$token_file")"
+        if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+          printf 'sentry: Sentry API token file is empty: %s\n' "$token_file" >&2
+          exit 1
+        fi
+
+        export SENTRY_AUTH_TOKEN
+        export SENTRY_FORCE_ENV_TOKEN=1
+        export SENTRY_CLI_NO_UPDATE_CHECK=1
+
+        exec -a sentry "$real_sentry" "$@"
+      '';
 
   enabledSkillsPackage = pkgs.runCommand "limitless-enabled-skills" { } ''
     copySkills() {
@@ -47,8 +203,10 @@ let
 
     mkdir -p $out
     copySkills ${cfg.skills.package}
+    ${lib.optionalString enabledAcliSkill "copySkills ${acliSkillPackage}"}
     ${lib.optionalString enabledAgentBrowserSkill "copySkills ${cfg.tools.agentBrowser.package}/share/skills"}
     ${lib.optionalString enabledEffectSolutionsSkill "copySkills ${cfg.tools.effectSolutions.package}/share/skills"}
+    ${lib.optionalString enabledSentrySkill "copySkills ${cfg.tools.sentry.package}/share/skills"}
   '';
 
   mkLspServer =
@@ -106,6 +264,17 @@ let
     lsp = lib.optionalAttrs enabledLsp lspServers;
     providers = {
       inherit (cfg.providers) disabled;
+    };
+    slack = {
+      inherit (cfg.slack)
+        enable
+        agent
+        botTokenEnv
+        appTokenEnv
+        ;
+    }
+    // lib.optionalAttrs (cfg.slack.repository != null) {
+      inherit (cfg.slack) repository;
     };
   };
 
@@ -175,7 +344,13 @@ in
       package = lib.mkOption {
         type = lib.types.package;
         default = self.packages.${system}.opencode2;
-        description = "OpenCode 2.0 beta package to install. Defaults to the pinned Numtide llm-agents.nix opencode2 package.";
+        description = "OpenCode 2.0 beta package to install. Defaults to the runtime pinned by this flake.";
+      };
+
+      disableClaudeCode = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Disable OpenCode's Claude Code integration by setting OPENCODE_DISABLE_CLAUDE_CODE=1 for the CLI and server.";
       };
 
       permissions = lib.mkOption {
@@ -285,6 +460,38 @@ in
     };
 
     tools = {
+      acli = {
+        enable = lib.mkEnableOption "Atlassian CLI and its companion Jira skill";
+
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = defaultAcliPackage;
+          defaultText = lib.literalExpression "pkgs.acli";
+          description = "Atlassian CLI package to install.";
+        };
+
+        site = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "^[A-Za-z0-9.-]+$");
+          default = null;
+          example = "company.atlassian.net";
+          description = "Jira Cloud hostname used for token-file authentication.";
+        };
+
+        email = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "agent@example.com";
+          description = "Atlassian account email used for token-file authentication.";
+        };
+
+        tokenFile = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "^/.*");
+          default = null;
+          example = "/run/agenix/atlassian-api-token";
+          description = "Optional runtime file containing an Atlassian API token. The token value is never written to generated configuration or passed in process arguments.";
+        };
+      };
+
       agentBrowser = {
         enable = lib.mkOption {
           type = lib.types.bool;
@@ -314,6 +521,23 @@ in
           description = "effect-solutions package to install.";
         };
       };
+
+      sentry = {
+        enable = lib.mkEnableOption "Sentry CLI and its companion agent skill";
+
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = defaultSentryPackage;
+          description = "Sentry CLI package to install.";
+        };
+
+        tokenFile = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "^/.*");
+          default = null;
+          example = "/run/agenix/sentry-api-token";
+          description = "Runtime file containing a Sentry API token. The token value is never written to generated configuration or passed in process arguments.";
+        };
+      };
     };
 
     agents = {
@@ -329,13 +553,13 @@ in
         enable = lib.mkOption {
           type = lib.types.bool;
           default = true;
-          description = "Enable the reverse-engineered Claude Pro/Max OAuth plugin and native Anthropic provider adapter. Anthropic does not officially support this use.";
+          description = "Enable the commit-pinned upstream Claude Pro/Max OAuth plugin. Anthropic does not officially support this use.";
         };
 
         package = lib.mkOption {
           type = lib.types.package;
           default = self.packages.${system}."anthropic-auth";
-          description = "Package containing the Anthropic OAuth plugin and provider adapter.";
+          description = "Package containing the upstream Anthropic OAuth plugin.";
         };
       };
 
@@ -441,6 +665,42 @@ in
           default = true;
           description = "Run the notification command before the OpenCode question tool prompts the user.";
         };
+      };
+    };
+
+    slack = {
+      enable = lib.mkEnableOption "the repository-scoped Slack bridge for OpenCode 2";
+
+      repository = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "^/.*");
+        default = null;
+        example = "/home/me/workspace";
+        description = "Absolute repository directory used for every Slack-backed OpenCode session.";
+      };
+
+      agent = lib.mkOption {
+        type = lib.types.strMatching ".+";
+        default = "gary";
+        description = "OpenCode agent selected for Slack-backed turns.";
+      };
+
+      botTokenEnv = lib.mkOption {
+        type = lib.types.strMatching "^[A-Za-z_][A-Za-z0-9_]*$";
+        default = "SLACK_BOT_TOKEN";
+        description = "Environment variable containing the Slack bot token.";
+      };
+
+      appTokenEnv = lib.mkOption {
+        type = lib.types.strMatching "^[A-Za-z_][A-Za-z0-9_]*$";
+        default = "SLACK_APP_TOKEN";
+        description = "Environment variable containing the Slack Socket Mode app token.";
+      };
+
+      environmentFile = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "^/.*");
+        default = null;
+        example = "/run/agenix/limitless-slack-environment";
+        description = "Optional runtime EnvironmentFile that supplies Slack tokens to the OpenCode user service without copying values into the Nix store.";
       };
     };
 
@@ -750,13 +1010,39 @@ in
             message = "programs.limitless.notifications.command must be non-empty when notifications are enabled.";
           }
           {
+            assertion = !enabledSlack || cfg.opencode.service.enable;
+            message = "programs.limitless.slack.enable requires programs.limitless.opencode.service.enable.";
+          }
+          {
+            assertion = !enabledSlack || cfg.slack.repository != null;
+            message = "programs.limitless.slack.repository must be set when Slack support is enabled.";
+          }
+          {
+            assertion = !enabledSlack || pkgs.stdenv.isLinux;
+            message = "programs.limitless Slack service integration currently requires Linux.";
+          }
+          {
+            assertion =
+              cfg.tools.acli.tokenFile == null
+              || (cfg.tools.acli.enable && cfg.tools.acli.site != null && cfg.tools.acli.email != null);
+            message = "programs.limitless.tools.acli token-file authentication requires enable = true plus non-null site and email values.";
+          }
+          {
+            assertion = cfg.tools.acli.tokenFile == null || pkgs.stdenv.isLinux;
+            message = "programs.limitless.tools.acli.tokenFile currently requires Linux and XDG_RUNTIME_DIR.";
+          }
+          {
+            assertion = !enabledSentry || cfg.tools.sentry.tokenFile != null;
+            message = "programs.limitless.tools.sentry.tokenFile must be set when Sentry CLI support is enabled.";
+          }
+          {
             assertion = lib.attrByPath [ "agents" "limitless" "disabled" ] false cfg.opencode.settings != true;
             message = "programs.limitless keeps the limitless default agent enabled; remove opencode.settings.agents.limitless.disabled.";
           }
         ];
 
         home = {
-          packages = [ cfg.opencode.package ];
+          packages = [ opencodePackage ];
           file = {
             "${opencodeDir}/opencode.json".text = opencodeConfigText;
             "${opencodeDir}/AGENTS.md".text = agentsText;
@@ -782,8 +1068,14 @@ in
       (lib.mkIf enabledAgentBrowser {
         home.packages = [ cfg.tools.agentBrowser.package ];
       })
+      (lib.mkIf enabledAcli {
+        home.packages = [ acliPackage ];
+      })
       (lib.mkIf enabledEffectSolutions {
         home.packages = [ cfg.tools.effectSolutions.package ];
+      })
+      (lib.mkIf enabledSentry {
+        home.packages = [ sentryPackage ];
       })
       (lib.mkIf enabledLsp {
         home.packages = lspPackages;
@@ -806,9 +1098,21 @@ in
           };
 
           Service = {
-            ExecStart = "${cfg.opencode.package}/bin/opencode2 serve --service --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
+            Environment =
+              lib.optional cfg.opencode.disableClaudeCode "OPENCODE_DISABLE_CLAUDE_CODE=1"
+              ++ lib.optional enabledSlack "LIMITLESS_SLACK_SERVICE=1";
+            ExecStart = "${opencodePackage}/bin/opencode2 serve --service --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
             Restart = "on-failure";
             RestartSec = "5s";
+          }
+          // lib.optionalAttrs enabledSlack {
+            WorkingDirectory = slackRepository;
+            ExecStartPre = slackPrepare;
+            ExecStartPost = slackBootstrap;
+            TimeoutStartSec = "90s";
+          }
+          // lib.optionalAttrs (enabledSlack && cfg.slack.environmentFile != null) {
+            EnvironmentFile = [ cfg.slack.environmentFile ];
           };
 
           Install.WantedBy = [ "default.target" ];

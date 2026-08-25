@@ -120,12 +120,16 @@ export const writeJsonFile = Effect.fn(function* writeJsonFile(
 	value: unknown,
 	toolName: string,
 ) {
-	const encoded = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+	const encoded = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+		value,
+	).pipe(
 		Effect.mapError((error) =>
 			toolOperationError(toolName, 'Could not serialize artifact JSON', error),
 		),
 	)
-	const json = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(encoded).pipe(
+	const json = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+		encoded,
+	).pipe(
 		Effect.mapError((error) =>
 			toolOperationError(toolName, 'Could not serialize artifact JSON', error),
 		),
@@ -257,9 +261,9 @@ export const readJsonFile = Effect.fn(function* readJsonFile<Decoded>(
 	label: string,
 ) {
 	const content = yield* readTextFile(filePath, toolName, `Could not read ${label}`)
-	const parsed = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(content).pipe(
-		Effect.mapError(() => toolInputError(toolName, `Invalid ${label} JSON`)),
-	)
+	const parsed = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+		content,
+	).pipe(Effect.mapError(() => toolInputError(toolName, `Invalid ${label} JSON`)))
 	return yield* Schema.decodeUnknownEffect(schema)(parsed).pipe(
 		Effect.mapError(() => toolInputError(toolName, `Invalid ${label}`)),
 	)

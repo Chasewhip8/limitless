@@ -45,7 +45,7 @@ function runArtifactTool(
 			Effect.match({
 				onFailure: (failure) =>
 					failure.metadata ?? { error: failure._tag, message: failure.message },
-				onSuccess: (result) => result.structured,
+				onSuccess: (result) => result.output,
 			}),
 		),
 	)
@@ -306,10 +306,7 @@ describe('template and typst tools', () => {
 				{ artifact: 'document', format: 'svg' },
 				{ artifact: 'document', timeoutMs: 0 },
 			]) {
-				await expect(runTypstCompilePayload(input, context(workspace))).resolves.toMatchObject({
-					error: 'LLM.ToolFailure',
-					message: expect.stringContaining('Invalid tool input'),
-				})
+				await expect(runTypstCompilePayload(input, context(workspace))).rejects.toThrow()
 			}
 		})
 	})
@@ -468,10 +465,9 @@ describe('template and typst tools', () => {
 				{ template: 'sphere-showcase', file: '/etc/passwd' },
 			]
 			for (const input of invalidInputs) {
-				await expect(runTemplateReadPayload(input, ctx)).resolves.toMatchObject({
-					error: 'LLM.ToolFailure',
-					message: expect.stringContaining('Invalid tool input'),
-				})
+				await expect(runTemplateReadPayload(input, ctx)).rejects.toThrow(
+					'file must be a relative template file path',
+				)
 			}
 
 			const unavailableFiles = [

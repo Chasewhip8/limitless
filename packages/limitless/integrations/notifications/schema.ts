@@ -7,13 +7,15 @@ export const NotificationEvent = Schema.Union([
 ])
 export type NotificationEvent = typeof NotificationEvent.Type
 
-export const NotificationQuestionAsked = Schema.Struct({
-	type: Schema.Literal('question.v2.asked'),
-	data: Schema.Struct({ sessionID: Schema.NonEmptyString }),
+export const NotificationFormCreated = Schema.Struct({
+	type: Schema.Literal('form.created'),
+	data: Schema.Struct({
+		form: Schema.Struct({ sessionID: Schema.NonEmptyString }),
+	}),
 })
 
 export const NotificationPermissionAsked = Schema.Struct({
-	type: Schema.Literal('permission.v2.asked'),
+	type: Schema.Literal('permission.asked'),
 	data: Schema.Struct({ sessionID: Schema.NonEmptyString }),
 })
 
@@ -28,14 +30,14 @@ export const NotificationExecutionTerminal = Schema.Struct({
 
 export const NotificationOpenCodeEvent = Schema.Union([
 	NotificationPermissionAsked,
-	NotificationQuestionAsked,
+	NotificationFormCreated,
 	NotificationExecutionTerminal,
 ])
 export type NotificationOpenCodeEvent = typeof NotificationOpenCodeEvent.Type
 
 export const NotificationEventEnvelope = Schema.Struct({ type: Schema.String })
 
-export class NotificationSessionLookupError extends Schema.TaggedErrorClass<NotificationSessionLookupError>()(
+export class NotificationSessionLookupError extends Schema.TaggedError<NotificationSessionLookupError>()(
 	'NotificationSessionLookupError',
 	{ message: Schema.String },
 ) {}

@@ -1,4 +1,4 @@
-import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
+import { Tool } from '@opencode-ai/schema/tool'
 import { Effect, Option, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { limitlessTools, registerLimitlessTools, resolvePluginConfigs } from '../index'
@@ -17,7 +17,7 @@ import { LspImplementationInput } from '../tools/lsp/implementation'
 import { LspReferencesInput } from '../tools/lsp/references'
 import { LspRenameInput } from '../tools/lsp/rename'
 import { LspSymbolsInput } from '../tools/lsp/symbols'
-import { testToolContext, testToolExecution, testToolExecutor } from './execution'
+import { settleTestTool, testToolExecution, testToolExecutor } from './execution'
 
 const contracts = [
 	{ name: 'artifact_create', input: ArtifactCreateInput, valid: { slug: 'brief' } },
@@ -105,8 +105,8 @@ describe('OpenCode 2 tool registrations', () => {
 
 		registerLimitlessTools(
 			{
-				add: (name, _tool, options) => {
-					registrations.push({ name, codemode: options?.codemode })
+				add: (tool) => {
+					registrations.push({ name: tool.name, codemode: tool.options?.codemode })
 				},
 			},
 			tools,
@@ -125,7 +125,7 @@ describe('OpenCode 2 tool registrations', () => {
 		)
 		const execution = testToolExecution('/project')
 		const calls: Array<string> = []
-		const boundaryFailure = new Tool.Failure({ message: 'session boundary reached' })
+		const boundaryFailure = new Tool.Error({ message: 'session boundary reached' })
 		const execute = makeToolExecutor(
 			(sessionID) =>
 				Effect.sync(() => calls.push(sessionID)).pipe(Effect.andThen(Effect.fail(boundaryFailure))),
@@ -135,11 +135,7 @@ describe('OpenCode 2 tool registrations', () => {
 
 		for (const contract of contracts) {
 			const failure = await Effect.runPromise(
-				Tool.settle(
-					tools[contract.name],
-					{ input: contract.valid },
-					testToolContext(execution),
-				).pipe(Effect.flip),
+				settleTestTool(tools[contract.name], contract.valid, execution).pipe(Effect.flip),
 			)
 			expect(failure, contract.name).toBe(boundaryFailure)
 		}

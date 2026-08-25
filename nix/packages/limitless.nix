@@ -20,6 +20,7 @@ let
 
     buildPhase = ''
       export HOME=$TMPDIR
+      cp -r patches packages/limitless/patches
       bun install --cwd packages/limitless --no-progress --frozen-lockfile --ignore-scripts --production --omit optional
     '';
 
@@ -29,7 +30,7 @@ let
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
     '';
 
-    outputHash = "sha256-/cOT1T5SwitiZyhOReqH8Tn1Fx5872m4BE2lBbQnejY=";
+    outputHash = "sha256-8IPGr2Lq2sKM7SUjOvsEMvaq7LGPCtuDQnq3eB22nck=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -54,6 +55,12 @@ pkgs.stdenvNoCC.mkDerivation {
       --format=esm \
       --packages=bundle \
       --outfile=dist/limitless.js
+
+    bun build packages/limitless/integrations/slack/image-worker.ts \
+      --target=node \
+      --format=esm \
+      --packages=bundle \
+      --outfile=dist/slack-image-worker.mjs
   '';
 
   installPhase = ''
@@ -63,12 +70,14 @@ pkgs.stdenvNoCC.mkDerivation {
       --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git" \
       --replace-fail "@TYPST_BIN@" "${pkgs.typst}/bin/typst"
 
+    cp ${bunDeps}/packages/limitless/node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "$out/"
+    cp dist/slack-image-worker.mjs "$out/"
     cp -r templates "$out/templates"
     cp -r frameworks "$out/frameworks"
   '';
 
   meta = with pkgs.lib; {
-    description = "Effect-native OpenCode 2 plugin that adds local code-intelligence tools";
+    description = "Effect-native OpenCode 2 plugin that adds local code-intelligence tools and integrations";
     platforms = platforms.all;
   };
 }

@@ -20,21 +20,22 @@ export const createNotificationRunner = Effect.fn('createNotificationRunner')(fu
 		event: NotificationOpenCodeEvent,
 		lookupSession: NotificationSessionLookup,
 	) {
-		if (event.type === 'permission.v2.asked') {
+		if (event.type === 'permission.asked') {
 			yield* runNotificationCommand(config, 'permission')
 			return
 		}
-		if (event.type === 'question.v2.asked') {
+		if (event.type === 'form.created') {
 			yield* runNotificationCommand(config, 'question')
 			return
 		}
 		const session = yield* lookupSession(event.data.sessionID).pipe(
 			Effect.catch((error) =>
 				Effect.logError(`[limitless] notification session lookup failed: ${error.message}`).pipe(
-					Effect.as<NotificationSession>({}),
+					Effect.as<NotificationSession | undefined>(undefined),
 				),
 			),
 		)
+		if (session === undefined) return
 		if (!config.includeChildSessions && session.parentID !== undefined) return
 		yield* runNotificationCommand(config, 'complete')
 	})
@@ -47,8 +48,8 @@ export const createNotificationRunner = Effect.fn('createNotificationRunner')(fu
 			if (
 				Option.isNone(envelope) ||
 				![
-					'permission.v2.asked',
-					'question.v2.asked',
+					'permission.asked',
+					'form.created',
 					'session.execution.succeeded',
 					'session.execution.failed',
 					'session.execution.interrupted',

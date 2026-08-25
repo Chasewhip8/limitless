@@ -1,4 +1,4 @@
-import type { CatalogDraft } from '@opencode-ai/plugin/v2/effect/catalog'
+import type { CatalogDraft } from '@opencode-ai/plugin/effect/catalog'
 import { Effect, Schema } from 'effect'
 import { TrimmedNonEmptyString } from '../core/command'
 import { schemaErrorMessage } from '../lib/guards'
@@ -18,7 +18,7 @@ export const ProviderPolicyConfig = Schema.Struct({
 })
 export type ProviderPolicyConfig = typeof ProviderPolicyConfig.Type
 
-export class ProviderPolicyConfigError extends Schema.TaggedErrorClass<ProviderPolicyConfigError>()(
+export class ProviderPolicyConfigError extends Schema.TaggedError<ProviderPolicyConfigError>()(
 	'ProviderPolicyConfigError',
 	{ message: Schema.String },
 ) {}
@@ -38,9 +38,6 @@ export const normalizeProviderPolicyConfig = Effect.fn('normalizeProviderPolicyC
 
 export function applyProviderPolicy(catalog: CatalogDraft, config: ProviderPolicyConfig): void {
 	for (const providerID of config.disabled) {
-		if (!catalog.provider.get(providerID)) continue
-		catalog.provider.update(providerID, (provider) => {
-			provider.disabled = true
-		})
+		catalog.provider.remove(providerID)
 	}
 }

@@ -9,7 +9,6 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    llm-agents.url = "github:numtide/llm-agents.nix";
   };
 
   outputs =
@@ -17,13 +16,15 @@
       self,
       nixpkgs,
       flake-utils,
-      llm-agents,
     }:
     let
       eachSystem = flake-utils.lib.eachDefaultSystem (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfreePredicate = pkg: (pkg.pname or "") == "sentry";
+          };
           effectSolutionsPackage = import ./nix/packages/effect-solutions.nix {
             inherit pkgs self system;
           };
@@ -31,19 +32,20 @@
             inherit pkgs self;
           };
           anthropicAuthPackage = import ./nix/packages/anthropic-auth.nix {
+            inherit pkgs;
+          };
+          sentryPackage = import ./nix/packages/sentry.nix {
             inherit pkgs self;
           };
           agentBrowserPackage = import ./nix/packages/agent-browser.nix {
             inherit pkgs self system;
           };
-          opencodePackage = llm-agents.packages.${system}.opencode2;
+          opencodePackage = import ./nix/packages/opencode2.nix { inherit pkgs; };
           packageManifest = builtins.fromJSON (builtins.readFile ./packages/limitless/package.json);
-          anthropicAuthManifest = builtins.fromJSON (
-            builtins.readFile ./packages/anthropic-auth/package.json
-          );
           pluginSdkVersion = packageManifest.dependencies."@opencode-ai/plugin";
           effectVersion = packageManifest.dependencies.effect;
-          pinnedOpencodeVersion = "0.0.0-next-16040";
+          pinnedOpencodeVersion = "0.0.0-beta-18050";
+          pinnedAnthropicAuthRev = "f043583c24085c60fc7f95059f2d6f36f44f4a8e";
 
           homeOptionStubs = {
             options = {
@@ -199,7 +201,7 @@
             if (!response.ok) throw new Error("Could not list OpenCode2 plugins")
             const payload = await response.json()
             const expected = [
-              { id: "limitless.anthropic-auth", source: "file://${anthropicAuthPackage}/anthropic-auth.js" },
+              { id: "ex-machina.anthropic-auth", source: "file://${anthropicAuthPackage}/anthropic-auth.js" },
               { id: "limitless", source: "file://${limitlessPackage}/limitless.js" },
             ]
             const missing = expected.filter(({ id }) => !payload.data?.some((plugin) => plugin.id === id))
@@ -212,19 +214,44 @@
               )
             }
 
+            const agents = new URL("/api/agent", service.url)
+            agents.searchParams.set("location[directory]", directory)
+            const agentResponse = await fetch(agents, { headers, signal })
+            if (!agentResponse.ok) throw new Error("Could not list OpenCode2 agents")
+            const agentPayload = await agentResponse.json()
+            const expectedAgents = [
+              { id: "limitless", providerID: "openai", modelID: "gpt-5.6-sol-fast-long", variant: "max" },
+              { id: "gary", providerID: "openai", modelID: "gpt-5.6-sol-fast-long", variant: "xhigh" },
+              { id: "oracle", providerID: "anthropic", modelID: "claude-fable-5", variant: "high" },
+              { id: "research", providerID: "openai", modelID: "gpt-5.6-sol-fast", variant: "medium" },
+              { id: "review", providerID: "openai", modelID: "gpt-5.6-sol-fast", variant: "xhigh" },
+              { id: "worker", providerID: "openai", modelID: "gpt-5.6-sol-fast", variant: "xhigh" },
+            ]
+            const invalidAgents = expectedAgents.filter((expectedAgent) => {
+              const agent = agentPayload.data?.find((candidate) => candidate.id === expectedAgent.id)
+              return (
+                agent === undefined ||
+                agent.model?.providerID !== expectedAgent.providerID ||
+                agent.model?.id !== expectedAgent.modelID ||
+                agent.model?.variant !== expectedAgent.variant
+              )
+            })
+            if (invalidAgents.length > 0) {
+              throw new Error(
+                "OpenCode2 agent loading drifted for " +
+                  invalidAgents.map((agent) => agent.id).join(", ") +
+                  ": " +
+                  JSON.stringify(agentPayload),
+              )
+            }
+
             const models = new URL("/api/model", service.url)
             models.searchParams.set("location[directory]", directory)
             const modelResponse = await fetch(models, { headers, signal })
             if (!modelResponse.ok) throw new Error("Could not list OpenCode2 models")
             const modelPayload = await modelResponse.json()
             const anthropic = modelPayload.data?.filter((model) => model.providerID === "anthropic") ?? []
-            const expectedPackage = expected[0].source
-            if (
-              anthropic.length === 0 ||
-              anthropic.some((model) => !model.package?.startsWith(expectedPackage))
-            ) {
-              throw new Error("Anthropic native provider routing drifted: " + JSON.stringify(anthropic))
-            }
+            if (anthropic.length === 0) throw new Error("Anthropic models are unavailable")
             const vertex = modelPayload.data?.filter((model) =>
               ["google-vertex", "google-vertex-anthropic"].includes(model.providerID),
             ) ?? []
@@ -335,13 +362,12 @@
                 pluginSdkVersion == pinnedOpencodeVersion
               ) "Limitless plugin SDK must remain pinned to ${pinnedOpencodeVersion}";
               assert pkgs.lib.assertMsg (
-                effectVersion == "4.0.0-beta.98"
-              ) "Limitless Effect must remain pinned to the plugin SDK dependency 4.0.0-beta.98";
+                effectVersion == "4.0.0-rc.111"
+              ) "Limitless Effect must remain pinned to the plugin SDK dependency 4.0.0-rc.111";
               assert pkgs.lib.assertMsg (
-                anthropicAuthManifest.dependencies."@opencode-ai/plugin" == pinnedOpencodeVersion
-                && anthropicAuthManifest.dependencies."@opencode-ai/ai" == pinnedOpencodeVersion
-                && anthropicAuthManifest.dependencies.effect == effectVersion
-              ) "Anthropic auth runtime dependencies must remain aligned with OpenCode2";
+                anthropicAuthPackage.rev == pinnedAnthropicAuthRev
+                && anthropicAuthPackage.upstreamPluginSdkVersion == "0.0.0-next-17444"
+              ) "Anthropic auth must remain pinned to the reviewed pull request 211 commit";
               assert pkgs.lib.assertMsg (
                 opencodePackage.version == pluginSdkVersion
               ) "OpenCode2 runtime ${opencodePackage.version} does not match plugin SDK ${pluginSdkVersion}";
@@ -363,6 +389,7 @@
               export XDG_STATE_HOME="$HOME/.local/state"
               mkdir -p "$HOME/.config/opencode"
               ln -s ${enabledConfigFile} "$HOME/.config/opencode/opencode.json"
+              ln -s ${opencodeAgentsPackage} "$HOME/.config/opencode/agents"
               export OPENCODE_CONFIG="$HOME/.config/opencode/opencode.json"
 
               ${opencodePackage}/bin/opencode2 service start >/dev/null
@@ -394,6 +421,7 @@
             skills = skillsPackage;
             "anthropic-auth" = anthropicAuthPackage;
             "effect-solutions" = effectSolutionsPackage;
+            sentry = sentryPackage;
             limitless = limitlessPackage;
             "agent-browser" = agentBrowserPackage;
             "opencode-agents" = opencodeAgentsPackage;
@@ -432,6 +460,7 @@
         opencode-limitless = self.packages.${final.stdenv.hostPlatform.system}.limitless;
         agent-browser = self.packages.${final.stdenv.hostPlatform.system}."agent-browser";
         effect-solutions = self.packages.${final.stdenv.hostPlatform.system}."effect-solutions";
+        sentry = self.packages.${final.stdenv.hostPlatform.system}.sentry;
       };
     };
 }

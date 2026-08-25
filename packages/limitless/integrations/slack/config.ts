@@ -1,4 +1,3 @@
-import type { PluginOptions } from '@opencode-ai/plugin'
 import { Effect, Schema } from 'effect'
 import { schemaErrorMessage } from '../../lib/guards'
 
@@ -40,10 +39,9 @@ export const SlackConfig = SlackConfigFields.check(
 )
 export type SlackConfig = typeof SlackConfig.Type
 
-export class SlackConfigError extends Schema.TaggedErrorClass<SlackConfigError>()(
-	'SlackConfigError',
-	{ message: Schema.String },
-) {}
+export class SlackConfigError extends Schema.TaggedError<SlackConfigError>()('SlackConfigError', {
+	message: Schema.String,
+}) {}
 
 export const DEFAULT_SLACK_AGENT = 'gary'
 export const DEFAULT_SLACK_BOT_TOKEN_ENV = 'SLACK_BOT_TOKEN'
@@ -72,9 +70,7 @@ export const DISABLED_SLACK_CONFIG = SlackConfig.make({
 	appTokenEnv: DEFAULT_SLACK_APP_TOKEN_ENV,
 })
 
-export const normalizeSlackConfig = Effect.fn('normalizeSlackConfig')(function* (
-	options: PluginOptions | undefined,
-) {
+export const normalizeSlackConfig = Effect.fn('normalizeSlackConfig')(function* (options: unknown) {
 	if (options === undefined) return DISABLED_SLACK_CONFIG
 	const decoded = yield* Schema.decodeUnknownEffect(SlackPluginOptions)(options).pipe(
 		Effect.mapError((error) => new SlackConfigError({ message: schemaErrorMessage(error) })),

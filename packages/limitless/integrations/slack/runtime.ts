@@ -1,10 +1,11 @@
 import { realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { PluginInput } from '@opencode-ai/plugin'
+import type { Plugin } from '@opencode-ai/plugin/effect'
 import { App } from '@slack/bolt'
 import { WebClient } from '@slack/web-api'
 import { type Deferred, Effect, Semaphore } from 'effect'
 import type { SlackConfig } from './config'
+import type { SlackAssistantResult } from './schema'
 
 export type SlackQueuedFile = {
 	readonly path: string
@@ -68,8 +69,13 @@ export type SlackActiveTurn = {
 	generation: number
 	busyVersion: number
 	inFlightAdmissions: number
+	readonly admissionSettlers: Set<Deferred.Deferred<void>>
 	readonly deliveredAssistantIDs: Set<string>
 	readonly assistantChunkProgress: Map<string, number>
+	readonly assistantText: Map<string, Map<number, string>>
+	readonly assistantParents: Map<string, string | null>
+	readonly completedAssistantResults: Map<string, SlackAssistantResult>
+	activeInputID: string | null
 	readonly queuedFiles: Map<string, SlackQueuedFile>
 	queuedFileBytes: number
 	cancelled: boolean
@@ -148,7 +154,9 @@ export const makeSlackRuntimeState = Effect.sync(() => {
 	return state
 })
 
-export type SlackPluginContext = Pick<PluginInput, 'client' | 'directory'>
+export type SlackPluginContext = {
+	readonly session: Pick<Plugin.Context['session'], 'create' | 'prompt' | 'interrupt' | 'wait'>
+}
 export type SlackRunnerConfig = {
 	readonly config: SlackConfig
 	readonly plugin: SlackPluginContext

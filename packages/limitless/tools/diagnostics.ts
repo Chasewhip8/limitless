@@ -1,11 +1,10 @@
 import path from 'node:path'
-import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Effect, Schema } from 'effect'
 import { CommandResult, runCommand } from '../core/command'
 import { ToolExecutionContext } from '../core/execution'
 import { findExecutable, findUp } from '../core/filesystem'
 import { workspacePath, workspaceRoot } from '../core/paths'
-import { encodeToolFailure, type ToolExecutor, toolModelOutput } from '../plugin/tool-boundary'
+import { defineLimitlessTool, encodeToolFailure, type ToolExecutor } from '../plugin/tool-boundary'
 
 export const DiagnosticsInput = Schema.Struct({
 	workspace: Schema.optional(Schema.String),
@@ -125,11 +124,11 @@ export const lspDiagnostics = Effect.fn(function* lspDiagnostics(
 
 export function diagnosticsTools(executeTool: ToolExecutor) {
 	return {
-		lsp_diagnostics: Tool.make({
+		lsp_diagnostics: defineLimitlessTool({
+			name: 'lsp_diagnostics',
 			description: 'Run safe local diagnostics for TS/JS projects.',
 			input: DiagnosticsInput,
 			output: DiagnosticsResult,
-			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool('lsp_diagnostics', args, context, lspDiagnostics, encodeToolFailure),
 		}),

@@ -1,6 +1,5 @@
 import { realpath } from 'node:fs/promises'
 import path from 'node:path'
-import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Effect, Schema } from 'effect'
 import {
 	CommandResult,
@@ -12,7 +11,7 @@ import { isMissingPath, toolOperationError } from '../core/errors'
 import { ToolExecutionContext } from '../core/execution'
 import { pathsOverlap, workspaceRoot } from '../core/paths'
 import { managedReposRoot } from '../core/storage'
-import { encodeToolFailure, type ToolExecutor, toolModelOutput } from '../plugin/tool-boundary'
+import { defineLimitlessTool, encodeToolFailure, type ToolExecutor } from '../plugin/tool-boundary'
 
 export const AstGrepSearchInput = Schema.Struct({
 	pattern: Schema.NonEmptyString,
@@ -162,19 +161,19 @@ export const astGrepReplace = Effect.fn(function* astGrepReplace(
 
 export function astGrepTools(executeTool: ToolExecutor) {
 	return {
-		ast_grep_search: Tool.make({
+		ast_grep_search: defineLimitlessTool({
+			name: 'ast_grep_search',
 			description: 'Search code with ast-grep using the packaged binary.',
 			input: AstGrepSearchInput,
 			output: AstGrepSearchResult,
-			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool('ast_grep_search', args, context, astGrepSearch, encodeToolFailure),
 		}),
-		ast_grep_replace: Tool.make({
+		ast_grep_replace: defineLimitlessTool({
+			name: 'ast_grep_replace',
 			description: 'Rewrite code with ast-grep. Dry-run is enabled by default.',
 			input: AstGrepReplaceInput,
 			output: AstGrepReplaceResult,
-			toModelOutput: toolModelOutput,
 			execute: (args, context) =>
 				executeTool('ast_grep_replace', args, context, astGrepReplace, encodeToolFailure),
 		}),

@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 
-export class SlackIntegrationError extends Schema.TaggedErrorClass<SlackIntegrationError>()(
+export class SlackIntegrationError extends Schema.TaggedError<SlackIntegrationError>()(
 	'SlackIntegrationError',
 	{
 		operation: Schema.String,

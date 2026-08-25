@@ -12,6 +12,7 @@ export const NotificationEventOptions = Schema.Struct({
 })
 export const NotificationOptionsBlock = Schema.Struct({
 	enable: Schema.optional(Schema.Boolean),
+	enabled: Schema.optional(Schema.Boolean),
 	command: Schema.optional(NotificationCommand),
 	events: Schema.optional(NotificationEventOptions),
 	includeChildSessions: Schema.optional(Schema.Boolean),
@@ -41,7 +42,7 @@ export const NotificationConfig = NotificationConfigFields.check(
 	),
 )
 export type NotificationConfig = typeof NotificationConfig.Type
-export class NotificationConfigError extends Schema.TaggedErrorClass<NotificationConfigError>()(
+export class NotificationConfigError extends Schema.TaggedError<NotificationConfigError>()(
 	'NotificationConfigError',
 	{ message: Schema.String },
 ) {}
@@ -71,7 +72,7 @@ export const normalizeNotificationConfig = Effect.fn('normalizeNotificationConfi
 	const notifications = decoded.notifications
 	const command = notifications.command ?? null
 	return NotificationConfig.make({
-		enabled: (notifications.enable ?? false) && command !== null,
+		enabled: (notifications.enable ?? notifications.enabled ?? false) && command !== null,
 		command,
 		events: NotificationEventSettings.make({
 			complete: notifications.events?.complete ?? defaultEvents.complete,

@@ -2,17 +2,33 @@
 description: Hidden primary agent for repository work initiated through the Limitless Slack bridge.
 mode: primary
 hidden: true
-model: openai/gpt-5.6-sol-fast-long
-reasoningEffort: xhigh
+model: openai/gpt-5.6-sol-fast-long#xhigh
 color: "#F8BBD0"
-permission:
-    slack_attach_file: allow
-    slack_status: allow
-    task:
-        oracle: allow
-        research: allow
-        review: deny
-        worker: allow
+permissions:
+    - action: question
+      resource: "*"
+      effect: deny
+    - action: slack_attach_file
+      resource: "*"
+      effect: allow
+    - action: slack_status
+      resource: "*"
+      effect: allow
+    - action: subagent
+      resource: "*"
+      effect: deny
+    - action: subagent
+      resource: oracle
+      effect: allow
+    - action: subagent
+      resource: research
+      effect: allow
+    - action: subagent
+      resource: review
+      effect: deny
+    - action: subagent
+      resource: worker
+      effect: allow
 ---
 
 # Gary

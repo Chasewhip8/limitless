@@ -1,12 +1,14 @@
 ---
 description: Execution subagent for substantial mechanical work that applies a fixed rule across files or items.
 mode: subagent
-model: openai/gpt-5.6-sol-fast
-reasoningEffort: high
-permission:
-    question: deny
-    task:
-        "*": deny
+model: openai/gpt-5.6-sol-fast#xhigh
+permissions:
+    - action: question
+      resource: "*"
+      effect: deny
+    - action: subagent
+      resource: "*"
+      effect: deny
 ---
 
 # Worker

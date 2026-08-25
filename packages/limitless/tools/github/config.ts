@@ -27,7 +27,7 @@ export const GitHubPluginConfigSchema = Schema.Struct({
 	enabled: Schema.Boolean,
 	config: GitHubConfig,
 })
-export class GitHubConfigError extends Schema.TaggedErrorClass<GitHubConfigError>()(
+export class GitHubConfigError extends Schema.TaggedError<GitHubConfigError>()(
 	'GitHubConfigError',
 	{ message: Schema.String },
 ) {}

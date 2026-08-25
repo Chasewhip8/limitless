@@ -1,5 +1,8 @@
 import { open } from 'node:fs/promises'
 import path from 'node:path'
+import { Agent } from '@opencode-ai/schema/agent'
+import { Session } from '@opencode-ai/schema/session'
+import { SessionMessage } from '@opencode-ai/schema/session-message'
 import { Deferred, Effect, Option, Schema, Semaphore } from 'effect'
 import { describeUnknown, schemaErrorMessage } from '../../lib/guards'
 import {
@@ -152,17 +155,16 @@ function duringPending<A, E, R>(
 	)
 }
 
-function openCodeParts(parts: ReadonlyArray<SlackPromptPart>) {
-	return parts.map((part) =>
-		part.type === 'text'
-			? { type: 'text' as const, text: part.text }
-			: {
-					type: 'file' as const,
-					mime: part.mime,
-					filename: part.filename,
-					url: part.url,
-				},
-	)
+function openCodePrompt(parts: ReadonlyArray<SlackPromptPart>) {
+	return {
+		text: parts
+			.filter((part) => part.type === 'text')
+			.map((part) => part.text)
+			.join('\n\n'),
+		files: parts
+			.filter((part) => part.type === 'file')
+			.map((part) => ({ uri: part.url, name: part.filename })),
+	}
 }
 
 function cleanupTurn(state: SlackRuntimeState, turn: SlackActiveTurn): void {
@@ -226,60 +228,60 @@ const updateSlackMessage = Effect.fn('updateSlackMessage')(function* (
 
 const createOpenCodeSession = Effect.fn('createOpenCodeSession')(function* (
 	context: SlackPluginContext,
+	config: SlackConfig,
 	channel: string,
 	threadTs: string,
-	signal: AbortSignal,
 ) {
-	const response = yield* Effect.tryPromise({
-		try: () =>
-			context.client.session.create({
-				body: { title: `Slack ${channel} thread ${threadTs}` },
-				signal,
-				throwOnError: true,
-			}),
-		catch: (error) => integrationFailure('OpenCode session creation', error),
-	})
-	return response.data.id
+	const agent = yield* Schema.decodeUnknownEffect(Agent.ID)(config.agent).pipe(
+		Effect.mapError((error) => integrationFailure('OpenCode session creation', error)),
+	)
+	const session = yield* context.session
+		.create({
+			title: `Slack ${channel} thread ${threadTs}`,
+			agent,
+		})
+		.pipe(Effect.mapError((error) => integrationFailure('OpenCode session creation', error)))
+	return session.id
 })
 
 const startOpenCodeTurn = Effect.fn('startOpenCodeTurn')(function* (
-	config: SlackConfig,
 	context: SlackPluginContext,
 	sessionID: string,
 	messageID: string,
 	parts: ReadonlyArray<SlackPromptPart>,
-	signal?: AbortSignal,
 ) {
-	yield* Effect.tryPromise({
-		try: () =>
-			context.client.session.promptAsync({
-				path: { id: sessionID },
-				body: {
-					messageID,
-					agent: config.agent,
-					tools: { question: false, slack_attach_file: true, slack_status: true },
-					parts: openCodeParts(parts),
-				},
-				...(signal === undefined ? {} : { signal }),
-				throwOnError: true,
-			}),
-		catch: (error) => integrationFailure('OpenCode turn start', error),
-	})
+	const prompt = openCodePrompt(parts)
+	const decodedSessionID = yield* Schema.decodeUnknownEffect(Session.ID)(sessionID).pipe(
+		Effect.mapError((error) => integrationFailure('OpenCode turn start', error)),
+	)
+	const decodedMessageID = yield* Schema.decodeUnknownEffect(SessionMessage.ID)(messageID).pipe(
+		Effect.mapError((error) => integrationFailure('OpenCode turn start', error)),
+	)
+	yield* context.session
+		.prompt({
+			sessionID: decodedSessionID,
+			id: decodedMessageID,
+			text: prompt.text,
+			files: prompt.files,
+		})
+		.pipe(Effect.mapError((error) => integrationFailure('OpenCode turn start', error)))
 })
 
 const startTrackedOpenCodeTurn = Effect.fn('startTrackedOpenCodeTurn')(function* (
 	turn: SlackActiveTurn,
-	config: SlackConfig,
 	context: SlackPluginContext,
 	messageID: string,
 	parts: ReadonlyArray<SlackPromptPart>,
 ) {
+	const settled = yield* Deferred.make<void>()
 	turn.inFlightAdmissions += 1
-	yield* startOpenCodeTurn(config, context, turn.rootSessionID, messageID, parts).pipe(
+	turn.admissionSettlers.add(settled)
+	yield* startOpenCodeTurn(context, turn.rootSessionID, messageID, parts).pipe(
 		Effect.ensuring(
 			Effect.sync(() => {
 				turn.inFlightAdmissions -= 1
-			}),
+				turn.admissionSettlers.delete(settled)
+			}).pipe(Effect.andThen(Deferred.succeed(settled, undefined)), Effect.asVoid),
 		),
 	)
 })
@@ -288,67 +290,23 @@ const abortOpenCodeTurn = Effect.fn('abortOpenCodeTurn')(function* (
 	context: SlackPluginContext,
 	sessionID: string,
 ) {
-	const response = yield* Effect.tryPromise({
-		try: () => context.client.session.abort({ path: { id: sessionID }, throwOnError: true }),
-		catch: (error) => integrationFailure('OpenCode turn cancellation', error),
-	})
-	return response.data
+	const decodedSessionID = yield* Schema.decodeUnknownEffect(Session.ID)(sessionID).pipe(
+		Effect.mapError((error) => integrationFailure('OpenCode turn cancellation', error)),
+	)
+	yield* context.session
+		.interrupt({ sessionID: decodedSessionID })
+		.pipe(Effect.mapError((error) => integrationFailure('OpenCode turn cancellation', error)))
+	yield* context.session
+		.wait({ sessionID: decodedSessionID })
+		.pipe(Effect.mapError((error) => integrationFailure('OpenCode turn cancellation', error)))
+	return true
 })
 
-const rejectOpenCodePermission = Effect.fn('rejectOpenCodePermission')(function* (
-	context: SlackPluginContext,
-	sessionID: string,
-	permissionID: string,
-) {
-	yield* Effect.tryPromise({
-		try: () =>
-			context.client.postSessionIdPermissionsPermissionId({
-				path: { id: sessionID, permissionID },
-				body: { response: 'reject' },
-				throwOnError: true,
-			}),
-		catch: (error) => integrationFailure('OpenCode permission rejection', error),
-	})
-})
-
-const completedAssistantResults = Effect.fn('completedAssistantResults')(function* (
-	context: SlackPluginContext,
-	turn: SlackActiveTurn,
-) {
-	if (turn.messageID === null) return [] as ReadonlyArray<SlackAssistantResult>
-	const response = yield* Effect.tryPromise({
-		try: () =>
-			context.client.session.messages({
-				path: { id: turn.rootSessionID },
-				throwOnError: true,
-			}),
-		catch: (error) => integrationFailure('OpenCode response retrieval', error),
-	})
-	const results: Array<SlackAssistantResult> = []
-	for (const message of response.data) {
-		if (message.info.role !== 'assistant') continue
-		if (message.info.id <= turn.messageID) continue
-		if (message.info.summary === true || message.info.time.completed === undefined) continue
-		if (
-			message.info.error === undefined &&
-			(message.info.finish === undefined ||
-				message.info.finish === 'tool-calls' ||
-				message.info.finish === 'unknown')
-		)
-			continue
-		const textParts: Array<string> = []
-		for (const part of message.parts)
-			if (part.type === 'text' && part.ignored !== true) textParts.push(part.text)
-		const text = textParts.join('\n').trim()
-		results.push({
-			id: message.info.id,
-			failed: message.info.error !== undefined,
-			parentID: message.info.parentID ?? null,
-			text,
-		})
-	}
-	return results.sort((left, right) => left.id.localeCompare(right.id))
-})
+function completedAssistantResults(turn: SlackActiveTurn) {
+	return [...turn.completedAssistantResults.values()].sort((left, right) =>
+		left.id.localeCompare(right.id),
+	)
+}
 
 function quotedTraceStatus(status: string): string {
 	return status
@@ -402,11 +360,10 @@ const publishQueuedFiles = Effect.fn('publishQueuedFiles')(function* (
 })
 
 const drainAssistantResults = Effect.fn('drainAssistantResults')(function* (
-	context: SlackPluginContext,
 	state: SlackRuntimeState,
 	turn: SlackActiveTurn,
 ) {
-	const results = yield* completedAssistantResults(context, turn)
+	const results = completedAssistantResults(turn)
 	for (const result of results) {
 		if (state.activeTurns.get(turn.rootSessionID) !== turn || turn.cancelled || turn.finishing)
 			return results
@@ -490,6 +447,7 @@ const abortStartedTurn = Effect.fn('abortStartedTurn')(function* (
 ) {
 	if (turn.launchState === 'not-started' || turn.abortSent) return false
 	turn.abortSent = true
+	yield* Effect.forEach([...turn.admissionSettlers], Deferred.await, { discard: true })
 	const aborted = yield* abortOpenCodeTurn(runner.plugin, turn.rootSessionID).pipe(
 		Effect.catch((error) =>
 			Effect.logError(`[limitless] Slack cancellation failed: ${error.message}`).pipe(
@@ -498,6 +456,12 @@ const abortStartedTurn = Effect.fn('abortStartedTurn')(function* (
 		),
 	)
 	if (!aborted) turn.abortSent = false
+	else if (
+		turn.cancelled &&
+		turn.inFlightAdmissions === 0 &&
+		runner.state.activeTurns.get(turn.rootSessionID) === turn
+	)
+		yield* settleCancelledTurn(runner.state, turn)
 	return aborted
 })
 
@@ -544,28 +508,28 @@ const processSlackMention = Effect.fn('processSlackMention')(function* (
 				)
 	if (pending.cancelled) return null
 	if (thread === undefined) {
-		const sessionID = yield* createOpenCodeSession(
-			plugin,
-			input.event.channel,
-			threadTs,
-			pending.abort.signal,
-		).pipe(
-			Effect.catch((error) =>
-				pending.cancelled
-					? Effect.void
-					: postSlackMessage(
-							state,
-							input.event.channel,
-							threadTs,
-							'OpenCode could not create a session for this thread. Check the Limitless service logs.',
-							true,
-						).pipe(
-							Effect.catch(() => Effect.void),
-							Effect.andThen(Effect.logError(`[limitless] ${error.operation}: ${error.message}`)),
-							Effect.as(undefined),
-						),
+		const created = yield* duringPending(
+			pending,
+			createOpenCodeSession(plugin, config, input.event.channel, threadTs).pipe(
+				Effect.catch((error) =>
+					pending.cancelled
+						? Effect.void
+						: postSlackMessage(
+								state,
+								input.event.channel,
+								threadTs,
+								'OpenCode could not create a session for this thread. Check the Limitless service logs.',
+								true,
+							).pipe(
+								Effect.catch(() => Effect.void),
+								Effect.andThen(Effect.logError(`[limitless] ${error.operation}: ${error.message}`)),
+								Effect.as(undefined),
+							),
+				),
 			),
 		)
+		if (Option.isNone(created)) return null
+		const sessionID = created.value
 		if (sessionID === undefined) return null
 		thread = { sessionID, lastImportedTs: undefined, lastMessageID: undefined }
 		state.threads.set(threadKey, thread)
@@ -592,8 +556,13 @@ const processSlackMention = Effect.fn('processSlackMention')(function* (
 			generation: 0,
 			busyVersion: 0,
 			inFlightAdmissions: 0,
+			admissionSettlers: new Set(),
 			deliveredAssistantIDs: new Set(),
 			assistantChunkProgress: new Map(),
+			assistantText: new Map(),
+			assistantParents: new Map(),
+			completedAssistantResults: new Map(),
+			activeInputID: null,
 			queuedFiles: new Map(),
 			queuedFileBytes: 0,
 			cancelled: pending.cancelled,
@@ -691,7 +660,11 @@ const processSlackMention = Effect.fn('processSlackMention')(function* (
 			turn.messageID = messageID
 			turn.launchState = 'starting'
 		}
-		yield* startTrackedOpenCodeTurn(turn, config, plugin, messageID, promptParts)
+		const started = yield* duringPending(
+			pending,
+			startTrackedOpenCodeTurn(turn, plugin, messageID, promptParts),
+		)
+		if (Option.isNone(started)) return
 		turn.latestMessageID = messageID
 		turn.generation += 1
 		if (!isNewTurn) turn.steered = true
@@ -742,6 +715,7 @@ const cancelSlackTurn = Effect.fn('cancelSlackTurn')(function* (
 	const thread = runner.state.threads.get(threadKey)
 	const turn = thread === undefined ? undefined : runner.state.activeTurns.get(thread.sessionID)
 	const pending = runner.state.pendingTurns.get(threadKey)
+	const hadPending = (pending?.size ?? 0) > 0
 	for (const item of pending ?? []) {
 		item.cancelled = true
 		item.abort.abort()
@@ -750,7 +724,7 @@ const cancelSlackTurn = Effect.fn('cancelSlackTurn')(function* (
 	const cancelledThroughTs = runner.state.cancelledThroughTs.get(threadKey)
 	if (cancelledThroughTs === undefined || isAfterSlackTimestamp(input.event.ts, cancelledThroughTs))
 		runner.state.cancelledThroughTs.set(threadKey, input.event.ts)
-	if (turn === undefined && (pending === undefined || pending.size === 0)) {
+	if (turn === undefined && !hadPending) {
 		yield* postSlackMessage(
 			runner.state,
 			input.event.channel,
@@ -812,17 +786,10 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 		if (!config.enabled || options.env[SLACK_SERVICE_ACTIVATION_ENV] !== '1') return
 		if (config.repository === null)
 			return yield* slackIntegrationError('Slack startup', 'Slack repository is not configured')
-		const [configuredDirectory, instanceDirectory] = yield* Effect.all([
-			Effect.tryPromise({
-				try: () => options.resolveDirectory(config.repository as string),
-				catch: (error) => integrationFailure('Slack repository resolution', error),
-			}),
-			Effect.tryPromise({
-				try: () => options.resolveDirectory(plugin.directory),
-				catch: (error) => integrationFailure('OpenCode directory resolution', error),
-			}),
-		])
-		if (configuredDirectory !== instanceDirectory) return
+		const configuredDirectory = yield* Effect.tryPromise({
+			try: () => options.resolveDirectory(config.repository as string),
+			catch: (error) => integrationFailure('Slack repository resolution', error),
+		})
 		if (options.readyFile === null)
 			return yield* slackIntegrationError(
 				'Slack startup',
@@ -985,13 +952,18 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 			Option.isNone(envelope) ||
 			![
 				'session.created',
-				'session.updated',
+				'session.forked',
 				'session.deleted',
-				'session.idle',
-				'session.status',
-				'session.error',
+				'session.inbox.delivered',
+				'session.execution.started',
+				'session.execution.succeeded',
+				'session.execution.failed',
+				'session.execution.interrupted',
+				'session.step.started',
+				'session.step.ended',
+				'session.step.failed',
+				'session.text.ended',
 				'permission.asked',
-				'message.updated',
 			].includes(envelope.value.type)
 		)
 			return
@@ -1004,27 +976,47 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 		)
 		if (decoded === undefined) return
 		switch (decoded.type) {
-			case 'message.updated': {
+			case 'session.text.ended': {
+				const turn = state.activeTurns.get(decoded.data.sessionID)
+				if (turn === undefined || turn.cancelled || turn.finishing) return
+				const text = turn.assistantText.get(decoded.data.assistantMessageID) ?? new Map()
+				text.set(decoded.data.ordinal, decoded.data.text)
+				turn.assistantText.set(decoded.data.assistantMessageID, text)
+				return
+			}
+			case 'session.inbox.delivered': {
+				const turn = state.activeTurns.get(decoded.data.sessionID)
+				if (turn !== undefined) turn.activeInputID = decoded.data.inboxID
+				return
+			}
+			case 'session.step.started': {
+				const turn = state.activeTurns.get(decoded.data.sessionID)
+				if (turn !== undefined)
+					turn.assistantParents.set(decoded.data.assistantMessageID, turn.activeInputID)
+				return
+			}
+			case 'session.step.ended':
+			case 'session.step.failed': {
 				if (
-					decoded.properties.info.role !== 'assistant' ||
-					decoded.properties.info.summary === true ||
-					decoded.properties.info.time.completed === undefined
+					decoded.type === 'session.step.ended' &&
+					(decoded.data.finish === 'tool-calls' || decoded.data.finish === 'unknown')
 				)
 					return
-				const turn = state.activeTurns.get(decoded.properties.info.sessionID)
+				const turn = state.activeTurns.get(decoded.data.sessionID)
 				if (turn === undefined || turn.cancelled || turn.finishing) return
+				const text = [...(turn.assistantText.get(decoded.data.assistantMessageID) ?? new Map())]
+					.sort(([left], [right]) => left - right)
+					.map(([, value]) => value)
+					.join('\n')
+					.trim()
+				turn.completedAssistantResults.set(decoded.data.assistantMessageID, {
+					id: decoded.data.assistantMessageID,
+					failed: decoded.type === 'session.step.failed',
+					parentID: turn.assistantParents.get(decoded.data.assistantMessageID) ?? null,
+					text,
+				})
 				yield* semaphoreForThread(state, turn.threadKey)
-					.withPermits(1)(
-						Effect.gen(function* () {
-							if (
-								state.activeTurns.get(turn.rootSessionID) !== turn ||
-								turn.cancelled ||
-								turn.finishing
-							)
-								return
-							yield* drainAssistantResults(plugin, state, turn)
-						}),
-					)
+					.withPermits(1)(drainAssistantResults(state, turn).pipe(Effect.asVoid))
 					.pipe(
 						Effect.catch((error) =>
 							Effect.logError(
@@ -1035,19 +1027,19 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 				return
 			}
 			case 'session.created':
-			case 'session.updated': {
-				const parent = decoded.properties.info.parentID
+			case 'session.forked': {
+				const parent = decoded.data.parentID
 				if (parent === undefined) return
 				const root = activeRootForSession(state, parent)
-				if (root !== undefined) state.childToRoot.set(decoded.properties.info.id, root)
+				if (root !== undefined) state.childToRoot.set(decoded.data.sessionID, root)
 				return
 			}
 			case 'session.deleted': {
-				state.childToRoot.delete(decoded.properties.info.id)
-				const turn = state.activeTurns.get(decoded.properties.info.id)
+				state.childToRoot.delete(decoded.data.sessionID)
+				const turn = state.activeTurns.get(decoded.data.sessionID)
 				const removeThread = () => {
 					for (const [threadKey, thread] of state.threads) {
-						if (thread.sessionID === decoded.properties.info.id) state.threads.delete(threadKey)
+						if (thread.sessionID === decoded.data.sessionID) state.threads.delete(threadKey)
 					}
 				}
 				if (turn === undefined) {
@@ -1078,23 +1070,20 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 				)
 				return
 			}
-			case 'session.error': {
-				const sessionID = decoded.properties.sessionID
-				if (sessionID === undefined) return
+			case 'session.execution.failed':
+			case 'session.execution.interrupted': {
+				const sessionID = decoded.data.sessionID
 				const turn = state.activeTurns.get(sessionID)
 				if (turn === undefined) return
 				yield* semaphoreForThread(state, turn.threadKey).withPermits(1)(
 					Effect.gen(function* () {
 						if (state.activeTurns.get(sessionID) !== turn) return
 						if (turn.cancelled) {
-							if (decoded.properties.error?.name !== 'ContextOverflowError')
-								yield* settleCancelledTurn(state, turn)
-							else if (turn.busyObserved) yield* abortStartedTurn(runner, turn)
+							yield* settleCancelledTurn(state, turn)
 							return
 						}
 						if (turn.finishing) return
-						if (decoded.properties.error?.name === 'ContextOverflowError') return
-						const results = yield* drainAssistantResults(plugin, state, turn).pipe(
+						const results = yield* drainAssistantResults(state, turn).pipe(
 							Effect.catch((error) =>
 								Effect.logError(
 									`[limitless] failed to drain Slack responses before terminal error: ${error.message}`,
@@ -1115,21 +1104,21 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 				)
 				return
 			}
-			case 'session.idle':
-			case 'session.status': {
-				const turn = state.activeTurns.get(decoded.properties.sessionID)
+			case 'session.execution.started': {
+				const turn = state.activeTurns.get(decoded.data.sessionID)
 				if (turn === undefined) return
-				if (decoded.type === 'session.status' && decoded.properties.status.type === 'busy') {
-					turn.busyObserved = true
-					turn.waitingForBusy = false
-					turn.busyVersion += 1
-					if (turn.cancelled) {
-						turn.abortSent = false
-						yield* abortStartedTurn(runner, turn)
-					}
-					return
+				turn.busyObserved = true
+				turn.waitingForBusy = false
+				turn.busyVersion += 1
+				if (turn.cancelled) {
+					turn.abortSent = false
+					yield* abortStartedTurn(runner, turn)
 				}
-				if (decoded.type === 'session.status' && decoded.properties.status.type !== 'idle') return
+				return
+			}
+			case 'session.execution.succeeded': {
+				const turn = state.activeTurns.get(decoded.data.sessionID)
+				if (turn === undefined) return
 				const eventGeneration = turn.generation
 				const eventBusyVersion = turn.busyVersion
 				yield* semaphoreForThread(state, turn.threadKey)
@@ -1144,7 +1133,7 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 								return
 							}
 							if (turn.finishing || turn.waitingForBusy) return
-							const results = yield* drainAssistantResults(plugin, state, turn)
+							const results = yield* drainAssistantResults(state, turn)
 							if (
 								state.activeTurns.get(turn.rootSessionID) !== turn ||
 								turn.cancelled ||
@@ -1163,7 +1152,7 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 								const messageID = openCodeMessageID(thread.lastMessageID)
 								thread.lastMessageID = messageID
 								turn.waitingForBusy = true
-								yield* startTrackedOpenCodeTurn(turn, config, plugin, messageID, [
+								yield* startTrackedOpenCodeTurn(turn, plugin, messageID, [
 									{
 										type: 'text',
 										text: '[Slack bridge: incorporate all preceding Slack messages and provide the final response.]',
@@ -1210,14 +1199,12 @@ export const createSlackRunner = Effect.fn('createSlackRunner')(function* (
 				return
 			}
 			case 'permission.asked': {
-				if (activeRootForSession(state, decoded.properties.sessionID) === undefined) return
-				yield* rejectOpenCodePermission(
-					plugin,
-					decoded.properties.sessionID,
-					decoded.properties.id,
-				).pipe(
+				if (activeRootForSession(state, decoded.data.sessionID) === undefined) return
+				yield* abortOpenCodeTurn(plugin, decoded.data.sessionID).pipe(
 					Effect.catch((error) =>
-						Effect.logError(`[limitless] failed to reject Slack permission: ${error.message}`),
+						Effect.logError(
+							`[limitless] failed to interrupt a Slack permission request: ${error.message}`,
+						),
 					),
 				)
 				return

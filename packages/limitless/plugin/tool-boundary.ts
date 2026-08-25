@@ -1,4 +1,4 @@
-import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
+import { Tool } from '@opencode-ai/schema/tool'
 import { Effect, Match } from 'effect'
 import {
 	FileAccessError,
@@ -22,9 +22,9 @@ export type { ToolFailure }
 
 export type SessionDirectoryResolver = (
 	sessionID: Tool.Context['sessionID'],
-) => Effect.Effect<string, Tool.Failure>
+) => Effect.Effect<string, Tool.Error>
 
-export type ToolErrorEncoder<Error> = (error: Error) => Tool.Failure
+export type ToolErrorEncoder<Error> = (error: Error) => Tool.Error
 
 export type ToolExecutor = <Input, Output, Error>(
 	name: string,
@@ -32,7 +32,17 @@ export type ToolExecutor = <Input, Output, Error>(
 	context: Tool.Context,
 	operation: (input: Input) => Effect.Effect<Output, Error, ToolExecutionContextType | LspConfig>,
 	encodeError: ToolErrorEncoder<Error>,
-) => Effect.Effect<Output, Tool.Failure>
+) => Effect.Effect<
+	{ readonly output: Output; readonly content: ReadonlyArray<Tool.Content> },
+	Tool.Error
+>
+
+export function defineLimitlessTool<
+	Input extends Tool.ValueSchema,
+	Output extends Tool.ValueSchema | undefined,
+>(definition: Omit<Tool.Info<Input, Output>, 'options'>): Tool.Info<Input, Output> {
+	return { ...definition, options: { codemode: false } }
+}
 
 export function failurePayload(error: ToolFailure): ToolFailurePayload {
 	return Match.valueTags(error, {
@@ -62,7 +72,7 @@ export function failurePayload(error: ToolFailure): ToolFailurePayload {
 }
 
 export const encodeToolFailure: ToolErrorEncoder<ToolFailure> = (error) =>
-	new Tool.Failure({ message: error.message, metadata: failurePayload(error) })
+	new Tool.Error({ message: error.message, metadata: failurePayload(error) })
 
 export const encodeNoError: ToolErrorEncoder<never> = (error) => error
 
@@ -88,6 +98,7 @@ export function makeToolExecutor(
 					agent: context.agent,
 				})
 				return operation(input).pipe(
+					Effect.map((output) => ({ output, content: toolModelOutput({ output }) })),
 					Effect.mapError(encodeError),
 					Effect.provideService(ToolExecutionContext, execution),
 					Effect.provideService(LspConfig, lspConfig),
@@ -99,7 +110,7 @@ export function makeToolExecutor(
 				).pipe(
 					Effect.andThen(
 						Effect.fail(
-							new Tool.Failure({
+							new Tool.Error({
 								message: 'Tool execution failed unexpectedly.',
 								metadata: { tool: name },
 							}),

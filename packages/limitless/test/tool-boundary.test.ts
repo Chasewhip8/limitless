@@ -1,11 +1,11 @@
-import { Tool } from '@opencode-ai/plugin/v2/effect/tool'
 import { Session } from '@opencode-ai/schema/session'
+import { Tool } from '@opencode-ai/schema/tool'
 import { Effect, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { toolInputError } from '../core/errors'
 import { ToolExecutionContext } from '../core/execution'
 import { makeSessionDirectoryResolver } from '../index'
-import { encodeToolFailure, makeToolExecutor } from '../plugin/tool-boundary'
+import { defineLimitlessTool, encodeToolFailure, makeToolExecutor } from '../plugin/tool-boundary'
 import { LspConfig } from '../tools/lsp/config'
 import { settleTestTool, testToolContext, testToolExecution } from './execution'
 
@@ -52,7 +52,8 @@ describe('OpenCode 2 tool execution boundary', () => {
 				}),
 			LspConfig.of({ servers: [] }),
 		)
-		const definition = Tool.make({
+		const definition = defineLimitlessTool({
+			name: 'boundary_test',
 			description: 'Boundary test',
 			input: BoundaryInput,
 			output: BoundaryOutput,
@@ -76,9 +77,9 @@ describe('OpenCode 2 tool execution boundary', () => {
 		})
 
 		const result = await Effect.runPromise(
-			Tool.settle(definition, { input: { value: 'ok' } }, testToolContext(execution)),
+			definition.execute({ value: 'ok' }, testToolContext(execution)),
 		)
-		expect(result.structured).toEqual({
+		expect(result.output).toEqual({
 			value: 'ok',
 			projectRoot: '/session/directory',
 			sessionId: 'ses_test',
@@ -87,13 +88,14 @@ describe('OpenCode 2 tool execution boundary', () => {
 		expect(calls).toEqual(['ses_test'])
 	})
 
-	test('maps expected domain errors to typed Tool.Failure metadata', async () => {
+	test('maps expected domain errors to typed Tool.Error metadata', async () => {
 		const execution = testToolExecution('/project')
 		const execute = makeToolExecutor(
 			() => Effect.succeed('/project'),
 			LspConfig.of({ servers: [] }),
 		)
-		const definition = Tool.make({
+		const definition = defineLimitlessTool({
+			name: 'failure_test',
 			description: 'Failure test',
 			input: Schema.Struct({}),
 			output: Schema.String,
@@ -102,7 +104,7 @@ describe('OpenCode 2 tool execution boundary', () => {
 					'failure_test',
 					input,
 					context,
-					() => toolInputError('failure_test', 'Useful model-visible failure'),
+					() => Effect.fail(toolInputError('failure_test', 'Useful model-visible failure')),
 					encodeToolFailure,
 				),
 		})
@@ -110,7 +112,7 @@ describe('OpenCode 2 tool execution boundary', () => {
 		const failure = await Effect.runPromise(
 			settleTestTool(definition, {}, execution).pipe(Effect.flip),
 		)
-		expect(failure).toBeInstanceOf(Tool.Failure)
+		expect(failure).toBeInstanceOf(Tool.Error)
 		expect(failure.message).toBe('Useful model-visible failure')
 		expect(failure.metadata).toMatchObject({
 			ok: false,

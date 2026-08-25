@@ -128,74 +128,87 @@ export type SlackAssistantResult = typeof SlackAssistantResult.Type
 export const SlackOpenCodeEventEnvelope = Schema.Struct({ type: Schema.String })
 
 export const SlackSessionLifecycleEvent = Schema.Struct({
-	type: Schema.Union([Schema.Literal('session.created'), Schema.Literal('session.updated')]),
-	properties: Schema.Struct({
-		info: Schema.Struct({
-			id: Schema.NonEmptyString,
-			parentID: Schema.optional(Schema.NonEmptyString),
-		}),
+	type: Schema.Union([Schema.Literal('session.created'), Schema.Literal('session.forked')]),
+	data: Schema.Struct({
+		sessionID: Schema.NonEmptyString,
+		parentID: Schema.optional(Schema.NonEmptyString),
 	}),
 })
 
 export const SlackSessionDeletedEvent = Schema.Struct({
 	type: Schema.Literal('session.deleted'),
-	properties: Schema.Struct({
-		info: Schema.Struct({ id: Schema.NonEmptyString }),
-	}),
+	data: Schema.Struct({ sessionID: Schema.NonEmptyString }),
 })
 
-export const SlackSessionIdleEvent = Schema.Struct({
-	type: Schema.Literal('session.idle'),
-	properties: Schema.Struct({ sessionID: Schema.NonEmptyString }),
+export const SlackSessionExecutionEvent = Schema.Struct({
+	type: Schema.Union([
+		Schema.Literal('session.execution.started'),
+		Schema.Literal('session.execution.succeeded'),
+		Schema.Literal('session.execution.interrupted'),
+	]),
+	data: Schema.Struct({ sessionID: Schema.NonEmptyString }),
 })
 
 export const SlackSessionErrorEvent = Schema.Struct({
-	type: Schema.Literal('session.error'),
-	properties: Schema.Struct({
-		sessionID: Schema.optional(Schema.NonEmptyString),
-		error: Schema.optional(Schema.Struct({ name: Schema.optional(Schema.String) })),
+	type: Schema.Literal('session.execution.failed'),
+	data: Schema.Struct({
+		sessionID: Schema.NonEmptyString,
+		error: Schema.Struct({ type: Schema.String, message: Schema.String }),
 	}),
 })
 
 export const SlackPermissionAskedEvent = Schema.Struct({
 	type: Schema.Literal('permission.asked'),
-	properties: Schema.Struct({
+	data: Schema.Struct({
 		id: Schema.NonEmptyString,
 		sessionID: Schema.NonEmptyString,
 	}),
 })
 
-export const SlackSessionStatusEvent = Schema.Struct({
-	type: Schema.Literal('session.status'),
-	properties: Schema.Struct({
+export const SlackInboxDeliveredEvent = Schema.Struct({
+	type: Schema.Literal('session.inbox.delivered'),
+	data: Schema.Struct({
 		sessionID: Schema.NonEmptyString,
-		status: Schema.Struct({ type: Schema.Literals(['busy', 'idle', 'retry']) }),
+		inboxID: Schema.NonEmptyString,
 	}),
 })
 
-export const SlackMessageUpdatedEvent = Schema.Struct({
-	type: Schema.Literal('message.updated'),
-	properties: Schema.Struct({
-		info: Schema.Struct({
-			id: Schema.NonEmptyString,
-			sessionID: Schema.NonEmptyString,
-			role: Schema.String,
-			parentID: Schema.optional(Schema.NonEmptyString),
-			summary: Schema.optional(Schema.Boolean),
-			finish: Schema.optional(Schema.String),
-			error: Schema.optional(Schema.Unknown),
-			time: Schema.Struct({ completed: Schema.optional(Schema.Number) }),
-		}),
+export const SlackStepStartedEvent = Schema.Struct({
+	type: Schema.Literal('session.step.started'),
+	data: Schema.Struct({
+		sessionID: Schema.NonEmptyString,
+		assistantMessageID: Schema.NonEmptyString,
+	}),
+})
+
+export const SlackTextEndedEvent = Schema.Struct({
+	type: Schema.Literal('session.text.ended'),
+	data: Schema.Struct({
+		sessionID: Schema.NonEmptyString,
+		assistantMessageID: Schema.NonEmptyString,
+		ordinal: Schema.Number,
+		text: Schema.String,
+	}),
+})
+
+export const SlackStepEndedEvent = Schema.Struct({
+	type: Schema.Union([Schema.Literal('session.step.ended'), Schema.Literal('session.step.failed')]),
+	data: Schema.Struct({
+		sessionID: Schema.NonEmptyString,
+		assistantMessageID: Schema.NonEmptyString,
+		finish: Schema.optional(Schema.String),
 	}),
 })
 
 export const SlackOpenCodeEvent = Schema.Union([
 	SlackSessionLifecycleEvent,
 	SlackSessionDeletedEvent,
-	SlackSessionIdleEvent,
+	SlackSessionExecutionEvent,
 	SlackSessionErrorEvent,
 	SlackPermissionAskedEvent,
-	SlackSessionStatusEvent,
-	SlackMessageUpdatedEvent,
+	SlackInboxDeliveredEvent,
+	SlackStepStartedEvent,
+	SlackTextEndedEvent,
+	SlackStepEndedEvent,
 ])
 export type SlackOpenCodeEvent = typeof SlackOpenCodeEvent.Type

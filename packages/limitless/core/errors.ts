@@ -1,16 +1,16 @@
 import { Schema } from 'effect'
 
-export class ToolInputError extends Schema.TaggedErrorClass<ToolInputError>()('ToolInputError', {
+export class ToolInputError extends Schema.TaggedError<ToolInputError>()('ToolInputError', {
 	tool: Schema.String,
 	message: Schema.String,
 }) {}
 
-export class FileAccessError extends Schema.TaggedErrorClass<FileAccessError>()('FileAccessError', {
+export class FileAccessError extends Schema.TaggedError<FileAccessError>()('FileAccessError', {
 	filePath: Schema.String,
 	message: Schema.String,
 }) {}
 
-export class ToolOperationError extends Schema.TaggedErrorClass<ToolOperationError>()(
+export class ToolOperationError extends Schema.TaggedError<ToolOperationError>()(
 	'ToolOperationError',
 	{
 		tool: Schema.String,
