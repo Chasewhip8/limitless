@@ -98,6 +98,15 @@ describe('OpenCode 2 tool registrations', () => {
 		}
 	})
 
+	test('generates provider-compatible object schemas for every tool input', () => {
+		for (const contract of contracts) {
+			const jsonSchema = Schema.toStandardJSONSchemaV1(contract.input)[
+				'~standard'
+			].jsonSchema.input({ target: 'draft-2020-12' })
+			expect(jsonSchema.type, `${contract.name} must generate an object schema`).toBe('object')
+		}
+	})
+
 	test('exposes every tool directly with codemode disabled', async () => {
 		const tools = await Effect.runPromise(makeTools())
 		const registrations: Array<{ readonly name: string; readonly codemode: boolean | undefined }> =

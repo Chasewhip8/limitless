@@ -31,7 +31,7 @@ export const ArtifactTemplate = Schema.Struct({
 type ArtifactTemplateType = typeof ArtifactTemplate.Type
 const InvalidArtifactTemplate = Schema.Struct({ name: Schema.String, reason: Schema.String })
 type InvalidArtifactTemplate = typeof InvalidArtifactTemplate.Type
-export const ArtifactTemplatesListInput = Schema.Struct({})
+export const ArtifactTemplatesListInput = Schema.Record(Schema.String, Schema.Unknown)
 export const ArtifactTemplatesListResult = Schema.Struct({
 	ok: Schema.Literal(true),
 	templates: Schema.Array(ArtifactTemplate),
