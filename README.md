@@ -38,7 +38,7 @@ switching.
 - **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional project-cached GitHub source research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **Optional Linear MCP**: Home Manager writes the remote Linear MCP entry directly when enabled; OpenCode reads `LINEAR_API_KEY` from its process environment.
-- **Optional Atlassian and Sentry CLIs**: install each CLI with its companion skill and runtime token-file authentication.
+- **Optional Atlassian, Notion, and Sentry CLIs**: install each CLI with its companion skill and runtime token-file authentication.
 - **Native attention hooks**: optionally run a system command when a session completes or the question tool prompts the user.
 - **Optional Slack bridge**: connect one repository and configurable agent to mentioned Slack threads over Socket Mode, including progress updates, attachments, steering, and cancellation.
 - **Safer agent permissions**: common work is allowed, while credential access, destructive git operations, broad deletion, publishing, privilege escalation, and infrastructure mutations ask first.
@@ -79,6 +79,10 @@ programs.limitless = {
     };
     agentBrowser.enable = true;
     effectSolutions.enable = true;
+    notion = {
+      enable = false;
+      tokenFile = null;
+    };
     sentry = {
       enable = false;
       tokenFile = null;
@@ -135,9 +139,20 @@ programs.limitless = {
 };
 ```
 
-`tools.agentBrowser.enable` and `tools.effectSolutions.enable` default to `skills.enable`. Set either tool explicitly to install the CLI without installing skills. Atlassian CLI and Sentry are opt-in; enabling either also installs its companion skill when skills are enabled.
+`tools.agentBrowser.enable` and `tools.effectSolutions.enable` default to `skills.enable`. Set either tool explicitly to install the CLI without installing skills. Atlassian CLI, Notion CLI, and Sentry are opt-in; enabling one also installs its companion skill when skills are enabled.
 
 For non-interactive Jira Cloud authentication, set `tools.acli.site`, `tools.acli.email`, and `tools.acli.tokenFile`. The token file is read lazily and never copied into the Nix store or process arguments. The wrapper keeps ACLI's generated profile under the per-user runtime directory and reauthenticates after a reboot or token-file change.
+
+Notion support uses the official beta `ntn` CLI. Enable it with:
+
+```nix
+programs.limitless.tools.notion = {
+  enable = true;
+  tokenFile = config.age.secrets.notion-api-token.path;
+};
+```
+
+The wrapper reads `tokenFile` for each command and passes it through the CLI environment as `NOTION_API_TOKEN`; it is never copied into the Nix store, generated OpenCode configuration, or process arguments. Without `tokenFile`, authenticate interactively with `ntn login`. The companion skill prefers Markdown page operations and bounded JSON queries, and requires reading pages before destructive replacements or trashing.
 
 Sentry support requires a runtime token file:
 

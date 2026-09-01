@@ -40,6 +40,9 @@
           agentBrowserPackage = import ./nix/packages/agent-browser.nix {
             inherit pkgs self system;
           };
+          notionCliPackage = import ./nix/packages/notion-cli.nix {
+            inherit pkgs self system;
+          };
           opencodePackage = import ./nix/packages/opencode2.nix { inherit pkgs; };
           packageManifest = builtins.fromJSON (builtins.readFile ./packages/limitless/package.json);
           pluginSdkVersion = packageManifest.dependencies."@opencode-ai/plugin";
@@ -96,6 +99,10 @@
               anthropicAuthEnabled ? true,
               linearEnabled ? false,
               lspEnabled ? false,
+              notionEnabled ? false,
+              notionPackage ? notionCliPackage,
+              notionTokenFile ? null,
+              skillsEnabled ? false,
               serviceEnabled ? false,
             }:
             pkgs.lib.evalModules {
@@ -107,9 +114,16 @@
                   programs.limitless = {
                     enable = true;
                     git.ignoreStorage = false;
-                    skills.enable = false;
-                    tools.agentBrowser.enable = false;
-                    tools.effectSolutions.enable = false;
+                    skills.enable = skillsEnabled;
+                    tools = {
+                      agentBrowser.enable = false;
+                      effectSolutions.enable = false;
+                      notion = {
+                        enable = notionEnabled;
+                        package = notionPackage;
+                        tokenFile = notionTokenFile;
+                      };
+                    };
                     plugins.anthropicAuth.enable = anthropicAuthEnabled;
                     lsp.enable = lspEnabled;
                     mcp.linear.enable = linearEnabled;
@@ -123,6 +137,22 @@
           disabledHome = evaluateHome { };
           anthropicAuthDisabledHome = evaluateHome { anthropicAuthEnabled = false; };
           lspHome = evaluateHome { lspEnabled = true; };
+          notionHome = evaluateHome {
+            notionEnabled = true;
+            skillsEnabled = true;
+          };
+          notionTestToken = pkgs.writeText "limitless-notion-test-token" "notion-test-token";
+          notionProbePackage = pkgs.writeShellScriptBin "ntn" ''
+            printf '%s\n' "$NOTION_API_TOKEN"
+          '';
+          notionTokenHome = evaluateHome {
+            notionEnabled = true;
+            notionPackage = notionProbePackage;
+            notionTokenFile = toString notionTestToken;
+          };
+          notionTokenWrapper = pkgs.lib.findFirst (
+            package: (package.name or "") == "ntn"
+          ) (throw "enabled Notion token wrapper was not installed") notionTokenHome.config.home.packages;
           serviceHome = evaluateHome { serviceEnabled = pkgs.stdenv.isLinux; };
           enabledConfig = builtins.fromJSON (
             builtins.unsafeDiscardStringContext
@@ -399,6 +429,16 @@
                 "$PWD"
               touch "$out"
             '';
+
+            notion-cli =
+              assert pkgs.lib.assertMsg (builtins.elem notionCliPackage notionHome.config.home.packages)
+                "enabled Notion CLI was not installed";
+              pkgs.runCommand "limitless-notion-cli-check" { } ''
+                ${notionCliPackage}/bin/ntn --version | grep -F 'ntn ${notionCliPackage.version}' >/dev/null
+                test -f ${notionHome.config.home.file.".config/opencode/skills".source}/notion-cli/SKILL.md
+                test "$(${notionTokenWrapper}/bin/ntn)" = "notion-test-token"
+                touch "$out"
+              '';
           };
 
           skillsPackage = pkgs.runCommand "abilities-skills" { } ''
@@ -424,6 +464,7 @@
             sentry = sentryPackage;
             limitless = limitlessPackage;
             "agent-browser" = agentBrowserPackage;
+            "notion-cli" = notionCliPackage;
             "opencode-agents" = opencodeAgentsPackage;
             opencode2 = opencodePackage;
           };
@@ -460,6 +501,7 @@
         opencode-limitless = self.packages.${final.stdenv.hostPlatform.system}.limitless;
         agent-browser = self.packages.${final.stdenv.hostPlatform.system}."agent-browser";
         effect-solutions = self.packages.${final.stdenv.hostPlatform.system}."effect-solutions";
+        notion-cli = self.packages.${final.stdenv.hostPlatform.system}."notion-cli";
         sentry = self.packages.${final.stdenv.hostPlatform.system}.sentry;
       };
     };

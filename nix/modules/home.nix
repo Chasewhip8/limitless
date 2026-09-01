@@ -65,16 +65,19 @@ let
 
   defaultAgentBrowserPackage = self.packages.${system}."agent-browser";
   defaultEffectSolutionsPackage = self.packages.${system}."effect-solutions";
+  defaultNotionPackage = self.packages.${system}."notion-cli";
   defaultSentryPackage = self.packages.${system}.sentry;
   defaultAcliPackage = pkgs.acli;
 
   enabledAcli = cfg.enable && cfg.tools.acli.enable;
   enabledAgentBrowser = cfg.enable && cfg.tools.agentBrowser.enable;
   enabledEffectSolutions = cfg.enable && cfg.tools.effectSolutions.enable;
+  enabledNotion = cfg.enable && cfg.tools.notion.enable;
   enabledSentry = cfg.enable && cfg.tools.sentry.enable;
   enabledAcliSkill = enabledSkills && enabledAcli;
   enabledAgentBrowserSkill = enabledSkills && enabledAgentBrowser;
   enabledEffectSolutionsSkill = enabledSkills && enabledEffectSolutions;
+  enabledNotionSkill = enabledSkills && enabledNotion;
   enabledSentrySkill = enabledSkills && enabledSentry;
 
   acliSkillPackage = pkgs.runCommand "limitless-atlassian-cli-skill" { } ''
@@ -193,6 +196,33 @@ let
         exec -a sentry "$real_sentry" "$@"
       '';
 
+  notionPackage =
+    if cfg.tools.notion.tokenFile == null then
+      cfg.tools.notion.package
+    else
+      let
+        realNotion = lib.getExe cfg.tools.notion.package;
+        tokenFile = lib.escapeShellArg cfg.tools.notion.tokenFile;
+      in
+      pkgs.writeShellScriptBin "ntn" ''
+        set -eu
+
+        token_file=${tokenFile}
+        if [ ! -r "$token_file" ]; then
+          printf 'ntn: Notion API token file is not readable: %s\n' "$token_file" >&2
+          exit 1
+        fi
+
+        NOTION_API_TOKEN="$(${pkgs.coreutils}/bin/cat "$token_file")"
+        if [ -z "$NOTION_API_TOKEN" ]; then
+          printf 'ntn: Notion API token file is empty: %s\n' "$token_file" >&2
+          exit 1
+        fi
+
+        export NOTION_API_TOKEN
+        exec -a ntn ${lib.escapeShellArg realNotion} "$@"
+      '';
+
   enabledSkillsPackage = pkgs.runCommand "limitless-enabled-skills" { } ''
     copySkills() {
       if [ -d "$1" ]; then
@@ -206,6 +236,7 @@ let
     ${lib.optionalString enabledAcliSkill "copySkills ${acliSkillPackage}"}
     ${lib.optionalString enabledAgentBrowserSkill "copySkills ${cfg.tools.agentBrowser.package}/share/skills"}
     ${lib.optionalString enabledEffectSolutionsSkill "copySkills ${cfg.tools.effectSolutions.package}/share/skills"}
+    ${lib.optionalString enabledNotionSkill "copySkills ${cfg.tools.notion.package}/share/skills"}
     ${lib.optionalString enabledSentrySkill "copySkills ${cfg.tools.sentry.package}/share/skills"}
   '';
 
@@ -519,6 +550,23 @@ in
           type = lib.types.package;
           default = defaultEffectSolutionsPackage;
           description = "effect-solutions package to install.";
+        };
+      };
+
+      notion = {
+        enable = lib.mkEnableOption "official Notion CLI and its companion skill";
+
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = defaultNotionPackage;
+          description = "Notion CLI package to install.";
+        };
+
+        tokenFile = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "^/.*");
+          default = null;
+          example = "/run/agenix/notion-api-token";
+          description = "Optional runtime file containing a Notion API token. The token value is never written to generated configuration or passed in process arguments.";
         };
       };
 
@@ -1028,6 +1076,10 @@ in
             message = "programs.limitless.tools.acli token-file authentication requires enable = true plus non-null site and email values.";
           }
           {
+            assertion = cfg.tools.notion.tokenFile == null || enabledNotion;
+            message = "programs.limitless.tools.notion.tokenFile requires programs.limitless.tools.notion.enable = true.";
+          }
+          {
             assertion = cfg.tools.acli.tokenFile == null || pkgs.stdenv.isLinux;
             message = "programs.limitless.tools.acli.tokenFile currently requires Linux and XDG_RUNTIME_DIR.";
           }
@@ -1073,6 +1125,9 @@ in
       })
       (lib.mkIf enabledEffectSolutions {
         home.packages = [ cfg.tools.effectSolutions.package ];
+      })
+      (lib.mkIf enabledNotion {
+        home.packages = [ notionPackage ];
       })
       (lib.mkIf enabledSentry {
         home.packages = [ sentryPackage ];

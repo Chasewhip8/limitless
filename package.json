@@ -7,7 +7,7 @@
 		"packages/*"
 	],
 	"scripts": {
-		"build": "nix build --no-link .#skills .#opencode-agents .#anthropic-auth .#limitless .#agent-browser .#effect-solutions .#sentry .#opencode2",
+		"build": "nix build --no-link .#skills .#opencode-agents .#anthropic-auth .#limitless .#agent-browser .#effect-solutions .#notion-cli .#sentry .#opencode2",
 		"ci": "bun run lint && bun run typecheck && bun run test && nix flake check && bun run build",
 		"examples:docs": "bun run scripts/generate-example-docs.ts",
 		"format": "bun run format:biome && bun run format:nix && bun run format:md",

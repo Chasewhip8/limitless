@@ -169,6 +169,7 @@ describe('decisive OpenCode 2 cutover', () => {
 			}),
 		)
 		expect(flake).toContain('import ./nix/packages/opencode2.nix')
+		expect(flake).toContain('import ./nix/packages/notion-cli.nix')
 		expect(flake).not.toContain('llm-agents')
 		expect(flakeLock).not.toContain('llm-agents')
 		expect(flake).toContain('/bin/opencode2 --version')
@@ -202,6 +203,7 @@ describe('decisive OpenCode 2 cutover', () => {
 		expect(home).toContain('LIMITLESS_SLACK_SERVICE=1')
 		expect(home).toContain('cfg.opencode.disableClaudeCode')
 		expect(home).toContain('cfg.tools.acli.tokenFile')
+		expect(home).toContain('cfg.tools.notion.tokenFile')
 		expect(home).toContain('cfg.tools.sentry.tokenFile')
 	})
 })
