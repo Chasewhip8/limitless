@@ -99,6 +99,8 @@
               anthropicAuthEnabled ? true,
               linearEnabled ? false,
               lspEnabled ? false,
+              notionAccounts ? { },
+              notionDefaultAccount ? null,
               notionEnabled ? false,
               notionPackage ? notionCliPackage,
               notionTokenFile ? null,
@@ -119,6 +121,8 @@
                       agentBrowser.enable = false;
                       effectSolutions.enable = false;
                       notion = {
+                        accounts = notionAccounts;
+                        defaultAccount = notionDefaultAccount;
                         enable = notionEnabled;
                         package = notionPackage;
                         tokenFile = notionTokenFile;
@@ -142,6 +146,8 @@
             skillsEnabled = true;
           };
           notionTestToken = pkgs.writeText "limitless-notion-test-token" "notion-test-token";
+          notionPersonalTestToken = pkgs.writeText "limitless-notion-personal-test-token" "notion-personal-test-token";
+          notionWorkTestToken = pkgs.writeText "limitless-notion-work-test-token" "notion-work-test-token";
           notionProbePackage = pkgs.writeShellScriptBin "ntn" ''
             printf '%s\n' "$NOTION_API_TOKEN"
           '';
@@ -153,6 +159,23 @@
           notionTokenWrapper = pkgs.lib.findFirst (
             package: (package.name or "") == "ntn"
           ) (throw "enabled Notion token wrapper was not installed") notionTokenHome.config.home.packages;
+          notionAccountsHome = evaluateHome {
+            notionAccounts = {
+              personal.tokenFile = toString notionPersonalTestToken;
+              work.tokenFile = toString notionWorkTestToken;
+            };
+            notionDefaultAccount = "work";
+            notionEnabled = true;
+            notionPackage = notionProbePackage;
+          };
+          findNotionAccountWrapper =
+            name:
+            pkgs.lib.findFirst (package: (package.name or "") == name)
+              (throw "enabled Notion account wrapper ${name} was not installed")
+              notionAccountsHome.config.home.packages;
+          notionDefaultWrapper = findNotionAccountWrapper "ntn";
+          notionPersonalWrapper = findNotionAccountWrapper "ntn-personal";
+          notionWorkWrapper = findNotionAccountWrapper "ntn-work";
           serviceHome = evaluateHome { serviceEnabled = pkgs.stdenv.isLinux; };
           enabledConfig = builtins.fromJSON (
             builtins.unsafeDiscardStringContext
@@ -433,10 +456,16 @@
             notion-cli =
               assert pkgs.lib.assertMsg (builtins.elem notionCliPackage notionHome.config.home.packages)
                 "enabled Notion CLI was not installed";
+              assert pkgs.lib.assertMsg (pkgs.lib.all (entry: entry.assertion)
+                notionAccountsHome.config.assertions
+              ) "valid named Notion account configuration failed a module assertion";
               pkgs.runCommand "limitless-notion-cli-check" { } ''
                 ${notionCliPackage}/bin/ntn --version | grep -F 'ntn ${notionCliPackage.version}' >/dev/null
                 test -f ${notionHome.config.home.file.".config/opencode/skills".source}/notion-cli/SKILL.md
                 test "$(${notionTokenWrapper}/bin/ntn)" = "notion-test-token"
+                test "$(${notionDefaultWrapper}/bin/ntn)" = "notion-work-test-token"
+                test "$(${notionPersonalWrapper}/bin/ntn-personal)" = "notion-personal-test-token"
+                test "$(${notionWorkWrapper}/bin/ntn-work)" = "notion-work-test-token"
                 touch "$out"
               '';
           };

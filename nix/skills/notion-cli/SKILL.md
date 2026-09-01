@@ -8,6 +8,13 @@ description: Always load this skill when using Notion or the ntn CLI to search, 
 Use the globally installed official `ntn` CLI for Notion. Prefer its structured
 commands and Markdown page operations over constructing raw API requests.
 
+Limitless can expose separate accounts as `ntn-ACCOUNT` commands while `ntn`
+uses the configured default account. When a task identifies an account, use its
+qualified command for every operation and verify it first with
+`ntn-ACCOUNT whoami --json`. Do not mix account commands within a write flow.
+The examples below use `ntn`; substitute the selected qualified command when
+working with a named account.
+
 ## Discover Commands
 
 - `ntn <command> --help` - verify syntax before an unfamiliar operation.

@@ -204,6 +204,8 @@ describe('decisive OpenCode 2 cutover', () => {
 		expect(home).toContain('cfg.opencode.disableClaudeCode')
 		expect(home).toContain('cfg.tools.acli.tokenFile')
 		expect(home).toContain('cfg.tools.notion.tokenFile')
+		expect(home).toContain('cfg.tools.notion.accounts')
+		expect(home).toContain('cfg.tools.notion.defaultAccount')
 		expect(home).toContain('cfg.tools.sentry.tokenFile')
 	})
 })

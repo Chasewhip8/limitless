@@ -196,32 +196,58 @@ let
         exec -a sentry "$real_sentry" "$@"
       '';
 
-  notionPackage =
+  validNotionAccountName = name: builtins.match "^[A-Za-z0-9][A-Za-z0-9_-]*$" name != null;
+  notionAccounts = cfg.tools.notion.accounts;
+  validNotionAccounts = lib.filterAttrs (name: _account: validNotionAccountName name) notionAccounts;
+  notionAccountNames = builtins.attrNames notionAccounts;
+  validNotionAccountNames = builtins.attrNames validNotionAccounts;
+  notionHasAccounts = notionAccounts != { };
+  notionHasValidDefault =
+    cfg.tools.notion.defaultAccount != null
+    && builtins.hasAttr cfg.tools.notion.defaultAccount validNotionAccounts;
+
+  mkNotionTokenPackage =
+    commandName: tokenFile:
+    let
+      realNotion = lib.getExe cfg.tools.notion.package;
+    in
+    pkgs.writeShellScriptBin commandName ''
+      set -eu
+
+      command_name=${lib.escapeShellArg commandName}
+      real_notion=${lib.escapeShellArg realNotion}
+      token_file=${lib.escapeShellArg tokenFile}
+      if [ ! -r "$token_file" ]; then
+        printf '%s: Notion API token file is not readable: %s\n' "$command_name" "$token_file" >&2
+        exit 1
+      fi
+
+      NOTION_API_TOKEN="$(${pkgs.coreutils}/bin/cat "$token_file")"
+      if [ -z "$NOTION_API_TOKEN" ]; then
+        printf '%s: Notion API token file is empty: %s\n' "$command_name" "$token_file" >&2
+        exit 1
+      fi
+
+      export NOTION_API_TOKEN
+      exec -a "$command_name" "$real_notion" "$@"
+    '';
+
+  notionSinglePackage =
     if cfg.tools.notion.tokenFile == null then
       cfg.tools.notion.package
     else
-      let
-        realNotion = lib.getExe cfg.tools.notion.package;
-        tokenFile = lib.escapeShellArg cfg.tools.notion.tokenFile;
-      in
-      pkgs.writeShellScriptBin "ntn" ''
-        set -eu
+      mkNotionTokenPackage "ntn" cfg.tools.notion.tokenFile;
 
-        token_file=${tokenFile}
-        if [ ! -r "$token_file" ]; then
-          printf 'ntn: Notion API token file is not readable: %s\n' "$token_file" >&2
-          exit 1
-        fi
+  notionNamedPackages = lib.mapAttrsToList (
+    accountName: account: mkNotionTokenPackage "ntn-${accountName}" account.tokenFile
+  ) validNotionAccounts;
 
-        NOTION_API_TOKEN="$(${pkgs.coreutils}/bin/cat "$token_file")"
-        if [ -z "$NOTION_API_TOKEN" ]; then
-          printf 'ntn: Notion API token file is empty: %s\n' "$token_file" >&2
-          exit 1
-        fi
+  notionDefaultPackages = lib.optional notionHasValidDefault (
+    mkNotionTokenPackage "ntn" validNotionAccounts.${cfg.tools.notion.defaultAccount}.tokenFile
+  );
 
-        export NOTION_API_TOKEN
-        exec -a ntn ${lib.escapeShellArg realNotion} "$@"
-      '';
+  notionPackages =
+    if notionHasAccounts then notionDefaultPackages ++ notionNamedPackages else [ notionSinglePackage ];
 
   enabledSkillsPackage = pkgs.runCommand "limitless-enabled-skills" { } ''
     copySkills() {
@@ -566,7 +592,34 @@ in
           type = lib.types.nullOr (lib.types.strMatching "^/.*");
           default = null;
           example = "/run/agenix/notion-api-token";
-          description = "Optional runtime file containing a Notion API token. The token value is never written to generated configuration or passed in process arguments.";
+          description = "Optional runtime file containing a single Notion API token. Mutually exclusive with accounts. The token value is never written to generated configuration or passed in process arguments.";
+        };
+
+        accounts = lib.mkOption {
+          type = lib.types.attrsOf (
+            lib.types.submodule {
+              options.tokenFile = lib.mkOption {
+                type = lib.types.strMatching "^/.*";
+                example = "/run/agenix/notion-work-api-token";
+                description = "Runtime file containing this Notion account's API token.";
+              };
+            }
+          );
+          default = { };
+          example = lib.literalExpression ''
+            {
+              work.tokenFile = config.age.secrets.notion-work.path;
+              personal.tokenFile = config.age.secrets.notion-personal.path;
+            }
+          '';
+          description = "Named Notion accounts installed as ntn-<name> commands. Account names may contain letters, numbers, underscores, and hyphens.";
+        };
+
+        defaultAccount = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "work";
+          description = "Named account exposed through the unqualified ntn command. Required when accounts is non-empty.";
         };
       };
 
@@ -1080,6 +1133,26 @@ in
             message = "programs.limitless.tools.notion.tokenFile requires programs.limitless.tools.notion.enable = true.";
           }
           {
+            assertion = !notionHasAccounts || enabledNotion;
+            message = "programs.limitless.tools.notion.accounts requires programs.limitless.tools.notion.enable = true.";
+          }
+          {
+            assertion = cfg.tools.notion.tokenFile == null || !notionHasAccounts;
+            message = "programs.limitless.tools.notion.tokenFile and programs.limitless.tools.notion.accounts are mutually exclusive.";
+          }
+          {
+            assertion = notionAccountNames == validNotionAccountNames;
+            message = "programs.limitless.tools.notion account names may contain only letters, numbers, underscores, and hyphens and must start with a letter or number.";
+          }
+          {
+            assertion = notionHasAccounts || cfg.tools.notion.defaultAccount == null;
+            message = "programs.limitless.tools.notion.defaultAccount requires a non-empty accounts set.";
+          }
+          {
+            assertion = !notionHasAccounts || notionHasValidDefault;
+            message = "programs.limitless.tools.notion.defaultAccount must name an entry in programs.limitless.tools.notion.accounts.";
+          }
+          {
             assertion = cfg.tools.acli.tokenFile == null || pkgs.stdenv.isLinux;
             message = "programs.limitless.tools.acli.tokenFile currently requires Linux and XDG_RUNTIME_DIR.";
           }
@@ -1127,7 +1200,7 @@ in
         home.packages = [ cfg.tools.effectSolutions.package ];
       })
       (lib.mkIf enabledNotion {
-        home.packages = [ notionPackage ];
+        home.packages = notionPackages;
       })
       (lib.mkIf enabledSentry {
         home.packages = [ sentryPackage ];

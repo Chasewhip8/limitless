@@ -80,6 +80,8 @@ programs.limitless = {
     agentBrowser.enable = true;
     effectSolutions.enable = true;
     notion = {
+      accounts = {};
+      defaultAccount = null;
       enable = false;
       tokenFile = null;
     };
@@ -153,6 +155,21 @@ programs.limitless.tools.notion = {
 ```
 
 The wrapper reads `tokenFile` for each command and passes it through the CLI environment as `NOTION_API_TOKEN`; it is never copied into the Nix store, generated OpenCode configuration, or process arguments. Without `tokenFile`, authenticate interactively with `ntn login`. The companion skill prefers Markdown page operations and bounded JSON queries, and requires reading pages before destructive replacements or trashing.
+
+For separate Notion accounts, configure named token files instead of the single `tokenFile`:
+
+```nix
+programs.limitless.tools.notion = {
+  enable = true;
+  accounts = {
+    work.tokenFile = config.age.secrets.notion-work.path;
+    personal.tokenFile = config.age.secrets.notion-personal.path;
+  };
+  defaultAccount = "work";
+};
+```
+
+This installs `ntn-work` and `ntn-personal`; the unqualified `ntn` command uses `defaultAccount`. Named account commands read only their own token file. Account names may contain letters, numbers, underscores, and hyphens and must start with a letter or number.
 
 Sentry support requires a runtime token file:
 
