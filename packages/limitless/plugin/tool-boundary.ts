@@ -1,5 +1,5 @@
 import { Tool } from '@opencode-ai/schema/tool'
-import { Effect, Match } from 'effect'
+import { Effect, Match, Schema } from 'effect'
 import {
 	FileAccessError,
 	FileAccessFailurePayload,
@@ -37,11 +37,35 @@ export type ToolExecutor = <Input, Output, Error>(
 	Tool.Error
 >
 
+function detachedStandardSchema<S extends Schema.ConstraintDecoder<unknown>>(schema: S) {
+	// Bundled plugins and OpenCode own separate Effect runtimes. Let the runtime call
+	// the bundled schema's Standard Schema validator instead of interpreting its AST.
+	const validation = Schema.toStandardSchemaV1(schema)['~standard']
+	const jsonSchema = Schema.toStandardJSONSchemaV1(schema)['~standard'].jsonSchema
+	return { '~standard': { ...validation, jsonSchema } }
+}
+
+type DetachedToolSchema<S> =
+	S extends Schema.ConstraintDecoder<unknown> ? ReturnType<typeof detachedStandardSchema<S>> : S
+
 export function defineLimitlessTool<
 	Input extends Tool.ValueSchema,
 	Output extends Tool.ValueSchema | undefined,
->(definition: Omit<Tool.Info<Input, Output>, 'options'>): Tool.Info<Input, Output> {
-	return { ...definition, options: { codemode: false } }
+>(
+	definition: Omit<Tool.Info<Input, Output>, 'options'>,
+): Tool.Info<DetachedToolSchema<Input>, DetachedToolSchema<Output>>
+export function defineLimitlessTool(definition: Omit<Tool.Info, 'options'>): Tool.Info {
+	return {
+		...definition,
+		input: Schema.isSchema(definition.input)
+			? detachedStandardSchema(definition.input)
+			: definition.input,
+		output:
+			definition.output !== undefined && Schema.isSchema(definition.output)
+				? detachedStandardSchema(definition.output)
+				: definition.output,
+		options: { codemode: false },
+	}
 }
 
 export function failurePayload(error: ToolFailure): ToolFailurePayload {

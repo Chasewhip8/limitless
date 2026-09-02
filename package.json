@@ -27,7 +27,7 @@
 		"@biomejs/biome": "^2.4.4",
 		"@effect/language-service": "^0.86.6",
 		"@types/node": "^25.3.3",
-		"effect": "4.0.0-rc.111",
+		"effect": "4.0.0-rc.112",
 		"typescript": "^5.4.0",
 		"vitest": "^3.0.0"
 	},

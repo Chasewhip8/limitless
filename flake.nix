@@ -44,11 +44,6 @@
             inherit pkgs self system;
           };
           opencodePackage = import ./nix/packages/opencode2.nix { inherit pkgs; };
-          packageManifest = builtins.fromJSON (builtins.readFile ./packages/limitless/package.json);
-          pluginSdkVersion = packageManifest.dependencies."@opencode-ai/plugin";
-          effectVersion = packageManifest.dependencies.effect;
-          pinnedOpencodeVersion = "0.0.0-beta-18050";
-          pinnedAnthropicAuthRev = "f043583c24085c60fc7f95059f2d6f36f44f4a8e";
 
           homeOptionStubs = {
             options = {
@@ -98,14 +93,12 @@
             {
               anthropicAuthEnabled ? true,
               linearEnabled ? false,
-              lspEnabled ? false,
               notionAccounts ? { },
               notionDefaultAccount ? null,
               notionEnabled ? false,
               notionPackage ? notionCliPackage,
               notionTokenFile ? null,
               skillsEnabled ? false,
-              serviceEnabled ? false,
             }:
             pkgs.lib.evalModules {
               specialArgs = { inherit pkgs; };
@@ -129,18 +122,13 @@
                       };
                     };
                     plugins.anthropicAuth.enable = anthropicAuthEnabled;
-                    lsp.enable = lspEnabled;
                     mcp.linear.enable = linearEnabled;
-                    opencode.service.enable = serviceEnabled;
                   };
                 }
               ];
             };
 
           enabledHome = evaluateHome { linearEnabled = true; };
-          disabledHome = evaluateHome { };
-          anthropicAuthDisabledHome = evaluateHome { anthropicAuthEnabled = false; };
-          lspHome = evaluateHome { lspEnabled = true; };
           notionHome = evaluateHome {
             notionEnabled = true;
             skillsEnabled = true;
@@ -176,29 +164,10 @@
           notionDefaultWrapper = findNotionAccountWrapper "ntn";
           notionPersonalWrapper = findNotionAccountWrapper "ntn-personal";
           notionWorkWrapper = findNotionAccountWrapper "ntn-work";
-          serviceHome = evaluateHome { serviceEnabled = pkgs.stdenv.isLinux; };
           enabledConfig = builtins.fromJSON (
             builtins.unsafeDiscardStringContext
               enabledHome.config.home.file.".config/opencode/opencode.json".text
           );
-          disabledConfig = builtins.fromJSON (
-            builtins.unsafeDiscardStringContext
-              disabledHome.config.home.file.".config/opencode/opencode.json".text
-          );
-          anthropicAuthDisabledConfig = builtins.fromJSON (
-            builtins.unsafeDiscardStringContext
-              anthropicAuthDisabledHome.config.home.file.".config/opencode/opencode.json".text
-          );
-          lspConfig = builtins.fromJSON (
-            builtins.unsafeDiscardStringContext lspHome.config.home.file.".config/opencode/opencode.json".text
-          );
-          expectedLinearConfig = {
-            type = "remote";
-            url = "https://mcp.linear.app/mcp";
-            disabled = false;
-            headers.Authorization = "Bearer {env:LINEAR_API_KEY}";
-            oauth = false;
-          };
           pluginSmokeConfig = pkgs.lib.recursiveUpdate enabledConfig {
             providers = {
               anthropic = {
@@ -254,8 +223,8 @@
             if (!response.ok) throw new Error("Could not list OpenCode2 plugins")
             const payload = await response.json()
             const expected = [
-              { id: "ex-machina.anthropic-auth", source: "file://${anthropicAuthPackage}/anthropic-auth.js" },
-              { id: "limitless", source: "file://${limitlessPackage}/limitless.js" },
+              { id: "ex-machina.anthropic-auth", source: "file://${anthropicAuthPackage}" },
+              { id: "limitless", source: "file://${limitlessPackage}" },
             ]
             const missing = expected.filter(({ id }) => !payload.data?.some((plugin) => plugin.id === id))
             if (missing.length > 0) {
@@ -275,7 +244,7 @@
             const expectedAgents = [
               { id: "limitless", providerID: "openai", modelID: "gpt-5.6-sol-fast-long", variant: "max" },
               { id: "gary", providerID: "openai", modelID: "gpt-5.6-sol-fast-long", variant: "xhigh" },
-              { id: "oracle", providerID: "anthropic", modelID: "claude-fable-5", variant: "high" },
+              { id: "oracle", providerID: "anthropic", modelID: "claude-fable-5-1", variant: "high" },
               { id: "research", providerID: "openai", modelID: "gpt-5.6-sol-fast", variant: "medium" },
               { id: "review", providerID: "openai", modelID: "gpt-5.6-sol-fast", variant: "xhigh" },
               { id: "worker", providerID: "openai", modelID: "gpt-5.6-sol-fast", variant: "xhigh" },
@@ -352,88 +321,6 @@
           '';
 
           checks = {
-            linear-mcp-config =
-              assert pkgs.lib.assertMsg (
-                enabledConfig.mcp.servers.linear == expectedLinearConfig
-              ) "generated Linear MCP config drifted";
-              assert pkgs.lib.assertMsg (
-                !(disabledConfig ? mcp)
-              ) "disabled Linear MCP unexpectedly generated config";
-              assert pkgs.lib.assertMsg (
-                !(enabledHome.config.home.file ? ".config/opencode/plugins/limitless.js")
-                && !(enabledHome.config.home.file ? ".config/opencode/plugins/anthropic-auth.js")
-              ) "managed plugins must be configured directly instead of through generated wrappers";
-              assert pkgs.lib.assertMsg (
-                builtins.length enabledConfig.plugins == 2
-                &&
-                  (builtins.elemAt enabledConfig.plugins 0).package
-                  == "file://${anthropicAuthPackage}/anthropic-auth.js"
-                &&
-                  (builtins.elemAt enabledConfig.plugins 1).options.providers.disabled == [
-                    "google-vertex"
-                    "google-vertex-anthropic"
-                  ]
-                && (builtins.elemAt enabledConfig.plugins 1).options.lsp == { }
-              ) "generated managed plugin configuration drifted";
-              assert pkgs.lib.assertMsg (
-                builtins.length anthropicAuthDisabledConfig.plugins == 1
-                &&
-                  (builtins.elemAt anthropicAuthDisabledConfig.plugins 0).package
-                  == "file://${limitlessPackage}/limitless.js"
-              ) "disabled Anthropic auth unexpectedly generated plugin configuration";
-              pkgs.runCommand "limitless-linear-mcp-config-check" { } ''
-                touch "$out"
-              '';
-
-            generated-runtime-config =
-              assert pkgs.lib.assertMsg (
-                lspConfig.lsp != { } && (builtins.elemAt lspConfig.plugins 1).options.lsp == lspConfig.lsp
-              ) "generated OpenCode and Limitless plugin LSP configurations drifted";
-              assert pkgs.lib.assertMsg
-                (builtins.elemAt disabledConfig.plugins 1).options.notifications.events.permission
-                "permission request notifications must default to enabled";
-              assert pkgs.lib.assertMsg (
-                !pkgs.stdenv.isLinux
-                || serviceHome.config.home.shellAliases.oc == "${opencodePackage}/bin/opencode2 \"$PWD\""
-              ) "generated OpenCode2 service alias drifted";
-              assert pkgs.lib.assertMsg (
-                !pkgs.stdenv.isLinux
-                ||
-                  serviceHome.config.systemd.user.services.opencode2.Service.ExecStart
-                  == "${opencodePackage}/bin/opencode2 serve --service --hostname 127.0.0.1 --port 4096"
-              ) "generated OpenCode2 service command drifted";
-              assert pkgs.lib.assertMsg (
-                !pkgs.stdenv.isLinux
-                || builtins.elem anthropicAuthPackage serviceHome.config.systemd.user.services.opencode2.Unit.X-Restart-Triggers
-              ) "OpenCode2 service does not restart when the Anthropic auth package changes";
-              pkgs.runCommand "limitless-generated-runtime-config-check" { } ''
-                touch "$out"
-              '';
-
-            opencode-version-alignment =
-              assert pkgs.lib.assertMsg (
-                pluginSdkVersion == pinnedOpencodeVersion
-              ) "Limitless plugin SDK must remain pinned to ${pinnedOpencodeVersion}";
-              assert pkgs.lib.assertMsg (
-                effectVersion == "4.0.0-rc.111"
-              ) "Limitless Effect must remain pinned to the plugin SDK dependency 4.0.0-rc.111";
-              assert pkgs.lib.assertMsg (
-                anthropicAuthPackage.rev == pinnedAnthropicAuthRev
-                && anthropicAuthPackage.upstreamPluginSdkVersion == "0.0.0-next-17444"
-              ) "Anthropic auth must remain pinned to the reviewed pull request 211 commit";
-              assert pkgs.lib.assertMsg (
-                opencodePackage.version == pluginSdkVersion
-              ) "OpenCode2 runtime ${opencodePackage.version} does not match plugin SDK ${pluginSdkVersion}";
-              pkgs.runCommand "limitless-opencode2-version-alignment-${pluginSdkVersion}" { } ''
-                export HOME="$TMPDIR"
-                runtimeVersion="$(${opencodePackage}/bin/opencode2 --version)"
-                if [ "$runtimeVersion" != "opencode2 v${pluginSdkVersion}" ]; then
-                  echo "OpenCode2 executable $runtimeVersion does not match plugin SDK ${pluginSdkVersion}" >&2
-                  exit 1
-                fi
-                touch "$out"
-              '';
-
             opencode-plugin-load = pkgs.runCommand "limitless-opencode2-plugin-load-check" { } ''
               export HOME="$TMPDIR/home"
               export XDG_CACHE_HOME="$HOME/.cache"

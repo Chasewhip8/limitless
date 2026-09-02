@@ -36,7 +36,17 @@ export function testToolExecutor(
 }
 
 export function settleTestTool(tool: Tool.Info, input: unknown, execution: ToolExecutionContext) {
-	if (!Schema.isSchema(tool.input))
-		return Effect.fail(new Tool.Error({ message: 'Test tools must use Effect Schema inputs.' }))
-	return tool.execute(Schema.decodeUnknownSync(tool.input)(input), testToolContext(execution))
+	if (Schema.isSchema(tool.input))
+		return tool.execute(Schema.decodeUnknownSync(tool.input)(input), testToolContext(execution))
+	if ('~standard' in tool.input) {
+		const standardInput = tool.input as Extract<Tool.ValueSchema, { readonly '~standard': unknown }>
+		return Effect.promise(() => Promise.resolve(standardInput['~standard'].validate(input))).pipe(
+			Effect.flatMap((result) =>
+				result.issues !== undefined
+					? Effect.die(new Error(result.issues.map((issue) => issue.message).join(', ')))
+					: tool.execute(result.value, testToolContext(execution)),
+			),
+		)
+	}
+	return Effect.fail(new Tool.Error({ message: 'Test tools require a decodable input schema.' }))
 }

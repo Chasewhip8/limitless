@@ -69,7 +69,7 @@ export function limitlessTools(
 }
 
 export function registerLimitlessTools(
-	draft: ToolDraft,
+	draft: Pick<ToolDraft, 'add'>,
 	tools: ReturnType<typeof limitlessTools>,
 ): void {
 	draft.add(tools.artifact_create)

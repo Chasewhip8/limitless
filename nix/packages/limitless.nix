@@ -30,7 +30,7 @@ let
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
     '';
 
-    outputHash = "sha256-8IPGr2Lq2sKM7SUjOvsEMvaq7LGPCtuDQnq3eB22nck=";
+    outputHash = "sha256-uspJVlnjQB5kN+th4Ia/gPETnQ4gPYGF3rEIPSR/SxM=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -69,11 +69,20 @@ pkgs.stdenvNoCC.mkDerivation {
       --replace-fail "@AST_GREP_BIN@" "${pkgs.ast-grep}/bin/ast-grep" \
       --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git" \
       --replace-fail "@TYPST_BIN@" "${pkgs.typst}/bin/typst"
+    cp "$out/limitless.js" "$out/index.js"
 
     cp ${bunDeps}/packages/limitless/node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "$out/"
     cp dist/slack-image-worker.mjs "$out/"
     cp -r templates "$out/templates"
     cp -r frameworks "$out/frameworks"
+    cat > "$out/package.json" <<'EOF'
+    {
+      "name": "limitless",
+      "version": "1.0.0",
+      "type": "module",
+      "exports": "./limitless.js"
+    }
+    EOF
   '';
 
   meta = with pkgs.lib; {

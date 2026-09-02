@@ -336,12 +336,12 @@ let
   };
 
   limitlessPlugin = {
-    package = "file://${cfg.plugins.limitless.package}/limitless.js";
+    package = "file://${cfg.plugins.limitless.package}";
     options = limitlessPluginOptions;
   };
 
   anthropicAuthPlugin = {
-    package = "file://${cfg.plugins.anthropicAuth.package}/anthropic-auth.js";
+    package = "file://${cfg.plugins.anthropicAuth.package}";
   };
 
   managedPlugins = lib.optional enabledAnthropicAuth anthropicAuthPlugin ++ [ limitlessPlugin ];

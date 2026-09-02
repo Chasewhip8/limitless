@@ -1,6 +1,7 @@
 { pkgs }:
 let
   rev = "f043583c24085c60fc7f95059f2d6f36f44f4a8e";
+  packageVersion = "2.0.0-pr211-${builtins.substring 0 7 rev}";
   upstreamPluginSdkVersion = "0.0.0-next-17444";
   src = pkgs.fetchFromGitHub {
     owner = "CasualDeveloper";
@@ -35,7 +36,7 @@ let
 in
 pkgs.stdenvNoCC.mkDerivation {
   pname = "opencode-anthropic-auth";
-  version = "2.0.0-pr211-${builtins.substring 0 7 rev}";
+  version = packageVersion;
   inherit src;
 
   nativeBuildInputs = [ pkgs.bun ];
@@ -69,7 +70,16 @@ pkgs.stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p $out
     cp dist/anthropic-auth.js $out/anthropic-auth.js
+    cp dist/anthropic-auth.js $out/index.js
     cp LICENSE $out/LICENSE
+    cat > $out/package.json <<'EOF'
+    {
+      "name": "opencode-anthropic-auth",
+      "version": "${packageVersion}",
+      "type": "module",
+      "exports": "./anthropic-auth.js"
+    }
+    EOF
   '';
 
   passthru = {
