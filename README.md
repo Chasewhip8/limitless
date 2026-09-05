@@ -3,7 +3,7 @@
 > A Home Manager module for a ready-to-use OpenCode 2.0 beta agent workspace.
 
 Limitless is decisively cut over to the volatile OpenCode 2.0 beta at
-`0.0.0-beta-18866`. It has no OpenCode 1 runtime, configuration, plugin, or
+`0.0.0-beta-19124`. It has no OpenCode 1 runtime, configuration, plugin, or
 session-migration path. Existing OpenCode 1 sessions may be unavailable after
 switching.
 
@@ -199,7 +199,7 @@ OpenCode 2 stores one saved credential per integration. Connecting Max replaces 
 
 OAuth credentials created by the earlier experimental Limitless integration use a different method ID and are not recognized by the upstream plugin. Reconnect **Claude Pro/Max** once after upgrading.
 
-PR 211 targets `@opencode-ai/plugin@0.0.0-next-17444`; Limitless validates its packaged output by loading it into the pinned OpenCode `0.0.0-beta-18866` runtime and exercising OAuth registration. The compatibility profile identifies as Claude Code `2.1.87`, and refresh rotation is deduplicated within one OpenCode process. `ANTHROPIC_BASE_URL` can override the request endpoint. `ANTHROPIC_INSECURE` cannot disable TLS verification through the V2 hooks and only produces a warning.
+PR 211 targets `@opencode-ai/plugin@0.0.0-next-17444`. The compatibility profile identifies as Claude Code `2.1.87`, and refresh rotation is deduplicated within one OpenCode process. `ANTHROPIC_BASE_URL` can override the request endpoint. `ANTHROPIC_INSECURE` cannot disable TLS verification through the V2 hooks and only produces a warning.
 
 When `mcp.linear.enable` is true, Home Manager adds Linear at `mcp.servers.linear` with `disabled = false`, `oauth = false`, and `Authorization = "Bearer {env:LINEAR_API_KEY}"`. No Linear plugin or generated secret is involved; `LINEAR_API_KEY` must be present in the `opencode2` process environment at runtime.
 
@@ -209,7 +209,7 @@ Language-server definitions for Limitless tools come only from validated Home Ma
 
 Home Manager installs skills in the native global OpenCode 2 location, `~/.config/opencode/skills`. Service mode runs `opencode2 serve --service`, which registers its generated credential in OpenCode's state directory; the shell alias uses normal managed-service discovery to connect with that credential.
 
-The packaged GPT-5.6 Luna, Sol, and Terra models use the 400k short-context limits by default. Separate `-long` and `-fast-long` aliases advertise a conservative 500k context limit to OpenCode so compaction starts before the provider's full 1.05M window is exhausted. OpenAI does not officially support long context with Priority processing, so a Fast Long request may be downgraded to the default service tier.
+The packaged GPT-5.6 Luna and Terra models use the 400k short-context limits by default. Separate `-long` and `-fast-long` aliases advertise a conservative 500k context limit to OpenCode so compaction starts before the provider's full 1.05M window is exhausted. GPT-6 Astra uses its full 1.05M context window for both Standard and Fast processing; Codex subscription usage does not apply an additional long-context multiplier above 272k input tokens, so Astra does not need separate long-context aliases.
 
 OpenCode 2 has no native equivalent for the former OpenAI response-header timeout option. Limitless therefore drops the old 60-second override rather than placing an unsupported value in provider settings. This is the narrow beta cutover decision until OpenCode 2 exposes a supported equivalent.
 
@@ -308,6 +308,6 @@ Document artifacts are source-first: edit `main.typ` directly, compose with fram
 
 ## Maintainers
 
-Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode-ai/*@0.0.0-beta-18866` and `effect@4.0.0-rc.112`; update them together because beta APIs and storage remain volatile.
+Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode-ai/*@0.0.0-beta-19124` and `effect@4.0.0-rc.112`; update them together because beta APIs and storage remain volatile.
 
 For structure and implementation details, see the module options in `nix/modules/home.nix`.

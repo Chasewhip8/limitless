@@ -1,4 +1,4 @@
-import type { CatalogDraft, CatalogProviderRecord } from '@opencode-ai/plugin/effect/catalog'
+import type { CatalogEditor, CatalogProviderRecord } from '@opencode-ai/plugin/effect/catalog'
 import { Provider } from '@opencode-ai/schema/provider'
 import { Effect, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
@@ -24,7 +24,7 @@ function catalog(...providerIDs: ReadonlyArray<string>) {
 			},
 		]),
 	)
-	const draft: CatalogDraft = {
+	const draft: CatalogEditor = {
 		provider: {
 			list: () => [...records.values()],
 			get: (id) => records.get(id),

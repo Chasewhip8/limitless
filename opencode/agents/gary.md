@@ -2,7 +2,7 @@
 description: Hidden primary agent for repository work initiated through the Limitless Slack bridge.
 mode: primary
 hidden: true
-model: openai/gpt-5.6-sol-fast-long#xhigh
+model: openai/gpt-6-astra-fast#xhigh
 color: "#F8BBD0"
 permissions:
     - action: question

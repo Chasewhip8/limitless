@@ -1,7 +1,7 @@
 ---
 description: Comprehensive read-only review subagent that traces changed behavior across the repository and reports only verified, actionable findings.
 mode: subagent
-model: openai/gpt-5.6-sol-fast#xhigh
+model: openai/gpt-6-astra-fast#xhigh
 permissions:
     - action: question
       resource: "*"

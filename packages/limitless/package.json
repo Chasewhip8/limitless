@@ -6,8 +6,8 @@
 	"main": "./index.ts",
 	"types": "./index.ts",
 	"dependencies": {
-		"@opencode-ai/plugin": "0.0.0-beta-18866",
-		"@opencode-ai/schema": "0.0.0-beta-18866",
+		"@opencode-ai/plugin": "0.0.0-beta-19124",
+		"@opencode-ai/schema": "0.0.0-beta-19124",
 		"@silvia-odwyer/photon-node": "0.3.4",
 		"@slack/bolt": "5.0.0",
 		"@slack/web-api": "8.0.0",

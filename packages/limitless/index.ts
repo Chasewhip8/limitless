@@ -1,5 +1,5 @@
 import { Plugin } from '@opencode-ai/plugin/effect'
-import type { ToolDraft } from '@opencode-ai/plugin/effect/tool'
+import type { ToolEditor } from '@opencode-ai/plugin/effect/tool'
 import { Session } from '@opencode-ai/schema/session'
 import { Tool } from '@opencode-ai/schema/tool'
 import { Effect, Schema, type Scope, Stream } from 'effect'
@@ -69,7 +69,7 @@ export function limitlessTools(
 }
 
 export function registerLimitlessTools(
-	draft: Pick<ToolDraft, 'add'>,
+	draft: Pick<ToolEditor, 'add'>,
 	tools: ReturnType<typeof limitlessTools>,
 ): void {
 	draft.add(tools.artifact_create)
