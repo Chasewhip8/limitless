@@ -1,7 +1,7 @@
 ---
 description: Oracle question-answering subagent for difficult technical questions, architecture, debugging, planning, tradeoffs, and independent second opinions.
 mode: subagent
-model: anthropic/claude-fable-5-1#high
+model: openai/gpt-6-astra-fast#max
 permissions:
     - action: question
       resource: "*"
