@@ -1,5 +1,5 @@
-import type { CatalogEditor, CatalogProviderRecord } from '@opencode-ai/plugin/effect/catalog'
-import { Provider } from '@opencode-ai/schema/provider'
+import type { CatalogEditor, CatalogProviderRecord } from '@opencode/plugin/effect/catalog'
+import { Provider } from '@opencode/schema/provider'
 import { Effect, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 import {

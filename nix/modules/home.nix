@@ -51,8 +51,8 @@ let
     : "''${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
     ready_file="$XDG_RUNTIME_DIR/limitless-slack-ready"
 
-    until ${opencodePackage}/bin/opencode2 api plugin.list \
-      --param ${lib.escapeShellArg "location.directory=${slackRepository}"} >/dev/null 2>&1; do
+    until ${opencodePackage}/bin/opencode2 api v2.plugin.list \
+      --param ${lib.escapeShellArg "location[directory]=${slackRepository}"} >/dev/null 2>&1; do
       ${pkgs.coreutils}/bin/sleep 0.1
     done
 

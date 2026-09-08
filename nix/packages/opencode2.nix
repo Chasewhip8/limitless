@@ -1,22 +1,22 @@
 { pkgs }:
 let
-  version = "0.0.0-dev-19134";
+  version = "0.0.0-beta-19296";
   sources = {
     x86_64-linux = {
       platform = "linux-x64";
-      hash = "sha256-KzEf6/jB9O6eOL/1wHV4gDcNnUfG4tbdmNUzzRV3a+k=";
+      hash = "sha256-G0DR7NChWhiiAmNpwuOfxx+ouobLrmr4AMWkdLrrM00=";
     };
     aarch64-linux = {
       platform = "linux-arm64";
-      hash = "sha256-50Z2Mk7GFeKuGRewteiRlJfIxGTpsPhpk2Jw2kA1XiE=";
+      hash = "sha256-sCLvLT/4GgXKQ7o5D5zDYPPaybPHdkEvF5fNFEr7zww=";
     };
     aarch64-darwin = {
       platform = "darwin-arm64";
-      hash = "sha256-83xotul+L4BM/tJuE5c/jhimjG5Kdd32qSaAbe024UE=";
+      hash = "sha256-uY938nPDID83IGsKu/mxzSIYjFX+33CggtpFG5o7c7k=";
     };
     x86_64-darwin = {
       platform = "darwin-x64";
-      hash = "sha256-JEF0m6iN2yn1lc+FXNzXpc9fKS4odl2FZnmbxv49tH4=";
+      hash = "sha256-qQiUTJuXAtVJHIPzDeN5oxm/cnJVNVBN8aQYTAxmsKg=";
     };
   };
   source =
@@ -28,7 +28,7 @@ pkgs.stdenv.mkDerivation {
   inherit version;
 
   src = pkgs.fetchurl {
-    url = "https://registry.npmjs.org/@opencode-ai/cli-${source.platform}/-/cli-${source.platform}-${version}.tgz";
+    url = "https://registry.npmjs.org/@opencode/cli-${source.platform}/-/cli-${source.platform}-${version}.tgz";
     inherit (source) hash;
   };
   sourceRoot = "package";
@@ -58,7 +58,7 @@ pkgs.stdenv.mkDerivation {
   meta = {
     description = "OpenCode 2 beta CLI";
     homepage = "https://opencode.ai";
-    downloadPage = "https://www.npmjs.com/package/@opencode-ai/cli?activeTab=versions";
+    downloadPage = "https://www.npmjs.com/package/@opencode/cli?activeTab=versions";
     license = pkgs.lib.licenses.mit;
     sourceProvenance = [ pkgs.lib.sourceTypes.binaryNativeCode ];
     mainProgram = "opencode2";

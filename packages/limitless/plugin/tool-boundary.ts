@@ -1,4 +1,4 @@
-import { Tool } from '@opencode-ai/schema/tool'
+import { Tool } from '@opencode/schema/tool'
 import { Effect, Match, Schema } from 'effect'
 import {
 	FileAccessError,

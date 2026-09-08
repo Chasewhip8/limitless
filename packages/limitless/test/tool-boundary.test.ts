@@ -1,5 +1,5 @@
-import { Session } from '@opencode-ai/schema/session'
-import { Tool } from '@opencode-ai/schema/tool'
+import { Session } from '@opencode/schema/session'
+import { Tool } from '@opencode/schema/tool'
 import { Effect, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { toolInputError } from '../core/errors'

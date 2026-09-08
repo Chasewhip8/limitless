@@ -1,4 +1,4 @@
-import type { CatalogEditor } from '@opencode-ai/plugin/effect/catalog'
+import type { CatalogEditor } from '@opencode/plugin/effect/catalog'
 import { Effect, Schema } from 'effect'
 import { TrimmedNonEmptyString } from '../core/command'
 import { schemaErrorMessage } from '../lib/guards'

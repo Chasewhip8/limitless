@@ -1,6 +1,6 @@
 import { realpath, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { Plugin } from '@opencode-ai/plugin/effect'
+import type { Plugin } from '@opencode/plugin/effect'
 import { App } from '@slack/bolt'
 import { WebClient } from '@slack/web-api'
 import { type Deferred, Effect, Semaphore } from 'effect'

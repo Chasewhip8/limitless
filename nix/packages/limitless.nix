@@ -30,7 +30,7 @@ let
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
     '';
 
-    outputHash = "sha256-uspJVlnjQB5kN+th4Ia/gPETnQ4gPYGF3rEIPSR/SxM=";
+    outputHash = "sha256-j0bAro2GgqvMoFqOkoJBb4QknikgNCpbD1r0EaUmBzY=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };

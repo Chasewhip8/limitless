@@ -1,7 +1,7 @@
-import { Plugin } from '@opencode-ai/plugin/effect'
-import type { ToolEditor } from '@opencode-ai/plugin/effect/tool'
-import { Session } from '@opencode-ai/schema/session'
-import { Tool } from '@opencode-ai/schema/tool'
+import { Plugin } from '@opencode/plugin/effect'
+import type { ToolEditor } from '@opencode/plugin/effect/tool'
+import { Session } from '@opencode/schema/session'
+import { Tool } from '@opencode/schema/tool'
 import { Effect, Schema, type Scope, Stream } from 'effect'
 import {
 	createNotificationRunner,

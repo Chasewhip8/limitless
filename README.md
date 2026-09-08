@@ -3,7 +3,7 @@
 > A Home Manager module for a ready-to-use OpenCode 2.0 beta agent workspace.
 
 Limitless is decisively cut over to the volatile OpenCode 2.0 beta at
-`0.0.0-beta-19124`. It has no OpenCode 1 runtime, configuration, plugin, or
+`0.0.0-beta-19296`. It has no OpenCode 1 runtime, configuration, plugin, or
 session-migration path. Existing OpenCode 1 sessions may be unavailable after
 switching.
 
@@ -308,6 +308,6 @@ Document artifacts are source-first: edit `main.typ` directly, compose with fram
 
 ## Maintainers
 
-Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode-ai/*@0.0.0-beta-19124` and `effect@4.0.0-rc.112`; update them together because beta APIs and storage remain volatile.
+Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode/*@0.0.0-beta-19296` and `effect@4.0.0-rc.112`; update them together because beta APIs and storage remain volatile. OpenCode 2 packages now use the `@opencode` namespace; follow the `beta` channel rather than npm's `latest` tag.
 
 For structure and implementation details, see the module options in `nix/modules/home.nix`.

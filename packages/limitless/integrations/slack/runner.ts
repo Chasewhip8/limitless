@@ -1,8 +1,8 @@
 import { open } from 'node:fs/promises'
 import path from 'node:path'
-import { Agent } from '@opencode-ai/schema/agent'
-import { Session } from '@opencode-ai/schema/session'
-import { SessionMessage } from '@opencode-ai/schema/session-message'
+import { Agent } from '@opencode/schema/agent'
+import { Session } from '@opencode/schema/session'
+import { SessionMessage } from '@opencode/schema/session-message'
 import { Deferred, Effect, Option, Schema, Semaphore } from 'effect'
 import { describeUnknown, schemaErrorMessage } from '../../lib/guards'
 import {
