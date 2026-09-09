@@ -6,8 +6,9 @@ import {
 	artifactsStorageRoot,
 	limitlessStorageRoot,
 } from '../../core/storage'
+import { optionalField } from '../../lib/type-utils'
 import { ensureDirectory, readJsonFile } from './filesystem'
-import { ArtifactManifest, type ArtifactSlug as ArtifactSlugType } from './schema'
+import { Artifact, ArtifactManifest, type ArtifactSlug as ArtifactSlugType } from './schema'
 
 export function artifactsRoot(worktree: string): string {
 	return artifactsStorageRoot(worktree)
@@ -30,6 +31,15 @@ export function artifactManifestRelativePath(slug: ArtifactSlugType): string {
 
 export function artifactManifestPath(worktree: string, slug: ArtifactSlugType): string {
 	return path.resolve(worktree, artifactManifestRelativePath(slug))
+}
+
+export function artifactFromManifest(manifest: ArtifactManifest): Artifact {
+	return Artifact.make({
+		slug: manifest.slug,
+		path: artifactRelativePath(manifest.slug),
+		...optionalField('title', manifest.title),
+		createdAt: manifest.createdAt,
+	})
 }
 
 export const ensureArtifactsRoot = Effect.fn(function* ensureArtifactsRoot(

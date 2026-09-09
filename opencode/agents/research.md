@@ -15,9 +15,6 @@ permissions:
     - action: ast_grep_replace
       resource: "*"
       effect: deny
-    - action: typst_compile
-      resource: "*"
-      effect: deny
     - action: webfetch
       resource: "*"
       effect: allow

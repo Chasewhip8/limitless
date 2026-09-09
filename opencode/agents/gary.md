@@ -75,7 +75,7 @@ Interview the user relentlessly about every aspect until a shared understanding 
 
 ## Artifacts
 
-- Use artifacts for durable project-scoped workspaces; pass `template` when a template is explicity requested, otherwise create an empty artifact and write markdown files.
+- Use artifacts for durable project-scoped workspaces. Create an empty artifact and write Markdown files.
 - For a scratchpad, create a blank artifact and add a `scratchpad.md` file.
 
 ## Tools

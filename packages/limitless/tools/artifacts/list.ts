@@ -3,28 +3,11 @@ import { Effect, Option, Result, Schema } from 'effect'
 import { isMissingPath, toolOperationError } from '../../core/errors'
 import { ToolExecutionContext } from '../../core/execution'
 import { optionalField } from '../../lib/type-utils'
-import { artifactRelativePath, ensureArtifactsRoot, readArtifactManifest } from './paths'
-import {
-	type ArtifactManifest,
-	ArtifactSlug,
-	ArtifactTemplateReference,
-	ArtifactTimestamp,
-	ArtifactTitle,
-} from './schema'
+import { artifactFromManifest, ensureArtifactsRoot, readArtifactManifest } from './paths'
+import { Artifact, ArtifactSlug } from './schema'
 
-export const ArtifactListInput = Schema.Struct({
-	template: Schema.optional(ArtifactTemplateReference),
-})
+export const ArtifactListInput = Schema.Struct({})
 export type ArtifactListInput = typeof ArtifactListInput.Type
-
-export const ArtifactListEntry = Schema.Struct({
-	slug: ArtifactSlug,
-	path: Schema.String,
-	createdAt: ArtifactTimestamp,
-	title: Schema.optional(ArtifactTitle),
-	template: Schema.optional(ArtifactTemplateReference),
-})
-export type ArtifactListEntry = typeof ArtifactListEntry.Type
 
 export const InvalidArtifactListEntry = Schema.Struct({
 	slug: ArtifactSlug,
@@ -34,7 +17,7 @@ export type InvalidArtifactListEntry = typeof InvalidArtifactListEntry.Type
 
 export const ArtifactListResult = Schema.Struct({
 	ok: Schema.Literal(true),
-	artifacts: Schema.Array(ArtifactListEntry),
+	artifacts: Schema.Array(Artifact),
 	invalidArtifacts: Schema.optional(Schema.Array(InvalidArtifactListEntry)),
 })
 export type ArtifactListResult = typeof ArtifactListResult.Type
@@ -44,16 +27,6 @@ export function artifactSlugFromString(value: string): typeof ArtifactSlug.Type 
 	return Option.isSome(decoded) ? decoded.value : undefined
 }
 
-function manifestListEntry(manifest: typeof ArtifactManifest.Type): typeof ArtifactListEntry.Type {
-	return ArtifactListEntry.make({
-		slug: manifest.slug,
-		path: artifactRelativePath(manifest.slug),
-		createdAt: manifest.createdAt,
-		...optionalField('title', manifest.title),
-		...optionalField('template', manifest.template),
-	})
-}
-
 const readArtifactsDirectory = Effect.fn(function* readArtifactsDirectory(root: string) {
 	return yield* Effect.tryPromise({
 		try: () => readdir(root, { withFileTypes: true }),
@@ -61,12 +34,12 @@ const readArtifactsDirectory = Effect.fn(function* readArtifactsDirectory(root: 
 	})
 })
 
-export const artifactList = Effect.fn(function* artifactList(input: ArtifactListInput) {
+export const artifactList = Effect.fn(function* artifactList(_input: ArtifactListInput) {
 	const context = yield* ToolExecutionContext
 	const root = yield* ensureArtifactsRoot(context.projectRoot, false, 'artifact_list')
 	if (root === undefined) return ArtifactListResult.make({ ok: true, artifacts: [] })
 	const entries = yield* readArtifactsDirectory(root)
-	const artifacts: Array<ArtifactListEntry> = []
+	const artifacts: Array<Artifact> = []
 	const invalidArtifacts: Array<InvalidArtifactListEntry> = []
 	for (const entry of entries) {
 		if (!entry.isDirectory()) continue
@@ -82,9 +55,7 @@ export const artifactList = Effect.fn(function* artifactList(input: ArtifactList
 			invalidArtifacts.push({ slug, reason: 'manifest.json is missing or invalid' })
 			continue
 		}
-		if (input.template === undefined || manifest.success.template === input.template) {
-			artifacts.push(manifestListEntry(manifest.success))
-		}
+		artifacts.push(artifactFromManifest(manifest.success))
 	}
 	artifacts.sort((left, right) => {
 		const created = right.createdAt.localeCompare(left.createdAt)

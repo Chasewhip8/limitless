@@ -67,14 +67,11 @@ pkgs.stdenvNoCC.mkDerivation {
     mkdir -p "$out"
     substitute "dist/limitless.js" "$out/limitless.js" \
       --replace-fail "@AST_GREP_BIN@" "${pkgs.ast-grep}/bin/ast-grep" \
-      --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git" \
-      --replace-fail "@TYPST_BIN@" "${pkgs.typst}/bin/typst"
+      --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git"
     cp "$out/limitless.js" "$out/index.js"
 
     cp ${bunDeps}/packages/limitless/node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "$out/"
     cp dist/slack-image-worker.mjs "$out/"
-    cp -r templates "$out/templates"
-    cp -r frameworks "$out/frameworks"
     cat > "$out/package.json" <<'EOF'
     {
       "name": "limitless",

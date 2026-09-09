@@ -64,19 +64,16 @@ let
   permissionRule = action: resource: effect: { inherit action resource effect; };
 
   defaultAgentBrowserPackage = self.packages.${system}."agent-browser";
-  defaultEffectSolutionsPackage = self.packages.${system}."effect-solutions";
   defaultNotionPackage = self.packages.${system}."notion-cli";
   defaultSentryPackage = self.packages.${system}.sentry;
   defaultAcliPackage = pkgs.acli;
 
   enabledAcli = cfg.enable && cfg.tools.acli.enable;
   enabledAgentBrowser = cfg.enable && cfg.tools.agentBrowser.enable;
-  enabledEffectSolutions = cfg.enable && cfg.tools.effectSolutions.enable;
   enabledNotion = cfg.enable && cfg.tools.notion.enable;
   enabledSentry = cfg.enable && cfg.tools.sentry.enable;
   enabledAcliSkill = enabledSkills && enabledAcli;
   enabledAgentBrowserSkill = enabledSkills && enabledAgentBrowser;
-  enabledEffectSolutionsSkill = enabledSkills && enabledEffectSolutions;
   enabledNotionSkill = enabledSkills && enabledNotion;
   enabledSentrySkill = enabledSkills && enabledSentry;
 
@@ -261,7 +258,6 @@ let
     copySkills ${cfg.skills.package}
     ${lib.optionalString enabledAcliSkill "copySkills ${acliSkillPackage}"}
     ${lib.optionalString enabledAgentBrowserSkill "copySkills ${cfg.tools.agentBrowser.package}/share/skills"}
-    ${lib.optionalString enabledEffectSolutionsSkill "copySkills ${cfg.tools.effectSolutions.package}/share/skills"}
     ${lib.optionalString enabledNotionSkill "copySkills ${cfg.tools.notion.package}/share/skills"}
     ${lib.optionalString enabledSentrySkill "copySkills ${cfg.tools.sentry.package}/share/skills"}
   '';
@@ -561,21 +557,6 @@ in
           type = lib.types.package;
           default = defaultAgentBrowserPackage;
           description = "agent-browser package to install.";
-        };
-      };
-
-      effectSolutions = {
-        enable = lib.mkOption {
-          type = lib.types.bool;
-          default = cfg.skills.enable;
-          defaultText = lib.literalExpression "config.programs.limitless.skills.enable";
-          description = "Whether to install effect-solutions and its TypeScript Effect companion skill when skill installation is enabled.";
-        };
-
-        package = lib.mkOption {
-          type = lib.types.package;
-          default = defaultEffectSolutionsPackage;
-          description = "effect-solutions package to install.";
         };
       };
 
@@ -1195,9 +1176,6 @@ in
       })
       (lib.mkIf enabledAcli {
         home.packages = [ acliPackage ];
-      })
-      (lib.mkIf enabledEffectSolutions {
-        home.packages = [ cfg.tools.effectSolutions.package ];
       })
       (lib.mkIf enabledNotion {
         home.packages = notionPackages;

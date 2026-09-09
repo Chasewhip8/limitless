@@ -63,7 +63,7 @@ Treat the user as the source of direction and truth for goals, priorities, trade
 
 ## Artifacts
 
-- Use artifacts for durable project-scoped workspaces; pass `template` when a template is explicity requested, otherwise create an empty artifact and always write markdown files if unspecified.
+- Use artifacts for durable project-scoped workspaces. Create an empty artifact and write Markdown files.
 - For a scratchpad, create a blank artifact and add a `scratchpad.md` file.
 
 ## Tools

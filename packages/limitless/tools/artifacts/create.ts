@@ -1,23 +1,21 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, rmdir } from 'node:fs/promises'
 import path from 'node:path'
-import { Effect, Schema } from 'effect'
+import { Effect, Exit, Schema } from 'effect'
 import { isAlreadyExists, toolInputError, toolOperationError } from '../../core/errors'
 import { ToolExecutionContext } from '../../core/execution'
 import { optionalField } from '../../lib/type-utils'
-import { copyDirectoryContents, writeJsonFile } from './filesystem'
-import { artifactManifestRelativePath, artifactRelativePath, ensureArtifactsRoot } from './paths'
-import type { ArtifactTemplateName } from './schema'
+import { writeJsonFile } from './filesystem'
+import { artifactFromManifest, ensureArtifactsRoot } from './paths'
 import {
 	ARTIFACT_TITLE_MAX_LENGTH,
+	Artifact,
 	ArtifactManifest as ArtifactManifestSchema,
 	ArtifactSlug,
 	type ArtifactSlug as ArtifactSlugType,
-	ArtifactTemplateReference,
 	ArtifactTimestamp,
 	ArtifactTitle,
 } from './schema'
-import { resolveArtifactTemplate } from './templates'
 
 const ArtifactTitleInput = Schema.String.check(
 	Schema.makeFilter(
@@ -30,22 +28,14 @@ const ArtifactTitleInput = Schema.String.check(
 export const ArtifactCreateInput = Schema.Struct({
 	title: Schema.optional(ArtifactTitleInput),
 	slug: Schema.optional(ArtifactSlug),
-	template: Schema.optional(ArtifactTemplateReference),
 })
 export type ArtifactCreateInput = typeof ArtifactCreateInput.Type
 
 export const ArtifactCreateResult = Schema.Struct({
 	ok: Schema.Literal(true),
-	slug: ArtifactSlug,
-	path: Schema.String,
-	manifestPath: Schema.String,
-	created: Schema.Literal(true),
-	manifest: ArtifactManifestSchema,
+	artifact: Artifact,
 })
 export type ArtifactCreateResult = typeof ArtifactCreateResult.Type
-
-const TEMPLATE_MANIFEST_FILE = 'manifest.json'
-export const decodeArtifactSlug = Schema.decodeUnknownEffect(ArtifactSlug)
 
 const normalizeTitle = Effect.fn(function* normalizeTitle(title: string | undefined) {
 	if (title === undefined) return undefined
@@ -61,8 +51,8 @@ const normalizeTitle = Effect.fn(function* normalizeTitle(title: string | undefi
 	)
 })
 
-function slugifyTitle(title: string | undefined, fallback: string): string {
-	const source = title ?? fallback
+function slugifyTitle(title: string | undefined): string {
+	const source = title ?? 'artifact'
 	const slug = source
 		.normalize('NFKD')
 		.toLowerCase()
@@ -70,18 +60,15 @@ function slugifyTitle(title: string | undefined, fallback: string): string {
 		.replace(/^-+|-+$/gu, '')
 		.slice(0, 72)
 		.replace(/-+$/u, '')
-	return slug.length === 0 ? fallback : slug
+	return slug.length === 0 ? 'artifact' : slug
 }
 
-export const generatedArtifactSlug = Effect.fn(function* generatedArtifactSlug(
-	fallback: string,
-	title: string | undefined,
-) {
+const generatedArtifactSlug = Effect.fn(function* generatedArtifactSlug(title: string | undefined) {
 	const value = yield* Effect.try({
 		try: () => {
 			const date = new Date().toISOString().slice(0, 10)
 			const random = randomBytes(3).toString('hex')
-			return `${date}-${random}-${slugifyTitle(title, fallback)}`
+			return `${date}-${random}-${slugifyTitle(title)}`
 		},
 		catch: (error) =>
 			toolOperationError('artifact_create', 'Could not generate artifact slug', error),
@@ -105,16 +92,37 @@ const createArtifactDirectory = Effect.fn(function* createArtifactDirectory(
 	}).pipe(
 		Effect.matchEffect({
 			onFailure: (error) =>
-				isAlreadyExists(error) && generated ? Effect.succeed(false) : Effect.fail(error),
+				Effect.gen(function* () {
+					if (!isAlreadyExists(error)) return yield* error
+					if (generated) return false
+					return yield* toolInputError('artifact_create', `Artifact already exists: ${slug}`)
+				}),
 			onSuccess: () => Effect.succeed(true),
 		}),
 	)
 })
 
+const allocateArtifactDirectory = Effect.fn(function* allocateArtifactDirectory(
+	root: string,
+	requestedSlug: ArtifactSlugType | undefined,
+	title: string | undefined,
+) {
+	const generated = requestedSlug === undefined
+	let slug = requestedSlug ?? (yield* generatedArtifactSlug(title))
+	let created = yield* createArtifactDirectory(root, slug, generated)
+	for (let attempt = 0; !created && attempt < 5; attempt += 1) {
+		slug = yield* generatedArtifactSlug(title)
+		created = yield* createArtifactDirectory(root, slug, true)
+	}
+	if (!created) {
+		return yield* toolInputError('artifact_create', 'Could not allocate a unique artifact slug')
+	}
+	return slug
+})
+
 const createManifest = Effect.fn(function* createManifest(
 	slug: ArtifactSlugType,
 	title: typeof ArtifactTitle.Type | undefined,
-	template: ArtifactTemplateName | undefined,
 ) {
 	const context = yield* ToolExecutionContext
 	const timestamp = yield* Effect.try({
@@ -131,7 +139,6 @@ const createManifest = Effect.fn(function* createManifest(
 		slug,
 		createdAt,
 		...optionalField('title', title),
-		...optionalField('template', template),
 		createdBy: {
 			sessionID: context.sessionId,
 			agent: context.agent,
@@ -142,46 +149,46 @@ const createManifest = Effect.fn(function* createManifest(
 export const artifactCreate = Effect.fn(function* artifactCreate(input: ArtifactCreateInput) {
 	const context = yield* ToolExecutionContext
 	const title = yield* normalizeTitle(input.title)
-	const templateName = input.template
-	const template =
-		templateName !== undefined
-			? yield* resolveArtifactTemplate(templateName, 'artifact_create')
-			: undefined
 	const root = yield* ensureArtifactsRoot(context.projectRoot, true, 'artifact_create')
 	if (root === undefined) {
 		return yield* toolInputError('artifact_create', 'Could not create artifacts root')
 	}
 
-	const generated = input.slug === undefined
-	const slugFallback = template?.manifest.title ?? template?.manifest.name ?? 'artifact'
-	let slug = input.slug ?? (yield* generatedArtifactSlug(slugFallback, title))
-	let created = yield* createArtifactDirectory(root, slug, generated)
-	for (let attempt = 0; !created && attempt < 5; attempt += 1) {
-		slug = yield* generatedArtifactSlug(slugFallback, title)
-		created = yield* createArtifactDirectory(root, slug, true)
-	}
-	if (!created) {
-		return yield* toolInputError('artifact_create', 'Could not allocate a unique artifact slug')
-	}
-
-	const directory = path.join(root, slug)
-	const manifest = yield* createManifest(slug, title, template?.manifest.name)
-	yield* writeJsonFile(path.join(directory, 'manifest.json'), manifest, 'artifact_create')
-	if (template !== undefined) {
-		if (template.frameworkDirectory !== undefined) {
-			yield* copyDirectoryContents(template.frameworkDirectory, directory, 'artifact_create')
-		}
-		yield* copyDirectoryContents(template.directory, directory, 'artifact_create', [
-			TEMPLATE_MANIFEST_FILE,
-		])
-	}
-
-	return ArtifactCreateResult.make({
-		ok: true,
-		slug,
-		path: artifactRelativePath(slug),
-		manifestPath: artifactManifestRelativePath(slug),
-		created: true,
-		manifest,
-	})
+	let committed = false
+	// Return the creation failure after cleanup so an incomplete rollback is visible.
+	const creation = yield* Effect.acquireUseRelease(
+		allocateArtifactDirectory(root, input.slug, title),
+		(slug) =>
+			Effect.gen(function* () {
+				const manifest = yield* createManifest(slug, title)
+				const result = ArtifactCreateResult.make({
+					ok: true,
+					artifact: artifactFromManifest(manifest),
+				})
+				// Finish the small manifest write before cancellation can release the directory.
+				return yield* Effect.uninterruptible(
+					writeJsonFile(path.join(root, slug, 'manifest.json'), manifest, 'artifact_create').pipe(
+						Effect.map(() => {
+							committed = true
+							return result
+						}),
+					),
+				)
+			}).pipe(Effect.exit),
+		(slug) =>
+			committed
+				? Effect.void
+				: Effect.tryPromise({
+						// Remove only an empty directory so concurrent user files are preserved.
+						try: () => rmdir(path.join(root, slug)),
+						catch: (error) =>
+							toolOperationError(
+								'artifact_create',
+								`Could not remove incomplete artifact: ${slug}`,
+								error,
+							),
+					}),
+	)
+	if (Exit.isFailure(creation)) return yield* Effect.failCause(creation.cause)
+	return creation.value
 })

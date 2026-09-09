@@ -1,9 +1,10 @@
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import * as fs from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { Effect, Schema } from 'effect'
-import { describe, expect, test } from 'vitest'
-import { ToolExecutionContext } from '../core/execution'
+import { Deferred, Effect, Schema } from 'effect'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import type { ToolExecutionContext } from '../core/execution'
 import { ArtifactCreateResult } from '../tools/artifacts/create'
 import { ArtifactListResult, artifactSlugFromString } from '../tools/artifacts/list'
 import {
@@ -11,17 +12,18 @@ import {
 	artifactRelativePath,
 	artifactsRoot,
 } from '../tools/artifacts/paths'
-import {
-	ArtifactTemplateReadResult,
-	ArtifactTemplatesListResult,
-} from '../tools/artifacts/templates'
 import { artifactTools } from '../tools/artifacts/tools'
-import { TypstCompileInput, type TypstCompileResult, typstCompile } from '../tools/artifacts/typst'
 import { settleTestTool, testToolExecution, testToolExecutor } from './execution'
 
-type ArtifactContext = ToolExecutionContext
+vi.mock('node:fs/promises', async (importOriginal) => ({
+	...(await importOriginal<typeof import('node:fs/promises')>()),
+}))
 
-function context(worktree: string, sessionID = 'session'): ArtifactContext {
+afterEach(() => {
+	vi.restoreAllMocks()
+})
+
+function context(worktree: string, sessionID = 'session'): ToolExecutionContext {
 	return testToolExecution(worktree, sessionID)
 }
 
@@ -37,7 +39,7 @@ async function withWorkspace<T>(body: (workspace: string) => Promise<T>): Promis
 function runArtifactTool(
 	name: keyof ReturnType<typeof artifactTools>,
 	input: unknown,
-	ctx: ArtifactContext,
+	ctx: ToolExecutionContext,
 ) {
 	const definition = artifactTools(testToolExecutor(ctx))[name]
 	return Effect.runPromise(
@@ -52,12 +54,8 @@ function runArtifactTool(
 }
 
 async function runArtifactCreate(
-	input: {
-		readonly title?: string
-		readonly slug?: string
-		readonly template?: string
-	},
-	ctx: ArtifactContext,
+	input: { readonly title?: string; readonly slug?: string },
+	ctx: ToolExecutionContext,
 ): Promise<ArtifactCreateResult> {
 	return Effect.runPromise(
 		Schema.decodeUnknownEffect(ArtifactCreateResult)(
@@ -66,85 +64,24 @@ async function runArtifactCreate(
 	)
 }
 
-async function runArtifactCreatePayload(
-	input: {
-		readonly title?: string
-		readonly slug?: string
-		readonly template?: string
-	},
-	ctx: ArtifactContext,
-): Promise<unknown> {
-	return runArtifactTool('artifact_create', input, ctx)
-}
-
-async function runArtifactList(
-	input: { readonly template?: string },
-	ctx: ArtifactContext,
-): Promise<ArtifactListResult> {
+async function runArtifactList(ctx: ToolExecutionContext): Promise<ArtifactListResult> {
 	return Effect.runPromise(
-		Schema.decodeUnknownEffect(ArtifactListResult)(
-			await runArtifactTool('artifact_list', input, ctx),
-		),
+		Schema.decodeUnknownEffect(ArtifactListResult)(await runArtifactTool('artifact_list', {}, ctx)),
 	)
 }
 
-async function runTemplatesList(ctx: ArtifactContext): Promise<ArtifactTemplatesListResult> {
-	return Effect.runPromise(
-		Schema.decodeUnknownEffect(ArtifactTemplatesListResult)(
-			await runArtifactTool('artifact_templates_list', {}, ctx),
-		),
-	)
-}
-
-async function runTemplateRead(
-	input: { readonly template?: string; readonly file?: string },
-	ctx: ArtifactContext,
-): Promise<ArtifactTemplateReadResult> {
-	return Effect.runPromise(
-		Schema.decodeUnknownEffect(ArtifactTemplateReadResult)(
-			await runArtifactTool('artifact_template_read', input, ctx),
-		),
-	)
-}
-
-async function runTemplateReadPayload(
-	input: { readonly template?: string; readonly file?: string },
-	ctx: ArtifactContext,
-): Promise<unknown> {
-	return runArtifactTool('artifact_template_read', input, ctx)
-}
-
-async function runTypstCompile(
-	input: {
-		readonly artifact: string
-		readonly entry?: string
-		readonly format?: string
-		readonly timeoutMs?: number
-	},
-	ctx: ArtifactContext,
-	typstBin: string,
-): Promise<TypstCompileResult> {
-	const decoded = await Effect.runPromise(Schema.decodeUnknownEffect(TypstCompileInput)(input))
-	return Effect.runPromise(
-		typstCompile(decoded, { typstBin }).pipe(Effect.provideService(ToolExecutionContext, ctx)),
-	)
-}
-
-async function runTypstCompilePayload(
-	input: {
-		readonly artifact: string
-		readonly entry?: string
-		readonly format?: string
-		readonly timeoutMs?: number
-	},
-	ctx: ArtifactContext,
-): Promise<unknown> {
-	return runArtifactTool('typst_compile', input, ctx)
-}
+describe('artifact tools', () => {
+	test('exposes creation and listing', () => {
+		expect(Object.keys(artifactTools(testToolExecutor(context('/repo')))).sort()).toEqual([
+			'artifact_create',
+			'artifact_list',
+		])
+	})
+})
 
 describe('artifact slug validation', () => {
 	test('accepts durable artifact slugs', () => {
-		expect(artifactSlugFromString('2026-06-29-a3f91c-strategy-brief')).toBeDefined()
+		expect(artifactSlugFromString('2026-06-29-a3f91c-strategy-notes')).toBeDefined()
 		expect(artifactSlugFromString('notes_1')).toBeDefined()
 		expect(artifactSlugFromString('A.B-C_1')).toBeDefined()
 	})
@@ -158,12 +95,12 @@ describe('artifact slug validation', () => {
 
 describe('artifact paths', () => {
 	test('uses project-scoped workspace-relative paths', () => {
-		const slug = artifactSlugFromString('strategy-brief')
+		const slug = artifactSlugFromString('strategy-notes')
 		if (slug === undefined) throw new Error('expected a valid artifact slug')
-		expect(artifactRelativePath(slug)).toBe('.limitless/artifacts/strategy-brief')
+		expect(artifactRelativePath(slug)).toBe('.limitless/artifacts/strategy-notes')
 		expect(artifactsRoot('/repo')).toBe(path.resolve('/repo/.limitless/artifacts'))
 		expect(artifactDirectoryPath('/repo', slug)).toBe(
-			path.resolve('/repo/.limitless/artifacts/strategy-brief'),
+			path.resolve('/repo/.limitless/artifacts/strategy-notes'),
 		)
 	})
 })
@@ -171,114 +108,309 @@ describe('artifact paths', () => {
 describe('artifact create and list', () => {
 	test('creates an empty artifact without session path scoping', async () => {
 		await withWorkspace(async (workspace) => {
-			const created = await runArtifactCreate(
+			const response = await runArtifactTool(
+				'artifact_create',
 				{ title: 'Pricing notes', slug: 'pricing-notes' },
 				context(workspace, 'session-a'),
 			)
+			const created = Schema.decodeUnknownSync(ArtifactCreateResult)(response)
 
-			expect(created).toMatchObject({
+			expect(response).toEqual({
 				ok: true,
-				slug: 'pricing-notes',
-				path: '.limitless/artifacts/pricing-notes',
-				manifestPath: '.limitless/artifacts/pricing-notes/manifest.json',
-				created: true,
+				artifact: {
+					slug: 'pricing-notes',
+					path: '.limitless/artifacts/pricing-notes',
+					title: 'Pricing notes',
+					createdAt: expect.any(String),
+				},
 			})
-			expect(created.path).not.toContain('session-a')
-			expect((await readdir(path.join(workspace, created.path))).sort()).toEqual(['manifest.json'])
+			expect(created.artifact.path).not.toContain('session-a')
+			const directory = path.join(workspace, created.artifact.path)
+			expect((await readdir(directory)).sort()).toEqual(['manifest.json'])
 
 			const manifest = JSON.parse(
-				await readFile(path.join(workspace, created.manifestPath), 'utf8'),
+				await readFile(path.join(directory, 'manifest.json'), 'utf8'),
 			) as Record<string, unknown>
-			expect(manifest).toMatchObject({
+			expect(manifest).toEqual({
 				slug: 'pricing-notes',
 				title: 'Pricing notes',
 				createdAt: expect.any(String),
 				createdBy: { sessionID: 'session-a', agent: 'limitless' },
 			})
-			expect(manifest.kind).toBeUndefined()
-			expect(manifest.template).toBeUndefined()
-			expect(manifest.updatedAt).toBeUndefined()
 
-			const list = await runArtifactList({}, context(workspace, 'session-b'))
+			const scratchpadPath = path.join(directory, 'scratchpad.md')
+			await writeFile(scratchpadPath, '# Pricing notes\n\nCompare usage tiers.\n')
+			const list = await runArtifactList(context(workspace, 'session-b'))
+			expect(list.artifacts).toEqual([created.artifact])
+			await expect(readFile(scratchpadPath, 'utf8')).resolves.toBe(
+				'# Pricing notes\n\nCompare usage tiers.\n',
+			)
+		})
+	})
+
+	test('generates slugs from trimmed titles', async () => {
+		await withWorkspace(async (workspace) => {
+			const created = await runArtifactCreate({ title: '  Pricing Notes!  ' }, context(workspace))
+			expect(created.artifact.slug).toMatch(/^\d{4}-\d{2}-\d{2}-[a-f0-9]{6}-pricing-notes$/u)
+			expect(created.artifact.title).toBe('Pricing Notes!')
+		})
+	})
+
+	test('creates an untitled artifact when no title or slug is supplied', async () => {
+		await withWorkspace(async (workspace) => {
+			const created = await runArtifactCreate({}, context(workspace))
+			expect(created.artifact.slug).toMatch(/^\d{4}-\d{2}-\d{2}-[a-f0-9]{6}-artifact$/u)
+			expect(created.artifact).not.toHaveProperty('title')
+		})
+	})
+
+	test('lists existing artifacts with additional manifest metadata without changing files', async () => {
+		await withWorkspace(async (workspace) => {
+			const directory = path.join(workspace, '.limitless/artifacts/existing-notes')
+			await mkdir(directory, { recursive: true })
+			const manifest = {
+				slug: 'existing-notes',
+				createdAt: '2026-06-29T12:00:00.000Z',
+				title: 'Existing notes',
+				template: 'brief',
+			}
+			const manifestText = JSON.stringify(manifest)
+			await writeFile(path.join(directory, 'manifest.json'), manifestText)
+			await writeFile(path.join(directory, 'scratchpad.md'), '# Existing notes\n')
+
+			const list = await runArtifactList(context(workspace))
 			expect(list.artifacts).toEqual([
 				{
-					slug: 'pricing-notes',
-					title: 'Pricing notes',
-					path: '.limitless/artifacts/pricing-notes',
+					slug: manifest.slug,
 					createdAt: manifest.createdAt,
+					title: manifest.title,
+					path: '.limitless/artifacts/existing-notes',
 				},
 			])
-		})
-	})
-
-	test('creates artifacts from the built-in template', async () => {
-		await withWorkspace(async (workspace) => {
-			const created = await runArtifactCreate(
-				{ template: 'brief', title: 'Strategy Brief', slug: 'strategy-brief' },
-				context(workspace),
+			await expect(readFile(path.join(directory, 'manifest.json'), 'utf8')).resolves.toBe(
+				manifestText,
 			)
-
-			expect(created.manifest).toMatchObject({
-				slug: 'strategy-brief',
-				title: 'Strategy Brief',
-				template: 'brief',
-			})
-			expect(created.manifest).not.toHaveProperty('kind')
-			for (const relativePath of ['manifest.json', 'main.typ']) {
-				await expect(
-					readFile(path.join(workspace, created.path, relativePath), 'utf8'),
-				).resolves.toEqual(expect.any(String))
-			}
-
-			const list = await runArtifactList({ template: 'brief' }, context(workspace))
-			expect(list.artifacts).toHaveLength(1)
-			expect(list.artifacts[0]).toMatchObject({
-				slug: 'strategy-brief',
-				template: 'brief',
-			})
-			expect(list.artifacts[0]).not.toHaveProperty('kind')
-		})
-	})
-
-	test('records the template when template is specified', async () => {
-		await withWorkspace(async (workspace) => {
-			const created = await runArtifactCreate(
-				{ title: 'Sphere Deck', slug: 'sphere-template', template: 'sphere' },
-				context(workspace),
+			await expect(readFile(path.join(directory, 'scratchpad.md'), 'utf8')).resolves.toBe(
+				'# Existing notes\n',
 			)
-
-			expect(created.manifest).toMatchObject({
-				slug: 'sphere-template',
-				template: 'sphere',
-			})
-			expect(created.manifest).not.toHaveProperty('kind')
-			await expect(
-				readFile(path.join(workspace, created.path, 'sphere.typ'), 'utf8'),
-			).resolves.toContain('#import "sphere/theme.typ"')
 		})
 	})
 
 	test('lists an empty artifact root before any artifacts are created', async () => {
 		await withWorkspace(async (workspace) => {
-			await expect(runArtifactList({}, context(workspace))).resolves.toEqual({
+			await expect(runArtifactList(context(workspace))).resolves.toEqual({
 				ok: true,
 				artifacts: [],
 			})
+			expect(await readdir(workspace)).toEqual([])
+		})
+	})
+
+	test('reports missing and invalid manifests while listing valid artifacts', async () => {
+		await withWorkspace(async (workspace) => {
+			const ctx = context(workspace)
+			await runArtifactCreate({ slug: 'valid' }, ctx)
+			const root = artifactsRoot(workspace)
+			await mkdir(path.join(root, 'missing'))
+			await mkdir(path.join(root, 'invalid'))
+			await writeFile(path.join(root, 'invalid', 'manifest.json'), '{}')
+			const list = await runArtifactList(ctx)
+			expect(list.artifacts.map((entry) => entry.slug)).toEqual(['valid'])
+			expect(list.invalidArtifacts).toHaveLength(2)
+			expect(list.invalidArtifacts).toEqual(
+				expect.arrayContaining([
+					{ slug: 'missing', reason: 'manifest.json is missing or invalid' },
+					{ slug: 'invalid', reason: 'manifest.json is missing or invalid' },
+				]),
+			)
 		})
 	})
 
 	test('rejects existing artifact workspaces instead of reusing them', async () => {
 		await withWorkspace(async (workspace) => {
 			const ctx = context(workspace)
-			await runArtifactCreate({ slug: 'notes' }, ctx)
+			const created = await runArtifactCreate({ slug: 'notes' }, ctx)
+			const manifestPath = path.join(workspace, created.artifact.path, 'manifest.json')
+			const manifest = await readFile(manifestPath, 'utf8')
 
-			const result = await runArtifactCreatePayload({ slug: 'notes' }, ctx)
+			const result = await runArtifactTool('artifact_create', { slug: 'notes' }, ctx)
+			expect(result).toMatchObject({
+				ok: false,
+				error: 'ToolInputError',
+				tool: 'artifact_create',
+				message: 'Artifact already exists: notes',
+			})
+			expect(JSON.stringify(result)).not.toContain(workspace)
+			await expect(readFile(manifestPath, 'utf8')).resolves.toBe(manifest)
+		})
+	})
+
+	test('removes an incomplete directory when the manifest cannot be opened', async () => {
+		await withWorkspace(async (workspace) => {
+			vi.spyOn(fs, 'open').mockRejectedValueOnce(
+				Object.assign(new Error('write unavailable'), { code: 'EIO' }),
+			)
+			const ctx = context(workspace)
+			const result = await runArtifactTool('artifact_create', { slug: 'notes' }, ctx)
+			expect(result).toMatchObject({ ok: false, error: 'ToolOperationError', code: 'EIO' })
+			expect(await readdir(artifactsRoot(workspace))).toEqual([])
+			const retried = await runArtifactCreate({ slug: 'notes' }, ctx)
+			expect(retried.artifact.slug).toBe('notes')
+		})
+	})
+
+	test('removes a partially written manifest and allows the same slug to be retried', async () => {
+		await withWorkspace(async (workspace) => {
+			const open = fs.open
+			vi.spyOn(fs, 'open').mockImplementationOnce(async (...args) => {
+				const handle = await open(...args)
+				await handle.writeFile('{')
+				vi.spyOn(handle, 'writeFile').mockRejectedValueOnce(
+					Object.assign(new Error('disk full'), { code: 'ENOSPC' }),
+				)
+				return handle
+			})
+			const ctx = context(workspace)
+			const result = await runArtifactTool('artifact_create', { slug: 'notes' }, ctx)
+			expect(result).toMatchObject({ ok: false, error: 'ToolOperationError', code: 'ENOSPC' })
+			expect(await readdir(artifactsRoot(workspace))).toEqual([])
+			const retried = await runArtifactCreate({ slug: 'notes' }, ctx)
+			expect(retried.artifact.slug).toBe('notes')
+		})
+	})
+
+	test('removes an incomplete artifact when closing the manifest fails', async () => {
+		await withWorkspace(async (workspace) => {
+			const open = fs.open
+			vi.spyOn(fs, 'open').mockImplementationOnce(async (...args) => {
+				const handle = await open(...args)
+				const close = handle.close.bind(handle)
+				vi.spyOn(handle, 'close').mockImplementationOnce(async () => {
+					await close()
+					throw Object.assign(new Error('close failed'), { code: 'EIO' })
+				})
+				return handle
+			})
+			const result = await runArtifactTool('artifact_create', { slug: 'notes' }, context(workspace))
 			expect(result).toMatchObject({
 				ok: false,
 				error: 'ToolOperationError',
-				tool: 'artifact_create',
+				message: 'Could not close artifact file (EIO)',
 			})
-			expect(JSON.stringify(result)).not.toContain(workspace)
+			expect(await readdir(artifactsRoot(workspace))).toEqual([])
+		})
+	})
+
+	test('preserves concurrent files and reports incomplete cleanup', async () => {
+		await withWorkspace(async (workspace) => {
+			const scratchpadPath = path.join(artifactsRoot(workspace), 'notes', 'scratchpad.md')
+			vi.spyOn(fs, 'open').mockImplementationOnce(async () => {
+				await writeFile(scratchpadPath, '# Concurrent notes\n')
+				throw Object.assign(new Error('write unavailable'), { code: 'EIO' })
+			})
+			const result = await runArtifactTool('artifact_create', { slug: 'notes' }, context(workspace))
+			expect(result).toMatchObject({
+				ok: false,
+				error: 'ToolOperationError',
+				message: 'Could not remove incomplete artifact: notes (ENOTEMPTY)',
+			})
+			await expect(readFile(scratchpadPath, 'utf8')).resolves.toBe('# Concurrent notes\n')
+		})
+	})
+
+	test('reports incomplete cleanup when a partial manifest cannot be removed', async () => {
+		await withWorkspace(async (workspace) => {
+			const open = fs.open
+			vi.spyOn(fs, 'open').mockImplementationOnce(async (...args) => {
+				const handle = await open(...args)
+				await handle.writeFile('{')
+				vi.spyOn(handle, 'writeFile').mockRejectedValueOnce(
+					Object.assign(new Error('disk full'), { code: 'ENOSPC' }),
+				)
+				return handle
+			})
+			vi.spyOn(fs, 'unlink').mockRejectedValueOnce(
+				Object.assign(new Error('cleanup unavailable'), { code: 'EACCES' }),
+			)
+			const result = await runArtifactTool('artifact_create', { slug: 'notes' }, context(workspace))
+			expect(result).toMatchObject({
+				ok: false,
+				error: 'ToolOperationError',
+				message: 'Could not remove incomplete artifact: notes (ENOTEMPTY)',
+			})
+			expect((await runArtifactList(context(workspace))).invalidArtifacts).toEqual([
+				{ slug: 'notes', reason: 'manifest.json is missing or invalid' },
+			])
+		})
+	})
+
+	test('finishes an in-flight manifest write before cancellation releases the directory', async () => {
+		await withWorkspace(async (workspace) => {
+			const writeStarted = Deferred.makeUnsafe<void>()
+			const finishWrite = Deferred.makeUnsafe<void>()
+			const open = fs.open
+			vi.spyOn(fs, 'open').mockImplementationOnce(async (...args) => {
+				const handle = await open(...args)
+				const write = handle.writeFile.bind(handle)
+				vi.spyOn(handle, 'writeFile').mockImplementationOnce(async (...writeArgs) => {
+					await Effect.runPromise(Deferred.succeed(writeStarted, undefined))
+					await Effect.runPromise(Deferred.await(finishWrite))
+					return write(...writeArgs)
+				})
+				return handle
+			})
+			const ctx = context(workspace)
+			const controller = new AbortController()
+			const tool = artifactTools(testToolExecutor(ctx)).artifact_create
+			const creation = Effect.runPromise(settleTestTool(tool, { slug: 'notes' }, ctx), {
+				signal: controller.signal,
+			})
+			const cancelled = expect(creation).rejects.toBeDefined()
+			await Effect.runPromise(Deferred.await(writeStarted))
+			controller.abort()
+			await Effect.runPromise(Deferred.succeed(finishWrite, undefined))
+			await cancelled
+			const list = await runArtifactList(ctx)
+			expect(list.artifacts.map((artifact) => artifact.slug)).toEqual(['notes'])
+			expect(list.invalidArtifacts).toBeUndefined()
+		})
+	})
+
+	test('preserves an existing manifest that appears before the exclusive file open', async () => {
+		await withWorkspace(async (workspace) => {
+			const open = fs.open
+			const manifestPath = path.join(artifactsRoot(workspace), 'notes', 'manifest.json')
+			vi.spyOn(fs, 'open').mockImplementationOnce(async (...args) => {
+				await writeFile(manifestPath, 'concurrent manifest')
+				return open(...args)
+			})
+			const result = await runArtifactTool('artifact_create', { slug: 'notes' }, context(workspace))
+			expect(result).toMatchObject({ ok: false, error: 'ToolOperationError' })
+			await expect(readFile(manifestPath, 'utf8')).resolves.toBe('concurrent manifest')
+		})
+	})
+
+	test('creates only one artifact when callers request the same slug concurrently', async () => {
+		await withWorkspace(async (workspace) => {
+			const ctx = context(workspace)
+			const results = await Promise.all([
+				runArtifactTool('artifact_create', { slug: 'notes' }, ctx),
+				runArtifactTool('artifact_create', { slug: 'notes' }, ctx),
+			])
+			expect(results).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						ok: true,
+						artifact: expect.objectContaining({ slug: 'notes' }),
+					}),
+					expect.objectContaining({
+						ok: false,
+						error: 'ToolInputError',
+						message: 'Artifact already exists: notes',
+					}),
+				]),
+			)
+			expect((await runArtifactList(ctx)).artifacts).toHaveLength(1)
 		})
 	})
 
@@ -288,255 +420,13 @@ describe('artifact create and list', () => {
 			await mkdir(outside)
 			await symlink(outside, path.join(workspace, '.limitless'))
 
-			const result = await runArtifactCreatePayload({ slug: 'plan' }, context(workspace))
+			const result = await runArtifactTool('artifact_create', { slug: 'plan' }, context(workspace))
 			expect(result).toMatchObject({
 				ok: false,
 				error: 'ToolOperationError',
 				tool: 'artifact_create',
 			})
 			expect(JSON.stringify(result)).not.toContain(workspace)
-		})
-	})
-})
-
-describe('template and typst tools', () => {
-	test('rejects unsupported formats and non-positive timeouts at the schema boundary', async () => {
-		await withWorkspace(async (workspace) => {
-			for (const input of [
-				{ artifact: 'document', format: 'svg' },
-				{ artifact: 'document', timeoutMs: 0 },
-			]) {
-				await expect(runTypstCompilePayload(input, context(workspace))).rejects.toThrow()
-			}
-		})
-	})
-
-	test('lists built-in artifact templates', async () => {
-		await withWorkspace(async (workspace) => {
-			const result = await runTemplatesList(context(workspace))
-			expect(result.templates.map((entry) => entry.name)).toEqual([
-				'brief',
-				'sphere',
-				'sphere-showcase',
-			])
-
-			const [brief, sphere] = result.templates
-			expect(brief).toMatchObject({
-				name: 'brief',
-				path: 'templates/brief',
-				files: ['main.typ'],
-			})
-			expect(brief).not.toHaveProperty('kind')
-			expect(brief).not.toHaveProperty('framework')
-			expect(brief).not.toHaveProperty('metadata')
-
-			expect(sphere).toMatchObject({
-				name: 'sphere',
-				framework: 'sphere',
-				path: 'templates/sphere',
-				authoring: expect.any(String),
-				files: expect.arrayContaining([
-					'main.typ',
-					'sphere.typ',
-					'sphere/',
-					'sphere/theme.typ',
-					'assets/',
-					'assets/fonts/Inter-Variable.ttf',
-				]),
-			})
-			expect(sphere).not.toHaveProperty('kind')
-			expect(sphere).not.toHaveProperty('metadata')
-		})
-	})
-
-	test('creates Sphere artifacts with packaged Inter fonts', async () => {
-		await withWorkspace(async (workspace) => {
-			const created = await runArtifactCreate(
-				{
-					title: 'Sphere Deck',
-					slug: 'sphere-deck',
-					template: 'sphere',
-				},
-				context(workspace),
-			)
-			const artifactPath = path.join(workspace, created.path)
-			await expect(readFile(path.join(artifactPath, 'main.typ'), 'utf8')).resolves.toEqual(
-				expect.any(String),
-			)
-			await expect(
-				readFile(path.join(artifactPath, 'sphere', 'theme.typ'), 'utf8'),
-			).resolves.toContain('#let sphere-font = "Inter"')
-			await expect(
-				readFile(path.join(artifactPath, 'sphere', 'chrome.typ'), 'utf8'),
-			).resolves.toContain('image("../assets/sphere-logo.svg"')
-			await expect(
-				readFile(path.join(artifactPath, 'assets', 'sphere-logo.svg'), 'utf8'),
-			).resolves.toContain('<svg width="263" height="57"')
-			const regularFont = await readFile(
-				path.join(artifactPath, 'assets', 'fonts', 'Inter-Variable.ttf'),
-			)
-			const italicFont = await readFile(
-				path.join(artifactPath, 'assets', 'fonts', 'Inter-Italic-Variable.ttf'),
-			)
-			expect(regularFont.byteLength).toBeGreaterThan(0)
-			expect(italicFont.byteLength).toBeGreaterThan(0)
-			await expect(
-				readFile(path.join(artifactPath, 'assets', 'fonts', 'OFL.txt'), 'utf8'),
-			).resolves.toContain('SIL OPEN FONT LICENSE')
-
-			const fakeTypst = path.join(workspace, 'fake-typst')
-			await writeFile(
-				fakeTypst,
-				'#!/bin/sh\nprintf "%s\\n" "$@" > args.txt\nlast=\nfor arg do last=$arg; done\ntouch "$last"\n',
-			)
-			await chmod(fakeTypst, 0o755)
-
-			const result = await runTypstCompile(
-				{ artifact: created.slug },
-				context(workspace),
-				fakeTypst,
-			)
-
-			expect(result).toMatchObject({
-				ok: true,
-				artifact: 'sphere-deck',
-				outputPath: '.limitless/artifacts/sphere-deck/dist/sphere-deck.pdf',
-			})
-			await expect(readFile(path.join(artifactPath, 'args.txt'), 'utf8')).resolves.toBe(
-				[
-					'compile',
-					'--font-path',
-					path.join(artifactPath, 'assets', 'fonts'),
-					'--root',
-					artifactPath,
-					'main.typ',
-					'dist/sphere-deck.pdf',
-					'',
-				].join('\n'),
-			)
-		})
-	})
-
-	test('creates the complete Sphere showcase template', async () => {
-		await withWorkspace(async (workspace) => {
-			const created = await runArtifactCreate(
-				{
-					title: 'Sphere Institutional Showcase',
-					slug: 'sphere-showcase',
-					template: 'sphere-showcase',
-				},
-				context(workspace),
-			)
-			const artifactPath = path.join(workspace, created.path)
-			await expect(readFile(path.join(artifactPath, 'main.typ'), 'utf8')).resolves.toContain(
-				'#sphere-kpi-page(',
-			)
-			await expect(
-				readFile(path.join(artifactPath, 'sphere', 'charts.typ'), 'utf8'),
-			).resolves.toContain('#let sphere-column-chart')
-		})
-	})
-
-	test('reads template and framework files without creating an artifact', async () => {
-		await withWorkspace(async (workspace) => {
-			const ctx = context(workspace)
-
-			const main = await runTemplateRead({ template: 'sphere-showcase', file: 'main.typ' }, ctx)
-			expect(main).toMatchObject({ ok: true, template: 'sphere-showcase', file: 'main.typ' })
-			expect(main.content).toContain('#sphere-kpi-page(')
-
-			const theme = await runTemplateRead(
-				{ template: 'sphere-showcase', file: 'sphere/theme.typ' },
-				ctx,
-			)
-			expect(theme.content).toContain('#let sphere-font = "Inter"')
-
-			const listed = await runArtifactList({}, ctx)
-			expect(listed.artifacts).toEqual([])
-		})
-	})
-
-	test('rejects unknown, traversal, directory, and binary template file reads', async () => {
-		await withWorkspace(async (workspace) => {
-			const ctx = context(workspace)
-			const invalidInputs = [
-				{ template: 'sphere-showcase', file: 'sphere/' },
-				{ template: 'sphere-showcase', file: '../sphere/main.typ' },
-				{ template: 'sphere-showcase', file: '/etc/passwd' },
-			]
-			for (const input of invalidInputs) {
-				await expect(runTemplateReadPayload(input, ctx)).rejects.toThrow(
-					'file must be a relative template file path',
-				)
-			}
-
-			const unavailableFiles = [
-				{ template: 'sphere-showcase', file: 'missing.typ' },
-				{ template: 'unknown-template', file: 'main.typ' },
-				{ template: 'sphere-showcase', file: 'assets/cover.png' },
-				{ template: 'sphere-showcase', file: 'assets/fonts/Inter-Variable.ttf' },
-			]
-			for (const input of unavailableFiles) {
-				await expect(runTemplateReadPayload(input, ctx)).resolves.toMatchObject({
-					ok: false,
-					error: 'ToolInputError',
-					tool: 'artifact_template_read',
-				})
-			}
-		})
-	})
-
-	test('rejects unknown templates', async () => {
-		await withWorkspace(async (workspace) => {
-			const ctx = context(workspace)
-			await expect(
-				runArtifactCreatePayload({ slug: 'bad-template', template: 'unknown-template' }, ctx),
-			).resolves.toMatchObject({
-				ok: false,
-				error: 'ToolInputError',
-				tool: 'artifact_create',
-			})
-		})
-	})
-
-	test('compiles a document artifact with the configured Typst binary', async () => {
-		await withWorkspace(async (workspace) => {
-			const created = await runArtifactCreate(
-				{ template: 'brief', title: 'Strategy Brief', slug: 'strategy-brief' },
-				context(workspace),
-			)
-			const fakeTypst = path.join(workspace, 'fake-typst')
-			await writeFile(fakeTypst, '#!/bin/sh\nprintf "%s\\n" "$@" > args.txt\ntouch "$5"\n')
-			await chmod(fakeTypst, 0o755)
-
-			const result = await runTypstCompile(
-				{ artifact: created.slug },
-				context(workspace),
-				fakeTypst,
-			)
-
-			expect(result).toMatchObject({
-				ok: true,
-				artifact: 'strategy-brief',
-				entry: 'main.typ',
-				format: 'pdf',
-				outputPath: '.limitless/artifacts/strategy-brief/dist/strategy-brief.pdf',
-				command: 'typst compile',
-				exitCode: 0,
-			})
-			await expect(
-				readFile(path.join(workspace, created.path, 'dist', 'strategy-brief.pdf'), 'utf8'),
-			).resolves.toBe('')
-			await expect(readFile(path.join(workspace, created.path, 'args.txt'), 'utf8')).resolves.toBe(
-				[
-					'compile',
-					'--root',
-					path.join(workspace, created.path),
-					'main.typ',
-					'dist/strategy-brief.pdf',
-					'',
-				].join('\n'),
-			)
 		})
 	})
 })

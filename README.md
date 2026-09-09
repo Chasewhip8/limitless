@@ -34,7 +34,7 @@ switching.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
 - **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces can be empty or hold notes, source files, assets, and generated outputs.
 - **Global Git hygiene**: Home Manager adds `.limitless/` to Git's global ignore file by default, so project-local clones and artifacts stay out of repository status.
-- **Typst document generation**: create artifacts from built-in Typst templates and compile them to PDF with the packaged Typst binary.
+- **Markdown artifacts**: create durable project-scoped folders for notes and scratchpads.
 - **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional project-cached GitHub source research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **Optional Linear MCP**: Home Manager writes the remote Linear MCP entry directly when enabled; OpenCode reads `LINEAR_API_KEY` from its process environment.
@@ -78,7 +78,6 @@ programs.limitless = {
       tokenFile = null;
     };
     agentBrowser.enable = true;
-    effectSolutions.enable = true;
     notion = {
       accounts = {};
       defaultAccount = null;
@@ -141,7 +140,7 @@ programs.limitless = {
 };
 ```
 
-`tools.agentBrowser.enable` and `tools.effectSolutions.enable` default to `skills.enable`. Set either tool explicitly to install the CLI without installing skills. Atlassian CLI, Notion CLI, and Sentry are opt-in; enabling one also installs its companion skill when skills are enabled.
+`tools.agentBrowser.enable` defaults to `skills.enable`. Set it explicitly to install the CLI without installing skills. Atlassian CLI, Notion CLI, and Sentry are opt-in; enabling one also installs its companion skill when skills are enabled.
 
 For non-interactive Jira Cloud authentication, set `tools.acli.site`, `tools.acli.email`, and `tools.acli.tokenFile`. The token file is read lazily and never copied into the Nix store or process arguments. The wrapper keeps ACLI's generated profile under the per-user runtime directory and reauthenticates after a reboot or token-file change.
 
@@ -243,10 +242,6 @@ Provide a token through either the named environment variable, for example `GITH
 
 Accepted submodules are rewritten to clean HTTPS origins locally and initialized one level at a time with shallow fetches so each transitive repository is validated before Git can access it. Managed repositories are read-only supporting source: clone first, then use local read, glob, grep, or ast-grep search against the returned path. The generated OpenCode `edit` policy denies normal edit, write, and patch operations beneath `.limitless/repos/`; this is an agent guardrail rather than an operating-system sandbox, so unrestricted shell commands remain capable of bypassing it. Git LFS smudging is disabled, so pointer files are present but LFS objects are not downloaded or materialized.
 
-## Deterministic review skill
-
-The packaged `review-general` skill checks repository-defined formatting, lint, compilation, type safety, tests, and diff hygiene when explicitly named. It treats checked-in scripts and CI as authoritative and does not invent subjective standards. Add narrower review skills for framework, security, accessibility, or domain-specific rules.
-
 ## Attention notifications
 
 Enable a native Limitless command hook without adding a separate OpenCode notifier plugin:
@@ -294,21 +289,20 @@ The Slack agent can use `slack_attach_file` to snapshot a readable local file an
 
 Message admission is serialized within a Slack thread; different threads intentionally run concurrently against the same checkout. Thread-to-session mappings and delivery cursors are process-local, so a service restart starts fresh OpenCode sessions and reimports the visible Slack transcript. Slack authenticates the transport but Limitless accepts every mention the installed bot can receive. Limit workspace membership, bot channel access, host credentials, and repository permissions accordingly. Slack service integration currently requires Linux systemd user services.
 
-## Artifacts and documents
+## Artifacts
 
-Limitless stores durable project-local work products under `.limitless/artifacts/`. Create an empty artifact for ad hoc notes or files, or instantiate one from a top-level `templates/<name>/` folder. Artifacts are rooted at the active session's `location.directory`; the creating session is also recorded in the manifest metadata.
+Limitless stores durable project-local work products under `.limitless/artifacts/`. Create an empty artifact and write Markdown files inside it; use `scratchpad.md` for a scratchpad. Artifacts are rooted at the active session's `location.directory`; the creating session is also recorded in the manifest metadata.
 
 The Limitless plugin exposes:
 
-- `artifact_create`: create a durable artifact workspace.
+- `artifact_create`: create a durable artifact folder with an optional title and slug.
 - `artifact_list`: list artifact workspaces for the current project.
-- `artifact_templates_list`: inspect built-in artifact templates.
-- `artifact_template_read`: read a built-in template file without creating an artifact (e.g. the `sphere-showcase` authoring reference).
-- `typst_compile`: compile a document artifact to PDF.
 
-Artifact templates are plain directories with a small `manifest.json`; `artifact_create` copies the folder contents into a new artifact and writes the artifact manifest. A template may declare a `framework` (a directory under top-level `frameworks/<name>/`); its files are composed into the artifact first, so document workspaces stay fully self-contained and keep compiling identically even after the plugin updates. Typst is handled separately by `typst_compile`, which compiles an artifact entry such as `main.typ` into `dist/`.
+Create artifacts through `artifact_create`, then use the normal file tools to add and edit their contents. Each artifact starts with a `manifest.json` containing its slug, creation timestamp, optional title, and creator. Listing recognizes folders with valid manifests and reports folders with missing or invalid manifests separately.
 
-Document artifacts are source-first: edit `main.typ` directly, compose with framework `.typ` modules such as `sphere.typ` and its `sphere/` files when present, and place charts/images/assets under `assets/`. The Sphere framework is opinionated about assembly: cards, charts, and panels placed in a `sphere-grid` or `sphere-two-column` are measured and stretched to equal heights per row, charts auto-scale, and every evidence-bearing component takes a `source:` that feeds the `sphere-lint()` QA page. Built-in templates: `brief` (plain default), `sphere` (Sphere-branded institutional starter on the shared `sphere` framework), and `sphere-showcase` (a complete example institutional document — cover, executive summary, market, architecture, comparison, proof, roadmap, risk, and QA pages — that doubles as the component reference). New Sphere document types (PRDs, PR/FAQs, memos) are added by dropping a new `templates/<name>/` folder that reuses the framework.
+Creation returns `{ ok: true, artifact }`; listing returns `{ ok: true, artifacts, invalidArtifacts? }`. Both use the same artifact summary: `{ slug, path, title?, createdAt }`. Paths are relative to the session directory. An omitted slug is generated from the title, date, and a random value; an explicit slug that already exists produces an `Artifact already exists` error.
+
+Failed creation removes its incomplete manifest and empty folder. If cleanup cannot complete, the tool reports that failure. Cleanup preserves other files added to the folder concurrently.
 
 ## Maintainers
 

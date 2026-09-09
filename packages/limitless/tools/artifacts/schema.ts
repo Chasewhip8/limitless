@@ -19,11 +19,6 @@ export const ArtifactSlug = Schema.String.check(pathSegmentFilter('slug')).pipe(
 )
 export type ArtifactSlug = typeof ArtifactSlug.Type
 
-export const ArtifactFileName = Schema.String.check(pathSegmentFilter('file name')).pipe(
-	Schema.brand('ArtifactFileName'),
-)
-export type ArtifactFileName = typeof ArtifactFileName.Type
-
 export const ArtifactTitle = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(ARTIFACT_TITLE_MAX_LENGTH),
@@ -41,10 +36,13 @@ export const ArtifactTimestamp = Schema.String.check(
 ).pipe(Schema.brand('ArtifactTimestamp'))
 export type ArtifactTimestamp = typeof ArtifactTimestamp.Type
 
-export const ArtifactTemplateReference = Schema.String.check(pathSegmentFilter('template')).pipe(
-	Schema.brand('ArtifactTemplateReference'),
-)
-export type ArtifactTemplateReference = typeof ArtifactTemplateReference.Type
+export const Artifact = Schema.Struct({
+	slug: ArtifactSlug,
+	path: Schema.String,
+	title: Schema.optional(ArtifactTitle),
+	createdAt: ArtifactTimestamp,
+})
+export type Artifact = typeof Artifact.Type
 
 export const ArtifactCreator = Schema.Struct({
 	sessionID: Schema.String,
@@ -56,27 +54,6 @@ export const ArtifactManifest = Schema.Struct({
 	slug: ArtifactSlug,
 	createdAt: ArtifactTimestamp,
 	title: Schema.optional(ArtifactTitle),
-	template: Schema.optional(ArtifactTemplateReference),
 	createdBy: Schema.optional(ArtifactCreator),
 })
 export type ArtifactManifest = typeof ArtifactManifest.Type
-
-export const ArtifactTemplateName = ArtifactTemplateReference
-export type ArtifactTemplateName = typeof ArtifactTemplateName.Type
-
-export const ArtifactTemplateManifest = Schema.Struct({
-	name: ArtifactTemplateName,
-	description: Schema.String,
-	title: Schema.optional(Schema.String),
-	framework: Schema.optional(ArtifactTemplateName),
-	authoring: Schema.optional(Schema.String),
-})
-export type ArtifactTemplateManifest = typeof ArtifactTemplateManifest.Type
-
-export const ResolvedArtifactTemplate = Schema.Struct({
-	name: ArtifactTemplateName,
-	directory: Schema.String,
-	frameworkDirectory: Schema.optional(Schema.String),
-	manifest: ArtifactTemplateManifest,
-})
-export type ResolvedArtifactTemplate = typeof ResolvedArtifactTemplate.Type

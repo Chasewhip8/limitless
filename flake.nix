@@ -25,9 +25,6 @@
             inherit system;
             config.allowUnfreePredicate = pkg: (pkg.pname or "") == "sentry";
           };
-          effectSolutionsPackage = import ./nix/packages/effect-solutions.nix {
-            inherit pkgs self system;
-          };
           limitlessPackage = import ./nix/packages/limitless.nix {
             inherit pkgs self;
           };
@@ -112,7 +109,6 @@
                     skills.enable = skillsEnabled;
                     tools = {
                       agentBrowser.enable = false;
-                      effectSolutions.enable = false;
                       notion = {
                         accounts = notionAccounts;
                         defaultAccount = notionDefaultAccount;
@@ -200,7 +196,6 @@
           packages = {
             skills = skillsPackage;
             "anthropic-auth" = anthropicAuthPackage;
-            "effect-solutions" = effectSolutionsPackage;
             sentry = sentryPackage;
             limitless = limitlessPackage;
             "agent-browser" = agentBrowserPackage;
@@ -223,8 +218,6 @@
               python3
               pkg-config
               statix
-              typst
-              effectSolutionsPackage
               agentBrowserPackage
             ];
           };
@@ -240,7 +233,6 @@
         opencode-anthropic-auth = self.packages.${final.stdenv.hostPlatform.system}."anthropic-auth";
         opencode-limitless = self.packages.${final.stdenv.hostPlatform.system}.limitless;
         agent-browser = self.packages.${final.stdenv.hostPlatform.system}."agent-browser";
-        effect-solutions = self.packages.${final.stdenv.hostPlatform.system}."effect-solutions";
         notion-cli = self.packages.${final.stdenv.hostPlatform.system}."notion-cli";
         sentry = self.packages.${final.stdenv.hostPlatform.system}.sentry;
       };

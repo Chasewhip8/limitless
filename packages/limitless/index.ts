@@ -74,9 +74,6 @@ export function registerLimitlessTools(
 ): void {
 	draft.add(tools.artifact_create)
 	draft.add(tools.artifact_list)
-	draft.add(tools.artifact_templates_list)
-	draft.add(tools.artifact_template_read)
-	draft.add(tools.typst_compile)
 	draft.add(tools.ast_grep_search)
 	draft.add(tools.ast_grep_replace)
 	draft.add(tools.lsp_diagnostics)
