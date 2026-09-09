@@ -217,7 +217,11 @@ OpenCode 2 has no native equivalent for the former OpenAI response-header timeou
 
 `research` is read-only and researches local code, tests, docs, configuration, APIs, standards, current external facts, implementation source, official examples, and configured private GitHub repositories. It does not edit files or run shell commands.
 
-`oracle` is the high-reasoning question-answering subagent. Limitless uses it for difficult architecture, debugging, planning, explanation, and tradeoff questions that benefit from an independent second opinion; Oracle may delegate broad evidence gathering to `research`. It inherits the normal broad tool access but cannot use the standard edit or structured-replacement tools.
+`oracle-solve` uses Astra for difficult technical questions that benefit from an independent conclusion, including debugging, root causes, algorithms, concurrency, correctness, and performance reasoning. It is the default Oracle for technical consultation and the adviser available to `review`.
+
+`oracle-design` uses Fable for consequential architecture, abstraction, API ergonomics, maintainability, and code organization decisions. To conserve Fable quota, Limitless and Gary handle routine planning and style questions directly, gather evidence before consulting it, and reuse its session for the same decision. They consult it again when new evidence materially changes the decision. For mixed questions, they resolve technical uncertainty with `oracle-solve` first and consult `oracle-design` if a material design choice remains. These routing instructions guide usage; they do not enforce a quota.
+
+Both Oracle agents advise the caller and may delegate broad evidence gathering to `research`. They inherit the normal broad tool access but cannot use the standard edit or structured-replacement tools.
 
 Enable the optional `github_clone` source tool with:
 

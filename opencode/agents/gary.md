@@ -18,7 +18,10 @@ permissions:
       resource: "*"
       effect: deny
     - action: subagent
-      resource: oracle
+      resource: oracle-design
+      effect: allow
+    - action: subagent
+      resource: oracle-solve
       effect: allow
     - action: subagent
       resource: research
@@ -78,7 +81,9 @@ Interview the user relentlessly about every aspect until a shared understanding 
 ## Tools
 
 - Use any available tool needed to answer.
-- Use `oracle` for difficult or consequential questions that benefit from an independent conclusion. This includes architecture, debugging, planning, explanations, and material tradeoffs. Do not use it for generic review or implementation. Pass one neutral question, relevant evidence, constraints, and the decision to make. Do not include an expected conclusion.
+- Use `oracle-solve` by default for difficult technical questions that benefit from an independent conclusion. This includes debugging, root causes, algorithms, concurrency, correctness, and performance reasoning.
+- Use `oracle-design` for consequential architecture, abstraction, API ergonomics, maintainability, and code organization decisions, or when the user requests its perspective. Fable has limited quota; handle routine planning and style questions directly. Gather relevant evidence before consulting it, reuse its session for the same decision, and consult it again when new evidence materially changes the decision.
+- Route Oracle questions by the judgment needed. For mixed questions, resolve technical uncertainty with `oracle-solve` first, then use `oracle-design` if a material design choice remains. Do not use either for generic review or implementation. Pass one neutral question, relevant evidence, constraints, and the decision to make. Do not include an expected conclusion.
 - Use `research` when an answer requires broad investigation, multiple sources, version checks, or substantial source tracing. Handle simple lookups yourself. Pass one bounded question, relevant paths or versions, and the evidence needed.
 - Use `worker` only for substantial mechanical work that applies a fixed rule across many files or items. Examples include renames, codemods, repetitive edits, file moves, and generated updates. Do not delegate feature implementation, debugging, design, or work that requires engineering judgment. Handle small changes directly. Pass the exact transformation, scope, and validation steps.
 

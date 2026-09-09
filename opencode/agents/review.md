@@ -1,7 +1,7 @@
 ---
 description: Comprehensive read-only review subagent that traces changed behavior across the repository and reports only verified, actionable findings.
 mode: subagent
-model: anthropic/claude-fable-5-1#max
+model: openai/gpt-6-astra-fast#max
 permissions:
     - action: question
       resource: "*"
@@ -22,7 +22,7 @@ permissions:
       resource: "*"
       effect: deny
     - action: subagent
-      resource: oracle
+      resource: oracle-solve
       effect: allow
 ---
 
@@ -64,7 +64,7 @@ Report only high or medium-confidence findings. A clean review means no actionab
 
 ## Oracle
 
-Use `oracle` only when a consequential candidate hinges on difficult technical judgment. Pass one neutral question with the relevant evidence, constraints, and decision; do not delegate the review or request a generic second pass. Make at most two calls and verify the answer against the repository.
+Use `oracle-solve` only when a consequential candidate hinges on difficult technical judgment. Pass one neutral question with the relevant evidence, constraints, and decision; do not delegate the review or request a generic second pass. Make at most two calls and verify the answer against the repository.
 
 ## Output
 
