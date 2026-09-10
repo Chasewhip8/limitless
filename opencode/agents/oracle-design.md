@@ -1,7 +1,7 @@
 ---
 description: Oracle design adviser for consequential architecture, abstraction, API ergonomics, maintainability, and code organization decisions.
 mode: subagent
-model: anthropic/claude-fable-5-1#max
+model: anthropic/claude-fable-5-1#high
 permissions:
     - action: question
       resource: "*"
