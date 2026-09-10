@@ -6,7 +6,8 @@ import { optionalField } from '../../lib/type-utils'
 import { artifactFromManifest, ensureArtifactsRoot, readArtifactManifest } from './paths'
 import { Artifact, ArtifactSlug } from './schema'
 
-export const ArtifactListInput = Schema.Struct({})
+// Empty structs also accept arrays in Effect and emit a union without a root object type.
+export const ArtifactListInput = Schema.Record(Schema.String, Schema.Never)
 export type ArtifactListInput = typeof ArtifactListInput.Type
 
 export const InvalidArtifactListEntry = Schema.Struct({
