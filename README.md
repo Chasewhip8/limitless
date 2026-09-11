@@ -30,6 +30,7 @@ switching.
 - **Anthropic subscription authentication**: a native OpenCode 2 plugin adds Claude Pro/Max OAuth while preserving normal `anthropic/*` models and API-key behavior.
 - **No ambient Vertex selection**: `google-vertex` and `google-vertex-anthropic` are disabled by default so credentials discovered through Google ADC cannot make them selectable; set `programs.limitless.providers.disabled = [ ];` to opt back in.
 - **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, read-only review, and mechanical execution. Native nested delegation is capped at depth 2.
+- **Subagent speed profiles**: choose `limitless` for Standard processing or `limitless-fast` for Fast processing on configurable OpenAI subagents, independently of your main model selection.
 - **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed with their tools for Effect guidance and browser automation.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
 - **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces can be empty or hold notes, source files, assets, and generated outputs.
@@ -65,6 +66,8 @@ programs.limitless = {
   skills = {
     enable = true;
   };
+
+  agents.fastSubagents = [ "oracle-solve" "research" "review" "worker" ];
 
   plugins.anthropicAuth.enable = true;
 
@@ -186,6 +189,36 @@ The wrapper reads the file for each `sentry` command, exports it only to the CLI
 Set `opencode.disableClaudeCode = true` to launch both the installed OpenCode 2 CLI and optional server with `OPENCODE_DISABLE_CLAUDE_CODE=1`.
 
 The checked-in `opencode/opencode.json` and generated Home Manager file use only native OpenCode 2 fields. Limitless deep-merges native `opencode.settings`, then enforces the `limitless` default agent, the ordered `opencode.permissions` rules, the managed-repository edit denial, and direct Effect plugin declarations.
+
+## Subagent speed profiles
+
+Select the primary agent to choose the processing tier for eligible subagents:
+
+| Agent | Eligible OpenAI subagents | Main agent |
+| --- | --- | --- |
+| `limitless` (default) | Standard processing | Your selected model |
+| `limitless-fast` | Fast processing | Your selected model |
+
+Both primary agents default to `openai/gpt-6-astra-fast#xhigh` and share the same instructions and permissions. The agent package generates `limitless-fast` from `limitless.md`. The main model remains independently selectable. OpenCode's V2 TUI remembers a model per primary agent, so switching profiles can restore that profile's remembered/default main model; select your preferred main model for each profile.
+
+Configure which subagents follow the profile with Home Manager:
+
+```nix
+programs.limitless.agents.fastSubagents = [
+  "oracle-solve"
+  "research"
+  "review"
+  "worker"
+];
+```
+
+These four specialists use standard `openai/gpt-6-astra` model IDs, with `#medium` reasoning for `research` and `worker` and `#max` for `oracle-solve` and `review`. The profile selects their processing tier. The setting replaces the list; `[]` disables profile overrides. Only listed agents making requests through the `openai` provider are eligible. Anthropic requests, excluded agents, and sessions rooted in other primary agents such as `gary` retain their configured settings. With the bundled model defaults, removing a specialist from the list or running it under `gary` uses Standard processing. A custom Fast model selection still applies outside the profile overrides.
+
+The plugin resolves the root profile for each eligible child request, including nested delegation such as `limitless → oracle-design → research`. Switching profiles affects subsequent requests in existing children; requests already dispatched finish with their original tier. Each specialist keeps its model and reasoning level. Existing children can retain their previously selected Fast model reference; the Standard profile explicitly overrides its priority tier for eligible requests.
+
+The OpenCode beta hook overrides the request's service tier without changing its stored model reference, so the bundled specialists display the base Astra model name in both profiles. The selected profile indicates the processing tier. Compaction and transient generation follow the profile when OpenCode routes them through the session context hook; automatic titles use OpenCode's own settings. Fast processing requests OpenAI's priority service tier and remains subject to provider availability and pricing.
+
+For a manually configured Limitless plugin, the corresponding plugin option is `options.agents.fastSubagents` with the same list and defaults.
 
 ## Anthropic subscription authentication
 

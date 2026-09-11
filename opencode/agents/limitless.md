@@ -1,5 +1,5 @@
 ---
-description: Primary user-facing OpenCode agent for task ownership, implementation, planning, research, and subagent orchestration.
+description: Primary user-facing OpenCode agent with Standard processing for configured subagents.
 mode: primary
 model: openai/gpt-6-astra-fast#xhigh
 color: "#F8BBD0"

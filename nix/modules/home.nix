@@ -290,6 +290,9 @@ let
   repositoryPermissionRules = baseOpencodeConfig.permissions;
 
   limitlessPluginOptions = {
+    agents = {
+      inherit (cfg.agents) fastSubagents;
+    };
     github = {
       inherit (cfg.github)
         enable
@@ -623,6 +626,26 @@ in
     };
 
     agents = {
+      fastSubagents = lib.mkOption {
+        type = lib.types.listOf lib.types.nonEmptyStr;
+        default = [
+          "oracle-solve"
+          "research"
+          "review"
+          "worker"
+        ];
+        example = [
+          "oracle-solve"
+          "research"
+        ];
+        description = ''
+          Subagents whose OpenAI processing tier follows the root Limitless profile:
+          Standard under limitless and Fast under limitless-fast, including nested
+          and resumed requests. Other agents, providers, and root-session requests
+          keep their configured settings. An empty list disables tier overrides.
+        '';
+      };
+
       package = lib.mkOption {
         type = lib.types.package;
         default = self.packages.${system}."opencode-agents";

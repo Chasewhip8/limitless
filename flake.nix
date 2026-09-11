@@ -89,6 +89,7 @@
           evaluateHome =
             {
               anthropicAuthEnabled ? true,
+              fastSubagents ? null,
               linearEnabled ? false,
               notionAccounts ? { },
               notionDefaultAccount ? null,
@@ -106,6 +107,7 @@
                   programs.limitless = {
                     enable = true;
                     git.ignoreStorage = false;
+                    agents = pkgs.lib.optionalAttrs (fastSubagents != null) { inherit fastSubagents; };
                     skills.enable = skillsEnabled;
                     tools = {
                       agentBrowser.enable = false;
@@ -160,6 +162,44 @@
           notionPersonalWrapper = findNotionAccountWrapper "ntn-personal";
           notionWorkWrapper = findNotionAccountWrapper "ntn-work";
           checks = {
+            subagent-profiles =
+              let
+                configuredFastSubagents =
+                  home:
+                  (pkgs.lib.last
+                    (builtins.fromJSON (
+                      builtins.unsafeDiscardStringContext home.config.home.file.".config/opencode/opencode.json".text
+                    )).plugins
+                  ).options.agents.fastSubagents;
+              in
+              assert pkgs.lib.assertMsg (
+                configuredFastSubagents (evaluateHome { }) == [
+                  "oracle-solve"
+                  "research"
+                  "review"
+                  "worker"
+                ]
+              ) "default Fast subagents were not passed to the Limitless plugin";
+              assert pkgs.lib.assertMsg (
+                configuredFastSubagents (evaluateHome {
+                  fastSubagents = [ "worker" ];
+                }) == [
+                  "worker"
+                ]
+              ) "custom Fast subagents were not passed to the Limitless plugin";
+              assert pkgs.lib.assertMsg (
+                configuredFastSubagents (evaluateHome {
+                  fastSubagents = [ ];
+                }) == [ ]
+              ) "empty Fast subagent list was not preserved";
+              pkgs.runCommand "limitless-subagent-profiles-check" { } ''
+                sed '2d' ${opencodeAgentsPackage}/limitless.md > standard.md
+                sed '2d' ${opencodeAgentsPackage}/limitless-fast.md > fast.md
+                cmp standard.md fast.md
+                grep -F 'with Standard processing for configured subagents.' ${opencodeAgentsPackage}/limitless.md
+                grep -F 'with Fast processing for configured subagents.' ${opencodeAgentsPackage}/limitless-fast.md
+                touch "$out"
+              '';
             notion-cli =
               assert pkgs.lib.assertMsg (builtins.elem notionCliPackage notionHome.config.home.packages)
                 "enabled Notion CLI was not installed";
@@ -188,6 +228,8 @@
             if [ -d ${self}/opencode/agents ]; then
               cp -r ${self}/opencode/agents/* $out/
             fi
+            sed '2,/^---$/s/^description: .*/description: Primary user-facing OpenCode agent with Fast processing for configured subagents./' \
+              "$out/limitless.md" > "$out/limitless-fast.md"
           '';
         in
         {

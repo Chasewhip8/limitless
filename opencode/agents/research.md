@@ -1,7 +1,7 @@
 ---
 description: Research subagent for answering questions using repo code, local docs, external docs, APIs, standards, dependencies, migrations, and source evidence.
 mode: subagent
-model: openai/gpt-6-astra-fast#medium
+model: openai/gpt-6-astra#medium
 permissions:
     - action: question
       resource: "*"

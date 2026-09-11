@@ -1,7 +1,7 @@
 ---
 description: Oracle problem-solving adviser for difficult debugging, root causes, algorithms, concurrency, correctness, and performance reasoning.
 mode: subagent
-model: openai/gpt-6-astra-fast#max
+model: openai/gpt-6-astra#max
 permissions:
     - action: question
       resource: "*"
