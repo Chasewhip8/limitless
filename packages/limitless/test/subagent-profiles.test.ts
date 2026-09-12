@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import type { SessionContext } from '@opencode/plugin/effect/session'
+import type { SessionContext, SessionDomain } from '@opencode/plugin/effect/session'
 import { Agent } from '@opencode/schema/agent'
 import { Model } from '@opencode/schema/model'
 import { Session } from '@opencode/schema/session'
@@ -10,6 +10,7 @@ import {
 	DEFAULT_FAST_SUBAGENTS,
 	makeSubagentProfileHook,
 	normalizeSubagentProfileConfig,
+	registerSubagentProfileHooks,
 	SubagentProfileConfig,
 	SubagentProfileConfigError,
 	SubagentProfileError,
@@ -33,8 +34,7 @@ function request(
 		system: [],
 		messages: [],
 		tools: {},
-		generation: { maxTokens: 4096 },
-		providerOptions: { reasoningEffort: 'medium' },
+		options: {},
 	}
 }
 
@@ -112,6 +112,19 @@ describe('subagent profile configuration', () => {
 })
 
 describe('subagent speed profiles', () => {
+	test('registers OpenAI hooks for agent, compaction, and transient requests', async () => {
+		const tree = sessionTree()
+		const names: string[] = []
+		const hook: SessionDomain['hook'] = (name, _callback, options) =>
+			Effect.sync(() => {
+				names.push(name)
+				expect(options).toEqual({ providerID: 'openai' })
+				return { dispose: Effect.void }
+			})
+		await Effect.runPromise(registerSubagentProfileHooks({ hook }, tree.apply).pipe(Effect.scoped))
+		expect(names).toEqual(['context', 'compaction', 'generate'])
+	})
+
 	test.each([
 		['limitless', 'default'],
 		['limitless-fast', 'priority'],
@@ -124,16 +137,28 @@ describe('subagent speed profiles', () => {
 
 		expect(event).toEqual({
 			...original,
-			providerOptions: { ...original.providerOptions, serviceTier: tier },
+			options: { ...original.options, serviceTier: tier },
 		})
 		expect(tree.lookups).toEqual([childID, rootID])
+	})
+
+	test('preserves generation and provider overrides from earlier hooks', async () => {
+		const tree = sessionTree('limitless-fast')
+		const event = request()
+		event.options = { maxTokens: 4096, reasoningEffort: 'medium', serviceTier: 'default' }
+		await Effect.runPromise(tree.apply(event))
+		expect(event.options).toEqual({
+			maxTokens: 4096,
+			reasoningEffort: 'medium',
+			serviceTier: 'priority',
+		})
 	})
 
 	test.each(DEFAULT_FAST_SUBAGENTS)('controls the default eligible agent %s', async (agent) => {
 		const tree = sessionTree()
 		const event = request(childID, agent)
 		await Effect.runPromise(tree.apply(event))
-		expect(event.providerOptions.serviceTier).toBe('default')
+		expect(event.options.serviceTier).toBe('default')
 	})
 
 	test.each([
@@ -142,7 +167,7 @@ describe('subagent speed profiles', () => {
 	])('preserves %s main model and request settings', async (agent) => {
 		const tree = sessionTree(agent, [agent])
 		const event = request(rootID, agent, 'gpt-6-astra-fast')
-		event.providerOptions.serviceTier = 'priority'
+		event.options.serviceTier = 'priority'
 		const original = structuredClone(event)
 
 		await Effect.runPromise(tree.apply(event))
@@ -156,7 +181,7 @@ describe('subagent speed profiles', () => {
 		tree.sessions.set(childID, { parentID: rootID, agent: Agent.ID.make('oracle-design') })
 		const event = request(nestedID)
 		await Effect.runPromise(tree.apply(event))
-		expect(event.providerOptions.serviceTier).toBe('default')
+		expect(event.options.serviceTier).toBe('default')
 		expect(tree.lookups).toEqual([nestedID, childID, rootID])
 	})
 
@@ -171,9 +196,9 @@ describe('subagent speed profiles', () => {
 		const third = request(nestedID)
 		await Effect.runPromise(tree.apply(third))
 
-		expect(first.providerOptions.serviceTier).toBe('default')
-		expect(second.providerOptions.serviceTier).toBe('priority')
-		expect(third.providerOptions.serviceTier).toBe('default')
+		expect(first.options.serviceTier).toBe('default')
+		expect(second.options.serviceTier).toBe('priority')
+		expect(third.options.serviceTier).toBe('default')
 	})
 
 	test('keeps concurrent root profiles independent', async () => {
@@ -187,8 +212,8 @@ describe('subagent speed profiles', () => {
 		await Effect.runPromise(
 			Effect.all([tree.apply(standard), tree.apply(fast)], { concurrency: 'unbounded' }),
 		)
-		expect(standard.providerOptions.serviceTier).toBe('default')
-		expect(fast.providerOptions.serviceTier).toBe('priority')
+		expect(standard.options.serviceTier).toBe('default')
+		expect(fast.options.serviceTier).toBe('priority')
 	})
 
 	test.each([
@@ -220,7 +245,7 @@ describe('subagent speed profiles', () => {
 		const tree = sessionTree('limitless-fast', ['custom-agent'])
 		const event = request(childID, 'custom-agent', 'gpt-6-astra')
 		await Effect.runPromise(tree.apply(event))
-		expect(event.providerOptions.serviceTier).toBe('priority')
+		expect(event.options.serviceTier).toBe('priority')
 		expect(event.model.id).toBe('gpt-6-astra')
 	})
 
@@ -238,9 +263,9 @@ describe('subagent speed profiles', () => {
 	test('overrides Fast model settings in existing child sessions under the Standard profile', async () => {
 		const tree = sessionTree()
 		const event = request(childID, 'research', 'gpt-6-astra-fast')
-		event.providerOptions.serviceTier = 'priority'
+		event.options.serviceTier = 'priority'
 		await Effect.runPromise(tree.apply(event))
-		expect(event.providerOptions.serviceTier).toBe('default')
+		expect(event.options.serviceTier).toBe('default')
 	})
 
 	test('fails on an unavailable ancestor without applying a partial override', async () => {
@@ -250,7 +275,7 @@ describe('subagent speed profiles', () => {
 		const error = await Effect.runPromise(tree.apply(event).pipe(Effect.flip))
 		expect(error).toBeInstanceOf(SubagentProfileError)
 		expect(error.message).toContain(rootID)
-		expect(event.providerOptions.serviceTier).toBeUndefined()
+		expect(event.options.serviceTier).toBeUndefined()
 	})
 
 	test('fails on cyclic ancestry', async () => {
@@ -260,6 +285,6 @@ describe('subagent speed profiles', () => {
 		const error = await Effect.runPromise(tree.apply(event).pipe(Effect.flip))
 		expect(error).toBeInstanceOf(SubagentProfileError)
 		expect(error.message).toContain('cycle in ancestry')
-		expect(event.providerOptions.serviceTier).toBeUndefined()
+		expect(event.options.serviceTier).toBeUndefined()
 	})
 })

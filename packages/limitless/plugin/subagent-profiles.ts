@@ -1,4 +1,4 @@
-import type { SessionContext } from '@opencode/plugin/effect/session'
+import type { SessionContext, SessionDomain } from '@opencode/plugin/effect/session'
 import type { Session } from '@opencode/schema/session'
 import { Effect, Schema } from 'effect'
 import { TrimmedNonEmptyString } from '../core/command'
@@ -71,10 +71,21 @@ export function makeSubagentProfileHook(
 
 		if (session.agent === 'limitless') {
 			// Explicitly override Fast aliases still selected in existing or customized children.
-			event.providerOptions.serviceTier = 'default'
+			event.options.serviceTier = 'default'
 		}
 		if (session.agent === 'limitless-fast') {
-			event.providerOptions.serviceTier = 'priority'
+			event.options.serviceTier = 'priority'
 		}
 	})
 }
+
+export const registerSubagentProfileHooks = Effect.fn('registerSubagentProfileHooks')(function* (
+	session: Pick<SessionDomain, 'hook'>,
+	applyProfile: ReturnType<typeof makeSubagentProfileHook>,
+) {
+	for (const name of ['context', 'compaction', 'generate'] as const) {
+		yield* session.hook(name, (event) => applyProfile(event).pipe(Effect.orDie), {
+			providerID: 'openai',
+		})
+	}
+})

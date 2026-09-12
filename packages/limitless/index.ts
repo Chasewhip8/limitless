@@ -18,6 +18,7 @@ import { applyProviderPolicy, normalizeProviderPolicyConfig } from './plugin/pro
 import {
 	makeSubagentProfileHook,
 	normalizeSubagentProfileConfig,
+	registerSubagentProfileHooks,
 	SubagentProfileError,
 } from './plugin/subagent-profiles'
 import {
@@ -149,9 +150,7 @@ export default Plugin.define({
 				),
 			),
 		)
-		yield* ctx.session.hook('context', (event) => applySubagentProfile(event).pipe(Effect.orDie), {
-			providerID: 'openai',
-		})
+		yield* registerSubagentProfileHooks(ctx.session, applySubagentProfile)
 
 		const lookupNotificationSession = (sessionID: string) =>
 			Schema.decodeUnknownEffect(Session.ID)(sessionID).pipe(

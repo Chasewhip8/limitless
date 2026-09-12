@@ -1,9 +1,8 @@
 # Limitless
 
-> A Home Manager module for a ready-to-use OpenCode 2.0 beta agent workspace.
+> A Home Manager module for a ready-to-use OpenCode 2 agent workspace.
 
-Limitless is decisively cut over to the volatile OpenCode 2.0 beta at
-`0.0.0-beta-19296`. It has no OpenCode 1 runtime, configuration, plugin, or
+Limitless pins OpenCode `2.0.2`. It has no OpenCode 1 runtime, configuration, plugin, or
 session-migration path. Existing OpenCode 1 sessions may be unavailable after
 switching.
 
@@ -35,7 +34,8 @@ switching.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
 - **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces can be empty or hold notes, source files, assets, and generated outputs.
 - **Global Git hygiene**: Home Manager adds `.limitless/` to Git's global ignore file by default, so project-local clones and artifacts stay out of repository status.
-- **Markdown artifacts**: create durable project-scoped folders for notes and scratchpads.
+- **Markdown artifacts**: create durable project-scoped folders for notes and
+  s.
 - **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional project-cached GitHub source research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **Optional Linear MCP**: Home Manager writes the remote Linear MCP entry directly when enabled; OpenCode reads `LINEAR_API_KEY` from its process environment.
@@ -194,10 +194,10 @@ The checked-in `opencode/opencode.json` and generated Home Manager file use only
 
 Select the primary agent to choose the processing tier for eligible subagents:
 
-| Agent | Eligible OpenAI subagents | Main agent |
-| --- | --- | --- |
-| `limitless` (default) | Standard processing | Your selected model |
-| `limitless-fast` | Fast processing | Your selected model |
+| Agent                 | Eligible OpenAI subagents | Main agent          |
+| --------------------- | ------------------------- | ------------------- |
+| `limitless` (default) | Standard processing       | Your selected model |
+| `limitless-fast`      | Fast processing           | Your selected model |
 
 Both primary agents default to `openai/gpt-6-astra-fast#xhigh` and share the same instructions and permissions. The agent package generates `limitless-fast` from `limitless.md`. The main model remains independently selectable. OpenCode's V2 TUI remembers a model per primary agent, so switching profiles can restore that profile's remembered/default main model; select your preferred main model for each profile.
 
@@ -216,7 +216,7 @@ These four specialists use standard `openai/gpt-6-astra` model IDs, with `#mediu
 
 The plugin resolves the root profile for each eligible child request, including nested delegation such as `limitless → oracle-design → research`. Switching profiles affects subsequent requests in existing children; requests already dispatched finish with their original tier. Each specialist keeps its model and reasoning level. Existing children can retain their previously selected Fast model reference; the Standard profile explicitly overrides its priority tier for eligible requests.
 
-The OpenCode beta hook overrides the request's service tier without changing its stored model reference, so the bundled specialists display the base Astra model name in both profiles. The selected profile indicates the processing tier. Compaction and transient generation follow the profile when OpenCode routes them through the session context hook; automatic titles use OpenCode's own settings. Fast processing requests OpenAI's priority service tier and remains subject to provider availability and pricing.
+OpenCode's session hooks override the request's service tier without changing its stored model reference, so the bundled specialists display the base Astra model name in both profiles. The selected profile indicates the processing tier. The plugin registers the same policy for agent-loop requests, compaction, and transient generation; automatic titles use OpenCode's own settings. Fast processing requests OpenAI's priority service tier and remains subject to provider availability and pricing.
 
 For a manually configured Limitless plugin, the corresponding plugin option is `options.agents.fastSubagents` with the same list and defaults.
 
@@ -339,6 +339,6 @@ Failed creation removes its incomplete manifest and empty folder. If cleanup can
 
 ## Maintainers
 
-Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode/*@0.0.0-beta-19296` and `effect@4.0.0-rc.112`; update them together because beta APIs and storage remain volatile. OpenCode 2 packages now use the `@opencode` namespace; follow the `beta` channel rather than npm's `latest` tag.
+Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode/*@2.0.2` and `effect@4.0.0-rc.112`; update them together to keep runtime and plugin APIs aligned. OpenCode 2 packages use the `@opencode` namespace and npm's `latest` tag. The Nix package installs the upstream `opencode` executable as `opencode2` for the module's commands and service.
 
 For structure and implementation details, see the module options in `nix/modules/home.nix`.
