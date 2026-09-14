@@ -22,6 +22,14 @@ let
       export HOME=$TMPDIR
       cp -r patches packages/limitless/patches
       bun install --cwd packages/limitless --no-progress --frozen-lockfile --ignore-scripts --production --omit optional
+      bun ${./limitless-bun-links.mjs}
+    '';
+
+    doCheck = true;
+    checkPhase = ''
+      cp ${./limitless-bun-links.mjs} ./limitless-bun-links.mjs
+      cp ${./limitless-bun-links.test.mjs} ./limitless-bun-links.test.mjs
+      bun test ./limitless-bun-links.test.mjs
     '';
 
     installPhase = ''
