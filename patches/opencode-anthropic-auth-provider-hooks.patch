@@ -1,0 +1,84 @@
+diff --git a/src/index.ts b/src/index.ts
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -142,41 +142,49 @@ export default Plugin.define({
+       })
+     })
+
+-    await ctx.session.hook('http.request', async (event) => {
+-      if (event.model.providerID !== INTEGRATION_ID) return
+-      const credential = await resolveActiveOAuth(ctx)
+-      if (!credential) return
++    await ctx.session.hook(
++      'http.request',
++      async (event) => {
++        if (event.model.providerID !== INTEGRATION_ID) return
++        const credential = await resolveActiveOAuth(ctx)
++        if (!credential) return
+
+-      const request = event.request
+-      const hasBody = request.method !== 'GET' && request.method !== 'HEAD'
+-      const bodyText = hasBody ? await request.clone().text() : undefined
+-      const rewrittenBody =
+-        bodyText !== undefined ? rewriteRequestBody(bodyText) : undefined
++        const request = event.request
++        const hasBody = request.method !== 'GET' && request.method !== 'HEAD'
++        const bodyText = hasBody ? await request.clone().text() : undefined
++        const rewrittenBody =
++          bodyText !== undefined ? rewriteRequestBody(bodyText) : undefined
+
+-      const headers = mergeHeaders(request)
+-      setOAuthHeaders(headers, credential.access)
+-      if (rewrittenBody !== undefined) headers.delete('content-length')
++        const headers = mergeHeaders(request)
++        setOAuthHeaders(headers, credential.access)
++        if (rewrittenBody !== undefined) headers.delete('content-length')
+
+-      const { input: rewrittenInput } = rewriteUrl(request.url)
+-      const url =
+-        typeof rewrittenInput === 'string'
+-          ? rewrittenInput
+-          : rewrittenInput instanceof Request
+-            ? rewrittenInput.url
+-            : rewrittenInput.toString()
++        const { input: rewrittenInput } = rewriteUrl(request.url)
++        const url =
++          typeof rewrittenInput === 'string'
++            ? rewrittenInput
++            : rewrittenInput instanceof Request
++              ? rewrittenInput.url
++              : rewrittenInput.toString()
+
+-      event.request = new Request(url, {
+-        method: request.method,
+-        headers,
+-        body: rewrittenBody,
+-        signal: request.signal,
+-      })
+-    })
++        event.request = new Request(url, {
++          method: request.method,
++          headers,
++          body: rewrittenBody,
++          signal: request.signal,
++        })
++      },
++      { providerID: INTEGRATION_ID },
++    )
+
+-    await ctx.session.hook('http.response', (event) => {
+-      if (event.model.providerID !== INTEGRATION_ID) return
+-      if (!isTransformedOAuthRequest(event.request)) return
+-      event.response = createStrippedStream(event.response)
+-    })
++    await ctx.session.hook(
++      'http.response',
++      (event) => {
++        if (event.model.providerID !== INTEGRATION_ID) return
++        if (!isTransformedOAuthRequest(event.request)) return
++        event.response = createStrippedStream(event.response)
++      },
++      { providerID: INTEGRATION_ID },
++    )
+   },
+ })

@@ -39,6 +39,9 @@ pkgs.stdenvNoCC.mkDerivation {
   version = packageVersion;
   inherit src;
 
+  # OpenCode disables WebSockets for every provider matched by an HTTP hook.
+  patches = [ ../../patches/opencode-anthropic-auth-provider-hooks.patch ];
+
   nativeBuildInputs = [ pkgs.bun ];
 
   dontConfigure = true;
@@ -56,15 +59,8 @@ pkgs.stdenvNoCC.mkDerivation {
 
   doCheck = true;
   checkPhase = ''
-    bun -e '
-      const module = await import("./dist/anthropic-auth.js")
-      if (module.default?.id !== "ex-machina.anthropic-auth") {
-        throw new Error("missing upstream OpenCode 2 plugin export")
-      }
-      if (typeof module.default?.setup !== "function") {
-        throw new Error("missing upstream Promise plugin implementation")
-      }
-    '
+    cp ${./anthropic-auth.test.mjs} ./anthropic-auth.test.mjs
+    bun test ./anthropic-auth.test.mjs ./src/tests/index.test.ts
   '';
 
   installPhase = ''
