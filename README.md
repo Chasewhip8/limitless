@@ -28,7 +28,7 @@ switching.
 - **One module to enable**: `programs.limitless.enable = true` wires `opencode2`, agents, skills, plugins, MCPs, and language servers together.
 - **Anthropic subscription authentication**: a native OpenCode 2 plugin adds Claude Pro/Max OAuth while preserving normal `anthropic/*` models and API-key behavior.
 - **No ambient Vertex selection**: `google-vertex` and `google-vertex-anthropic` are disabled by default so credentials discovered through Google ADC cannot make them selectable; set `programs.limitless.providers.disabled = [ ];` to opt back in.
-- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, read-only review, and mechanical execution. Native nested delegation is capped at depth 2.
+- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, and mechanical execution. Native nested delegation is capped at depth 2.
 - **Subagent speed profiles**: choose `limitless` for Standard processing or `limitless-fast` for Fast processing on configurable OpenAI subagents, independently of your main model selection.
 - **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed with their tools for Effect guidance and browser automation.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
@@ -67,7 +67,7 @@ programs.limitless = {
     enable = true;
   };
 
-  agents.fastSubagents = [ "oracle-solve" "research" "review" "worker" ];
+  agents.fastSubagents = [ "oracle-solve" "research" "worker" ];
 
   plugins.anthropicAuth.enable = true;
 
@@ -199,7 +199,7 @@ Select the primary agent to choose the processing tier for eligible subagents:
 | `limitless` (default) | Standard processing       | Your selected model |
 | `limitless-fast`      | Fast processing           | Your selected model |
 
-Both primary agents default to `openai/gpt-6-astra-fast#xhigh` and share the same instructions and permissions. The agent package generates `limitless-fast` from `limitless.md`. The main model remains independently selectable. OpenCode's V2 TUI remembers a model per primary agent, so switching profiles can restore that profile's remembered/default main model; select your preferred main model for each profile.
+Both primary agents default to `openai/gpt-6-astra#xhigh` and share the same instructions and permissions. The agent package generates `limitless-fast` from `limitless.md`. The main model remains independently selectable. OpenCode's V2 TUI remembers a model per primary agent, so switching profiles can restore that profile's remembered/default main model; select your preferred main model for each profile.
 
 Configure which subagents follow the profile with Home Manager:
 
@@ -207,16 +207,15 @@ Configure which subagents follow the profile with Home Manager:
 programs.limitless.agents.fastSubagents = [
   "oracle-solve"
   "research"
-  "review"
   "worker"
 ];
 ```
 
-These four specialists use standard `openai/gpt-6-astra` model IDs, with `#medium` reasoning for `research` and `worker` and `#max` for `oracle-solve` and `review`. The profile selects their processing tier. The setting replaces the list; `[]` disables profile overrides. Only listed agents making requests through the `openai` provider are eligible. Anthropic requests, excluded agents, and sessions rooted in other primary agents such as `gary` retain their configured settings. With the bundled model defaults, removing a specialist from the list or running it under `gary` uses Standard processing. A custom Fast model selection still applies outside the profile overrides.
+`research` and `worker` use `openai/gpt-5.6-sol#medium`; `oracle-solve` uses `openai/gpt-6-astra#xhigh`. The profile selects their processing tier. The setting replaces the list; `[]` disables profile overrides. Only listed agents making requests through the `openai` provider are eligible. Anthropic requests, excluded agents, and sessions rooted in other primary agents such as `gary` retain their configured settings. With the bundled model defaults, removing a specialist from the list or running it under `gary` uses Standard processing. A custom Fast model selection still applies outside the profile overrides.
 
 The plugin resolves the root profile for each eligible child request, including nested delegation such as `limitless → oracle-design → research`. Switching profiles affects subsequent requests in existing children; requests already dispatched finish with their original tier. Each specialist keeps its model and reasoning level. Existing children can retain their previously selected Fast model reference; the Standard profile explicitly overrides its priority tier for eligible requests.
 
-OpenCode's session hooks override the request's service tier without changing its stored model reference, so the bundled specialists display the base Astra model name in both profiles. The selected profile indicates the processing tier. The plugin registers the same policy for agent-loop requests, compaction, and transient generation; automatic titles use OpenCode's own settings. Fast processing requests OpenAI's priority service tier and remains subject to provider availability and pricing.
+OpenCode's session hooks override the request's service tier without changing its stored model reference, so the bundled specialists display their base Astra or Sol model names in both profiles. The selected profile indicates the processing tier. The plugin registers the same policy for agent-loop requests, compaction, and transient generation; automatic titles use OpenCode's own settings. Fast processing requests OpenAI's priority service tier and remains subject to provider availability and pricing.
 
 For a manually configured Limitless plugin, the corresponding plugin option is `options.agents.fastSubagents` with the same list and defaults.
 
@@ -249,7 +248,7 @@ OpenCode 2 has no native equivalent for the former OpenAI response-header timeou
 
 `research` is read-only and researches local code, tests, docs, configuration, APIs, standards, current external facts, implementation source, official examples, and configured private GitHub repositories. It does not edit files or run shell commands.
 
-`oracle-solve` uses Astra for difficult technical questions that benefit from an independent conclusion, including debugging, root causes, algorithms, concurrency, correctness, and performance reasoning. It is the default Oracle for technical consultation and the adviser available to `review`.
+`oracle-solve` uses Astra for difficult technical questions that benefit from an independent conclusion, including debugging, root causes, algorithms, concurrency, correctness, and performance reasoning. It is the default Oracle for technical consultation.
 
 `oracle-design` uses Fable for consequential architecture, abstraction, API ergonomics, maintainability, and code organization decisions. To conserve Fable quota, Limitless and Gary handle routine planning and style questions directly, gather evidence before consulting it, and reuse its session for the same decision. They consult it again when new evidence materially changes the decision. For mixed questions, they resolve technical uncertainty with `oracle-solve` first and consult `oracle-design` if a material design choice remains. These routing instructions guide usage; they do not enforce a quota.
 

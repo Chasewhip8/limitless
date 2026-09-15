@@ -631,7 +631,6 @@ in
         default = [
           "oracle-solve"
           "research"
-          "review"
           "worker"
         ];
         example = [

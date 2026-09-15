@@ -27,9 +27,6 @@ permissions:
       resource: research
       effect: allow
     - action: subagent
-      resource: review
-      effect: deny
-    - action: subagent
       resource: worker
       effect: allow
 ---
@@ -75,8 +72,9 @@ Interview the user relentlessly about every aspect until a shared understanding 
 
 ## Artifacts
 
-- Use artifacts for durable project-scoped workspaces. Create an empty artifact and write Markdown files.
-- For a scratchpad, create a blank artifact and add a `scratchpad.md` file.
+- Keep routine plans, task checklists, and progress updates in the conversation.
+- Create or update an artifact only when the user explicitly requests one, the agreed task includes a durable document, or a large set of items needs persistent tracking across multiple rounds of work (for example, a bug inventory with short descriptions, sources, and status).
+- Create artifact folders with `artifact_create`, then use normal file tools to write their contents.
 
 ## Tools
 

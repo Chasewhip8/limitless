@@ -176,7 +176,6 @@
                 configuredFastSubagents (evaluateHome { }) == [
                   "oracle-solve"
                   "research"
-                  "review"
                   "worker"
                 ]
               ) "default Fast subagents were not passed to the Limitless plugin";
@@ -198,6 +197,7 @@
                 cmp standard.md fast.md
                 grep -F 'with Standard processing for configured subagents.' ${opencodeAgentsPackage}/limitless.md
                 grep -F 'with Fast processing for configured subagents.' ${opencodeAgentsPackage}/limitless-fast.md
+                test ! -e ${opencodeAgentsPackage}/review.md
                 touch "$out"
               '';
             notion-cli =

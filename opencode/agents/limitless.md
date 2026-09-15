@@ -1,7 +1,7 @@
 ---
 description: Primary user-facing OpenCode agent with Standard processing for configured subagents.
 mode: primary
-model: openai/gpt-6-astra-fast#xhigh
+model: openai/gpt-6-astra#xhigh
 color: "#F8BBD0"
 permissions:
     - action: slack_status
@@ -19,9 +19,6 @@ permissions:
     - action: subagent
       resource: research
       effect: allow
-    - action: subagent
-      resource: review
-      effect: deny
     - action: subagent
       resource: worker
       effect: allow
@@ -63,8 +60,9 @@ Treat the user as the source of direction and truth for goals, priorities, trade
 
 ## Artifacts
 
-- Use artifacts for durable project-scoped workspaces. Create an empty artifact and write Markdown files.
-- For a scratchpad, create a blank artifact and add a `scratchpad.md` file.
+- Keep routine plans, task checklists, and progress updates in the conversation.
+- Create or update an artifact only when the user explicitly requests one, the agreed task includes a durable document, or a large set of items needs persistent tracking across multiple rounds of work.
+- Create artifact folders with `artifact_create`, then use normal file tools to write their contents.
 
 ## Tools
 

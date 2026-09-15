@@ -4,7 +4,7 @@ import { Effect, Schema } from 'effect'
 import { TrimmedNonEmptyString } from '../core/command'
 import { schemaErrorMessage } from '../lib/guards'
 
-export const DEFAULT_FAST_SUBAGENTS = ['oracle-solve', 'research', 'review', 'worker'] as const
+export const DEFAULT_FAST_SUBAGENTS = ['oracle-solve', 'research', 'worker'] as const
 
 const SubagentProfileOptions = Schema.Struct({
 	agents: Schema.optional(

@@ -69,21 +69,21 @@ describe('subagent profile configuration', () => {
 	test('enables profiles for the bundled OpenAI specialists by default', async () => {
 		const config = await Effect.runPromise(normalizeSubagentProfileConfig({}))
 		expect(config.fastSubagents).toEqual(DEFAULT_FAST_SUBAGENTS)
+		expect(config.fastSubagents).toEqual(['oracle-solve', 'research', 'worker'])
 	})
 
 	test.each([
-		{ agent: 'oracle-solve', variant: 'max' },
-		{ agent: 'research', variant: 'medium' },
-		{ agent: 'review', variant: 'max' },
-		{ agent: 'worker', variant: 'medium' },
-	])('bundles $agent with standard Astra and $variant reasoning', async ({ agent, variant }) => {
+		{ agent: 'oracle-solve', model: 'gpt-6-astra', variant: 'xhigh' },
+		{ agent: 'research', model: 'gpt-5.6-sol', variant: 'medium' },
+		{ agent: 'worker', model: 'gpt-5.6-sol', variant: 'medium' },
+	])('bundles $agent with $model and $variant reasoning', async ({ agent, model, variant }) => {
 		const content = await readFile(
 			new URL(`../../../opencode/agents/${agent}.md`, import.meta.url),
 			'utf8',
 		)
 		expect(DEFAULT_FAST_SUBAGENTS).toContain(agent)
 		expect(content).toContain('\nmode: subagent\n')
-		expect(content).toContain(`\nmodel: openai/gpt-6-astra#${variant}\n`)
+		expect(content).toContain(`\nmodel: openai/${model}#${variant}\n`)
 	})
 
 	test('passes an explicit agent list through plugin configuration and deduplicates it', async () => {
