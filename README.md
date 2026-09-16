@@ -2,7 +2,7 @@
 
 > A Home Manager module for a ready-to-use OpenCode 2 agent workspace.
 
-Limitless pins OpenCode `2.0.2`. It has no OpenCode 1 runtime, configuration, plugin, or
+Limitless pins OpenCode `2.0.5`. It has no OpenCode 1 runtime, configuration, plugin, or
 session-migration path. Existing OpenCode 1 sessions may be unavailable after
 switching.
 
@@ -338,6 +338,6 @@ Failed creation removes its incomplete manifest and empty folder. If cleanup can
 
 ## Maintainers
 
-Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode/*@2.0.2` and `effect@4.0.0-rc.112`; update them together to keep runtime and plugin APIs aligned. OpenCode 2 packages use the `@opencode` namespace and npm's `latest` tag. The Nix package installs the upstream `opencode` executable as `opencode2` for the module's commands and service.
+Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode/*@2.0.5` and `effect@4.0.0-rc.112`; update them together to keep runtime and plugin APIs aligned. OpenCode 2 packages use the `@opencode` namespace and npm's `latest` tag. The Nix package installs the upstream `opencode` executable as `opencode2` for the module's commands and service.
 
 For structure and implementation details, see the module options in `nix/modules/home.nix`.

@@ -137,8 +137,8 @@ export default Plugin.define({
 		yield* ctx.tool.transform((draft) => {
 			registerLimitlessTools(draft, tools)
 		})
-		yield* ctx.catalog.transform((catalog) => {
-			applyProviderPolicy(catalog, configs.providerPolicy)
+		yield* ctx.provider.transform((providers) => {
+			applyProviderPolicy(providers, configs.providerPolicy)
 		})
 		const applySubagentProfile = makeSubagentProfileHook(configs.subagentProfiles, (sessionID) =>
 			ctx.session.get({ sessionID }).pipe(

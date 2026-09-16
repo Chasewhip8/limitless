@@ -1,4 +1,4 @@
-import type { CatalogEditor } from '@opencode/plugin/effect/catalog'
+import type { ProviderEditor } from '@opencode/plugin/effect/provider'
 import { Effect, Schema } from 'effect'
 import { TrimmedNonEmptyString } from '../core/command'
 import { schemaErrorMessage } from '../lib/guards'
@@ -36,8 +36,8 @@ export const normalizeProviderPolicyConfig = Effect.fn('normalizeProviderPolicyC
 	})
 })
 
-export function applyProviderPolicy(catalog: CatalogEditor, config: ProviderPolicyConfig): void {
+export function applyProviderPolicy(providers: ProviderEditor, config: ProviderPolicyConfig): void {
 	for (const providerID of config.disabled) {
-		catalog.provider.remove(providerID)
+		providers.remove(providerID)
 	}
 }
