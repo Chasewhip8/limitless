@@ -28,7 +28,7 @@ switching.
 - **One module to enable**: `programs.limitless.enable = true` wires `opencode2`, agents, skills, plugins, MCPs, and language servers together.
 - **Anthropic subscription authentication**: a native OpenCode 2 plugin adds Claude Pro/Max OAuth while preserving normal `anthropic/*` models and API-key behavior.
 - **No ambient Vertex selection**: `google-vertex` and `google-vertex-anthropic` are disabled by default so credentials discovered through Google ADC cannot make them selectable; set `programs.limitless.providers.disabled = [ ];` to opt back in.
-- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, and mechanical execution. Native nested delegation is capped at depth 2.
+- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, and mechanical execution. Native nested delegation is capped at depth 2. Select `solo` for the same workflow with subagent delegation denied.
 - **Subagent speed profiles**: choose `limitless` for Standard processing or `limitless-fast` for Fast processing on configurable OpenAI subagents, independently of your main model selection.
 - **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed with their tools for Effect guidance and browser automation.
 - **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
@@ -199,7 +199,7 @@ Select the primary agent to choose the processing tier for eligible subagents:
 | `limitless` (default) | Standard processing       | Your selected model |
 | `limitless-fast`      | Fast processing           | Your selected model |
 
-Both primary agents default to `openai/gpt-6-astra#xhigh` and share the same instructions and permissions. The agent package generates `limitless-fast` from `limitless.md`. The main model remains independently selectable. OpenCode's V2 TUI remembers a model per primary agent, so switching profiles can restore that profile's remembered/default main model; select your preferred main model for each profile.
+Both primary agents default to `openai/gpt-6-astra#xhigh` and share the same instructions and permissions. The agent package generates `limitless-fast` from `limitless.md`. The `solo` primary agent carries the same instructions with every `subagent` action denied, so it works in a single context and has no speed profile. The main model remains independently selectable. OpenCode's V2 TUI remembers a model per primary agent, so switching profiles can restore that profile's remembered/default main model; select your preferred main model for each profile.
 
 Configure which subagents follow the profile with Home Manager:
 
