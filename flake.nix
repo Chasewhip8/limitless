@@ -40,7 +40,7 @@
           notionCliPackage = import ./nix/packages/notion-cli.nix {
             inherit pkgs self system;
           };
-          opencodePackage = import ./nix/packages/opencode2.nix { inherit pkgs; };
+          opencodePackage = import ./nix/packages/opencode.nix { inherit pkgs; };
 
           homeOptionStubs = {
             options = {
@@ -243,7 +243,7 @@
             "agent-browser" = agentBrowserPackage;
             "notion-cli" = notionCliPackage;
             "opencode-agents" = opencodeAgentsPackage;
-            opencode2 = opencodePackage;
+            opencode = opencodePackage;
           };
 
           inherit checks;

@@ -1,13 +1,13 @@
 { pkgs }:
 let
-  rev = "f043583c24085c60fc7f95059f2d6f36f44f4a8e";
-  packageVersion = "2.0.0-pr211-${builtins.substring 0 7 rev}";
-  upstreamPluginSdkVersion = "0.0.0-next-17444";
+  rev = "c6921e486e9d180b1c2ace318211f7156a5f09b0";
+  packageVersion = "2.0.0-next.1-${builtins.substring 0 7 rev}";
+  upstreamPluginSdkVersion = "2.0.4";
   src = pkgs.fetchFromGitHub {
-    owner = "CasualDeveloper";
+    owner = "ex-machina-co";
     repo = "opencode-anthropic-auth";
     inherit rev;
-    hash = "sha256-v24QlWKuZJ0BXr86B+qxJ/tjesG3l5hocOKcCC+8c1A=";
+    hash = "sha256-Ym7kbbET2yhGFKM8Ohp1jfTSrXkJBl7CK+Dlzml4Oto=";
   };
 
   bunDeps = pkgs.stdenvNoCC.mkDerivation {
@@ -29,7 +29,7 @@ let
       cp -r node_modules $out/node_modules
     '';
 
-    outputHash = "sha256-aAJHeQd0E/c1BaRY1zxBsR0lwwdyVlwTMIY7BjWMJto=";
+    outputHash = "sha256-f7/r26LtMwT0K+68q4shpJMLpxS12D+G5eb7icFOcMU=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -83,8 +83,8 @@ pkgs.stdenvNoCC.mkDerivation {
   };
 
   meta = with pkgs.lib; {
-    description = "OpenCode 2 Anthropic OAuth plugin from upstream pull request 211";
-    homepage = "https://github.com/ex-machina-co/opencode-anthropic-auth/pull/211";
+    description = "OpenCode 2 Anthropic OAuth plugin";
+    homepage = "https://github.com/ex-machina-co/opencode-anthropic-auth";
     license = licenses.mit;
     platforms = platforms.all;
   };

@@ -29,17 +29,17 @@ let
   opencodePackage =
     if cfg.opencode.disableClaudeCode then
       pkgs.symlinkJoin {
-        name = "opencode2-disable-claude-code";
+        name = "opencode-disable-claude-code";
         paths = [ cfg.opencode.package ];
         nativeBuildInputs = [ pkgs.makeWrapper ];
         postBuild = ''
-          wrapProgram $out/bin/opencode2 --set OPENCODE_DISABLE_CLAUDE_CODE 1
+          wrapProgram $out/bin/opencode --set OPENCODE_DISABLE_CLAUDE_CODE 1
         '';
       }
     else
       cfg.opencode.package;
 
-  opencodeAttachCommand = "${opencodePackage}/bin/opencode2 \"$PWD\"";
+  opencodeAttachCommand = "${opencodePackage}/bin/opencode \"$PWD\"";
   slackRepository = if cfg.slack.repository == null then "/" else cfg.slack.repository;
   slackPrepare = pkgs.writeShellScript "limitless-slack-prepare" ''
     set -eu
@@ -51,7 +51,7 @@ let
     : "''${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
     ready_file="$XDG_RUNTIME_DIR/limitless-slack-ready"
 
-    until ${opencodePackage}/bin/opencode2 api v2.plugin.list \
+    until ${opencodePackage}/bin/opencode api v2.plugin.list \
       --param ${lib.escapeShellArg "location[directory]=${slackRepository}"} >/dev/null 2>&1; do
       ${pkgs.coreutils}/bin/sleep 0.1
     done
@@ -399,8 +399,8 @@ in
     opencode = {
       package = lib.mkOption {
         type = lib.types.package;
-        default = self.packages.${system}.opencode2;
-        description = "OpenCode 2.0 beta package to install. Defaults to the runtime pinned by this flake.";
+        default = self.packages.${system}.opencode;
+        description = "OpenCode package to install. Defaults to the V2 runtime pinned by this flake.";
       };
 
       disableClaudeCode = lib.mkOption {
@@ -1212,9 +1212,9 @@ in
         home.shellAliases.${cfg.opencode.service.alias} = lib.mkDefault opencodeAttachCommand;
       })
       (lib.mkIf (enabledOpencodeService && pkgs.stdenv.isLinux) {
-        systemd.user.services.opencode2 = {
+        systemd.user.services.opencode = {
           Unit = {
-            Description = "OpenCode 2 beta server";
+            Description = "OpenCode 2 server";
             X-Restart-Triggers = [
               opencodeConfigRestartTrigger
               agentsRestartTrigger
@@ -1229,7 +1229,7 @@ in
             Environment =
               lib.optional cfg.opencode.disableClaudeCode "OPENCODE_DISABLE_CLAUDE_CODE=1"
               ++ lib.optional enabledSlack "LIMITLESS_SLACK_SERVICE=1";
-            ExecStart = "${opencodePackage}/bin/opencode2 serve --service --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
+            ExecStart = "${opencodePackage}/bin/opencode serve --service --hostname ${cfg.opencode.service.hostname} --port ${toString cfg.opencode.service.port}";
             Restart = "on-failure";
             RestartSec = "5s";
           }

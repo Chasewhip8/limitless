@@ -1,22 +1,22 @@
 { pkgs }:
 let
-  version = "2.0.5";
+  version = "2.0.12";
   sources = {
     x86_64-linux = {
       platform = "linux-x64";
-      hash = "sha256-k9SpjmJzSXBXls4LdZw83oBctIxeIQ1WMsLt689cTTA=";
+      hash = "sha256-Knm+suJDgssr27cJI328IvSYz1KhBtAppqOjJDdgx4s=";
     };
     aarch64-linux = {
       platform = "linux-arm64";
-      hash = "sha256-hZFVwuiIkdfKCCrVEmLPf9S3mBn4qktGQ5pYJFrulOg=";
+      hash = "sha256-M/Dd6fDwVbajZl0pA3G8/Ixj2s6t56U1xLlNOG8r2Rc=";
     };
     aarch64-darwin = {
       platform = "darwin-arm64";
-      hash = "sha256-ZevVkknFMAmPvfT7fbYlatZxU9Th49kMblBi/XEBzVY=";
+      hash = "sha256-mTGWnp8D/u07PQX3PzkqBRz01CDIWmcWiBffPGZnvRc=";
     };
     x86_64-darwin = {
       platform = "darwin-x64";
-      hash = "sha256-ZBXUpeE1bkpCYt1M/L9L7CxKEx0RckIUE+WWRAIVJuI=";
+      hash = "sha256-0kXojnLZiADSRhbbWiF97nHPGalO/OoVbSarVC6EpFI=";
     };
   };
   source =
@@ -24,7 +24,7 @@ let
       or (throw "OpenCode 2 is unsupported on ${pkgs.stdenv.hostPlatform.system}");
 in
 pkgs.stdenv.mkDerivation {
-  pname = "opencode2";
+  pname = "opencode";
   inherit version;
 
   src = pkgs.fetchurl {
@@ -45,8 +45,8 @@ pkgs.stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    install -Dm755 bin/opencode $out/bin/opencode2
-    wrapProgram $out/bin/opencode2 --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ripgrep ]}
+    install -Dm755 bin/opencode $out/bin/opencode
+    wrapProgram $out/bin/opencode --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.ripgrep ]}
 
     runHook postInstall
   '';
@@ -61,7 +61,7 @@ pkgs.stdenv.mkDerivation {
     downloadPage = "https://www.npmjs.com/package/@opencode/cli?activeTab=versions";
     license = pkgs.lib.licenses.mit;
     sourceProvenance = [ pkgs.lib.sourceTypes.binaryNativeCode ];
-    mainProgram = "opencode2";
+    mainProgram = "opencode";
     platforms = builtins.attrNames sources;
   };
 }

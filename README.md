@@ -2,7 +2,7 @@
 
 > A Home Manager module for a ready-to-use OpenCode 2 agent workspace.
 
-Limitless pins OpenCode `2.0.5`. It has no OpenCode 1 runtime, configuration, plugin, or
+Limitless pins OpenCode `2.0.12`. It has no OpenCode 1 runtime, configuration, plugin, or
 session-migration path. Existing OpenCode 1 sessions may be unavailable after
 switching.
 
@@ -23,9 +23,27 @@ switching.
 }
 ```
 
+## Upgrade from OpenCode 1
+
+The V2 release keeps the `opencode` executable and systemd service names while
+replacing their runtime, configuration, plugin API, and persisted session
+format. Before switching, record the current flake lock revision. If service
+mode is enabled, stop `opencode.service` and back up OpenCode's state directory
+under `$XDG_DATA_HOME/opencode` (normally `~/.local/share/opencode`) before
+changing generations.
+
+Apply the updated Home Manager generation, verify `opencode --version`, and
+reconnect Anthropic through `/connect` if subscription authentication was used.
+Existing V1 sessions are not migrated.
+
+To roll back, stop the service, activate the previous Home Manager generation
+or restore the previous flake lock revision, restore the matching state backup,
+and then start the V1 service. Do not run V1 and V2 against the same writable
+state directory.
+
 ## Features
 
-- **One module to enable**: `programs.limitless.enable = true` wires `opencode2`, agents, skills, plugins, MCPs, and language servers together.
+- **One module to enable**: `programs.limitless.enable = true` wires `opencode`, agents, skills, plugins, MCPs, and language servers together.
 - **Anthropic subscription authentication**: a native OpenCode 2 plugin adds Claude Pro/Max OAuth while preserving normal `anthropic/*` models and API-key behavior.
 - **No ambient Vertex selection**: `google-vertex` and `google-vertex-anthropic` are disabled by default so credentials discovered through Google ADC cannot make them selectable; set `programs.limitless.providers.disabled = [ ];` to opt back in.
 - **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, and mechanical execution. Native nested delegation is capped at depth 2. Select `solo` for the same workflow with subagent delegation denied.
@@ -35,7 +53,7 @@ switching.
 - **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces can be empty or hold notes, source files, assets, and generated outputs.
 - **Global Git hygiene**: Home Manager adds `.limitless/` to Git's global ignore file by default, so project-local clones and artifacts stay out of repository status.
 - **Markdown artifacts**: create durable project-scoped folders for notes and
-  s.
+  scratchpads.
 - **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional project-cached GitHub source research in one place.
 - **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
 - **Optional Linear MCP**: Home Manager writes the remote Linear MCP entry directly when enabled; OpenCode reads `LINEAR_API_KEY` from its process environment.
@@ -221,7 +239,7 @@ For a manually configured Limitless plugin, the corresponding plugin option is `
 
 ## Anthropic subscription authentication
 
-Anthropic authentication is enabled by default. Run `/connect`, select Anthropic, and choose **Claude Pro/Max** to complete the hosted PKCE code flow. Limitless packages the OpenCode 2 implementation from [`ex-machina-co/opencode-anthropic-auth` PR 211](https://github.com/ex-machina-co/opencode-anthropic-auth/pull/211), pinned to commit `f043583c24085c60fc7f95059f2d6f36f44f4a8e`. Subscription credentials use its Claude Code-compatible request hooks, while API keys and `ANTHROPIC_API_KEY` retain standard Anthropic request behavior.
+Anthropic authentication is enabled by default. Run `/connect`, select Anthropic, and choose **Claude Pro/Max** to complete the hosted PKCE code flow. Limitless packages the upstream OpenCode 2 implementation from [`ex-machina-co/opencode-anthropic-auth`](https://github.com/ex-machina-co/opencode-anthropic-auth), pinned to commit `c6921e486e9d180b1c2ace318211f7156a5f09b0`. Subscription credentials use its Claude Code-compatible request hooks, while API keys and `ANTHROPIC_API_KEY` retain standard Anthropic request behavior.
 
 > [!WARNING]
 > Anthropic does not officially support using Claude Pro/Max subscriptions through OpenCode. This reverse-engineered compatibility path may violate Anthropic's terms or put an account at risk. Disable it with `programs.limitless.plugins.anthropicAuth.enable = false` if you do not accept that risk.
@@ -230,19 +248,19 @@ OpenCode 2 stores one saved credential per integration. Connecting Max replaces 
 
 OAuth credentials created by the earlier experimental Limitless integration use a different method ID and are not recognized by the upstream plugin. Reconnect **Claude Pro/Max** once after upgrading.
 
-PR 211 targets `@opencode-ai/plugin@0.0.0-next-17444`. The compatibility profile identifies as Claude Code `2.1.87`, and refresh rotation is deduplicated within one OpenCode process. `ANTHROPIC_BASE_URL` can override the request endpoint. `ANTHROPIC_INSECURE` cannot disable TLS verification through the V2 hooks and only produces a warning.
+The packaged source targets `@opencode/plugin@2.0.4`. The compatibility profile identifies as Claude Code `2.1.258` by default; set `ANTHROPIC_CLAUDE_CODE_VERSION` before startup to report a newer version when Anthropic raises its model gate. Refresh rotation is deduplicated within one OpenCode process. `ANTHROPIC_BASE_URL` can override the request endpoint. `ANTHROPIC_INSECURE` cannot disable TLS verification through the V2 hooks and only produces a warning.
 
-When `mcp.linear.enable` is true, Home Manager adds Linear at `mcp.servers.linear` with `disabled = false`, `oauth = false`, and `Authorization = "Bearer {env:LINEAR_API_KEY}"`. No Linear plugin or generated secret is involved; `LINEAR_API_KEY` must be present in the `opencode2` process environment at runtime.
+When `mcp.linear.enable` is true, Home Manager adds Linear at `mcp.servers.linear` with `disabled = false`, `oauth = false`, and `Authorization = "Bearer {env:LINEAR_API_KEY}"`. No Linear plugin or generated secret is involved; `LINEAR_API_KEY` must be present in the `opencode` process environment at runtime.
 
 The Limitless plugin uses `Plugin.define`, `Tool.make`, Effect Schema contracts, scoped event and process lifecycles, and native Effect interruption. Its 16 core tools and two Slack transport tools are registered directly with `codemode = false`. Every call resolves its OpenCode session and uses exactly `session.location.directory` as the project root; Limitless does not discover a Git root or expose a root override.
 
 Language-server definitions for Limitless tools come only from validated Home Manager-generated plugin `options.lsp`. The tools intentionally do not read or merge effective OpenCode configuration, so project-local `lsp` overrides can affect OpenCode's own LSP behavior but are not observed by Limitless tools.
 
-Home Manager installs skills in the native global OpenCode 2 location, `~/.config/opencode/skills`. Service mode runs `opencode2 serve --service`, which registers its generated credential in OpenCode's state directory; the shell alias uses normal managed-service discovery to connect with that credential.
+Home Manager installs skills in the native global OpenCode 2 location, `~/.config/opencode/skills`. Service mode runs `opencode serve --service`, which registers its generated credential in OpenCode's state directory; the shell alias uses normal managed-service discovery to connect with that credential.
 
 The packaged GPT-5.6 Luna and Terra models use the 400k short-context limits by default. Separate `-long` and `-fast-long` aliases advertise a conservative 500k context limit to OpenCode so compaction starts before the provider's full 1.05M window is exhausted. GPT-6 Astra uses its full 1.05M context window for both Standard and Fast processing; Codex subscription usage does not apply an additional long-context multiplier above 272k input tokens, so Astra does not need separate long-context aliases.
 
-OpenCode 2 has no native equivalent for the former OpenAI response-header timeout option. Limitless therefore drops the old 60-second override rather than placing an unsupported value in provider settings. This is the narrow beta cutover decision until OpenCode 2 exposes a supported equivalent.
+OpenCode 2 has no native equivalent for the former OpenAI response-header timeout option. Limitless therefore drops the old 60-second override rather than placing an unsupported value in provider settings. This remains the cutover behavior until OpenCode exposes a supported equivalent.
 
 ## Research and remote source code
 
@@ -338,6 +356,6 @@ Failed creation removes its incomplete manifest and empty folder. If cleanup can
 
 ## Maintainers
 
-Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode2`/`@opencode/*@2.0.5` and `effect@4.0.0-rc.112`; update them together to keep runtime and plugin APIs aligned. OpenCode 2 packages use the `@opencode` namespace and npm's `latest` tag. The Nix package installs the upstream `opencode` executable as `opencode2` for the module's commands and service.
+Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode`/`@opencode/*@2.0.12` and `effect@4.0.0-rc.112`; update them together to keep runtime and plugin APIs aligned. OpenCode 2 packages use the `@opencode` namespace and npm's `latest` tag. The Nix package preserves the upstream `opencode` executable name for the module's commands and service.
 
 For structure and implementation details, see the module options in `nix/modules/home.nix`.
