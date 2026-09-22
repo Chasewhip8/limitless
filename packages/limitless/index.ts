@@ -1,19 +1,7 @@
 import { Plugin } from '@opencode/plugin/effect'
 import type { ToolEditor } from '@opencode/plugin/effect/tool'
-import { Session } from '@opencode/schema/session'
 import { Tool } from '@opencode/schema/tool'
-import { Effect, Schema, type Scope, Stream } from 'effect'
-import {
-	createNotificationRunner,
-	NotificationSessionLookupError,
-	normalizeNotificationConfig,
-} from './integrations/notifications/index'
-import {
-	createSlackRunner,
-	normalizeSlackConfig,
-	type SlackRunner,
-	slackTools,
-} from './integrations/slack/index'
+import { Effect } from 'effect'
 import { applyProviderPolicy, normalizeProviderPolicyConfig } from './plugin/provider-policy'
 import {
 	makeSubagentProfileHook,
@@ -36,27 +24,20 @@ import {
 } from './tools/github/index'
 import { decodeLspConfig, lspTools } from './tools/lsp/index'
 
-export const resolveNotificationConfig = normalizeNotificationConfig
 export const resolveGitHubConfig = normalizeGitHubPluginConfig
-export const resolveSlackConfig = normalizeSlackConfig
 
 export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* (options: unknown) {
-	const notificationConfig = yield* normalizeNotificationConfig(options)
-	const notifications = yield* createNotificationRunner(notificationConfig)
 	const githubConfig = yield* normalizeGitHubPluginConfig(options)
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
 	const lspConfig = yield* decodeLspConfig(options)
 	const providerPolicy = yield* normalizeProviderPolicyConfig(options)
 	const subagentProfiles = yield* normalizeSubagentProfileConfig(options)
-	const slackConfig = yield* normalizeSlackConfig(options)
 	return {
-		notifications,
 		githubConfig,
 		githubCloneRuntime,
 		lspConfig,
 		providerPolicy,
 		subagentProfiles,
-		slackConfig,
 	}
 })
 
@@ -64,7 +45,6 @@ export function limitlessTools(
 	executeTool: ToolExecutor,
 	githubConfig: Parameters<typeof githubTools>[1],
 	githubCloneRuntime: Parameters<typeof githubTools>[2],
-	slackRunner?: SlackRunner,
 ) {
 	return {
 		...artifactTools(executeTool),
@@ -72,7 +52,6 @@ export function limitlessTools(
 		...diagnosticsTools(executeTool),
 		...lspTools(executeTool),
 		...githubTools(executeTool, githubConfig, githubCloneRuntime),
-		...(slackRunner === undefined ? {} : slackTools(executeTool, slackRunner)),
 	}
 }
 
@@ -93,8 +72,6 @@ export function registerLimitlessTools(
 	draft.add(tools.lsp_symbols)
 	draft.add(tools.lsp_rename)
 	draft.add(tools.github_clone)
-	if ('slack_attach_file' in tools) draft.add(tools.slack_attach_file)
-	if ('slack_status' in tools) draft.add(tools.slack_status)
 }
 
 export function makeSessionDirectoryResolver(
@@ -125,14 +102,7 @@ export default Plugin.define({
 			makeSessionDirectoryResolver(ctx.session),
 			configs.lspConfig,
 		)
-		const slackRunner = yield* createSlackRunner(configs.slackConfig, { session: ctx.session })
-		const runPromise = Effect.runPromiseWith(yield* Effect.context<Scope.Scope>())
-		const tools = limitlessTools(
-			executeTool,
-			configs.githubConfig,
-			configs.githubCloneRuntime,
-			slackRunner,
-		)
+		const tools = limitlessTools(executeTool, configs.githubConfig, configs.githubCloneRuntime)
 
 		yield* ctx.tool.transform((draft) => {
 			registerLimitlessTools(draft, tools)
@@ -151,60 +121,5 @@ export default Plugin.define({
 			),
 		)
 		yield* registerSubagentProfileHooks(ctx.session, applySubagentProfile)
-
-		const lookupNotificationSession = (sessionID: string) =>
-			Schema.decodeUnknownEffect(Session.ID)(sessionID).pipe(
-				Effect.flatMap((decodedSessionID) => ctx.session.get({ sessionID: decodedSessionID })),
-				Effect.map((session) =>
-					session.parentID === undefined ? {} : { parentID: session.parentID },
-				),
-				Effect.mapError(
-					() =>
-						new NotificationSessionLookupError({
-							message: `Unable to resolve session ${sessionID}.`,
-						}),
-				),
-			)
-		yield* ctx.event.subscribe().pipe(
-			Stream.runForEach((event) =>
-				slackRunner
-					.handleOpenCodeEvent(event)
-					.pipe(
-						Effect.catchCause((cause) =>
-							Effect.logError('[limitless] OpenCode Slack event handler failed', cause),
-						),
-					),
-			),
-			Effect.catchCause((cause) =>
-				Effect.logError('[limitless] OpenCode Slack event stream stopped', cause),
-			),
-			Effect.forkScoped({ startImmediately: true }),
-		)
-		yield* ctx.event.subscribe().pipe(
-			Stream.runForEach((event) =>
-				configs.notifications
-					.handleEvent(event, lookupNotificationSession)
-					.pipe(
-						Effect.catchCause((cause) =>
-							Effect.logError('[limitless] OpenCode notification event handler failed', cause),
-						),
-					),
-			),
-			Effect.catchCause((cause) =>
-				Effect.logError('[limitless] OpenCode notification event stream stopped', cause),
-			),
-			Effect.forkScoped({ startImmediately: true }),
-		)
-		yield* Effect.acquireRelease(
-			slackRunner
-				.start((input) => runPromise(slackRunner.handleMention(input)))
-				.pipe(
-					Effect.tapError((error) =>
-						Effect.logError(`[limitless] Slack startup failed: ${error.message}`),
-					),
-					Effect.orDie,
-				),
-			() => slackRunner.stop,
-		)
 	}),
 })

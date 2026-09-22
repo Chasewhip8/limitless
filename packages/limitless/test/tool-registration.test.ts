@@ -1,10 +1,9 @@
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
 import { limitlessTools, resolvePluginConfigs } from '../index'
-import type { SlackRunner } from '../integrations/slack'
 import { testToolExecution, testToolExecutor } from './execution'
 
-const makeTools = Effect.fn('makeTestTools')(function* (slackRunner?: SlackRunner) {
+const makeTools = Effect.fn('makeTestTools')(function* () {
 	const configs = yield* resolvePluginConfigs({
 		github: { enable: true, allowUnrestrictedRepos: true },
 		lsp: {},
@@ -14,7 +13,6 @@ const makeTools = Effect.fn('makeTestTools')(function* (slackRunner?: SlackRunne
 		testToolExecutor(execution, configs.lspConfig.servers),
 		configs.githubConfig,
 		configs.githubCloneRuntime,
-		slackRunner,
 	)
 })
 
@@ -23,22 +21,23 @@ describe('OpenCode 2 tool registrations', () => {
 		'draft-07',
 		'draft-2020-12',
 	] as const)('exports every tool schema for %s', async (target) => {
-		const unexpectedSlackCall = () => Effect.die('Schema generation must not call Slack')
-		const tools = await Effect.runPromise(
-			makeTools({
-				enabled: true,
-				start: unexpectedSlackCall,
-				stop: unexpectedSlackCall(),
-				handleMention: unexpectedSlackCall,
-				handleOpenCodeEvent: unexpectedSlackCall,
-				updateStatus: unexpectedSlackCall,
-				attachFile: unexpectedSlackCall,
-				shouldDenyPermission: unexpectedSlackCall,
-			}),
-		)
+		const tools = await Effect.runPromise(makeTools())
 
-		expect(tools).toHaveProperty('slack_attach_file')
-		expect(tools).toHaveProperty('slack_status')
+		expect(Object.keys(tools).sort()).toEqual([
+			'artifact_create',
+			'artifact_list',
+			'ast_grep_replace',
+			'ast_grep_search',
+			'github_clone',
+			'lsp_call_hierarchy',
+			'lsp_definition',
+			'lsp_diagnostics',
+			'lsp_hover',
+			'lsp_implementation',
+			'lsp_references',
+			'lsp_rename',
+			'lsp_symbols',
+		])
 		for (const [name, tool] of Object.entries(tools)) {
 			const input = tool.input['~standard'].jsonSchema.input({ target })
 			expect(input, name).toHaveProperty('type', 'object')

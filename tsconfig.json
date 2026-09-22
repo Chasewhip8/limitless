@@ -28,7 +28,6 @@
 		"packages/limitless/lib/**/*.ts",
 		"packages/limitless/plugin/**/*.ts",
 		"packages/limitless/tools/**/*.ts",
-		"packages/limitless/integrations/**/*.ts",
 		"packages/*/test/**/*"
 	],
 	"exclude": ["node_modules"]

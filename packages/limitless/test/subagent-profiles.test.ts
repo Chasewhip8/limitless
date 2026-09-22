@@ -250,7 +250,7 @@ describe('subagent speed profiles', () => {
 	})
 
 	test.each([
-		'gary',
+		'other-primary',
 		'custom-primary',
 	])('preserves child settings under unrelated root %s', async (agent) => {
 		const tree = sessionTree(agent)

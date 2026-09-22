@@ -4,9 +4,6 @@ mode: primary
 model: openai/gpt-6-astra#xhigh
 color: "#F8BBD0"
 permissions:
-    - action: slack_status
-      resource: "*"
-      effect: deny
     - action: subagent
       resource: "*"
       effect: ask

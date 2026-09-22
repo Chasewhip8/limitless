@@ -1,21 +1,22 @@
 # Limitless
 
-> A Home Manager module for a ready-to-use OpenCode 2 agent workspace.
+> A Home Manager module for a ready-to-use OpenCode 2 workspace.
 
-Limitless pins OpenCode `2.0.12`. It has no OpenCode 1 runtime, configuration, plugin, or
-session-migration path. Existing OpenCode 1 sessions may be unavailable after
-switching.
+Limitless pins OpenCode `2.0.12`, supplies coding agents and local code-intelligence
+tools, and configures optional first-party MCP connections. OpenCode owns its
+background service, OAuth credentials, Code Mode, browser integration, and TUI
+notifications. Home Manager owns packages and non-secret configuration.
 
 ## Use it
 
 ```nix
 {
-  inputs.abilities.url = "github:your-org/abilities";
+  inputs.limitless.url = "github:your-org/limitless";
 
-  outputs = { home-manager, abilities, ... }: {
+  outputs = { home-manager, limitless, ... }: {
     homeConfigurations.me = home-manager.lib.homeManagerConfiguration {
       modules = [
-        abilities.homeModules.default
+        limitless.homeModules.default
         { programs.limitless.enable = true; }
       ];
     };
@@ -23,339 +24,293 @@ switching.
 }
 ```
 
-## Upgrade from OpenCode 1
+Run `opencode` from a project. It discovers or starts its native background
+service. Connect model providers through `/connect`.
 
-The V2 release keeps the `opencode` executable and systemd service names while
-replacing their runtime, configuration, plugin API, and persisted session
-format. Before switching, record the current flake lock revision. If service
-mode is enabled, stop `opencode.service` and back up OpenCode's state directory
-under `$XDG_DATA_HOME/opencode` (normally `~/.local/share/opencode`) before
-changing generations.
+## Included capabilities
 
-Apply the updated Home Manager generation, verify `opencode --version`, and
-reconnect Anthropic through `/connect` if subscription authentication was used.
-Existing V1 sessions are not migrated.
+- **Agents:** `limitless`, `limitless-fast`, and `solo`, with research, technical
+  and design Oracle advisers, and a worker for mechanical transformations.
+- **Code intelligence:** ast-grep search and replacement, TypeScript/Biome
+  diagnostics, and seven LSP tools for definitions, hover, implementations,
+  call hierarchy, references, symbols, and rename previews.
+- **Language servers:** TypeScript, Biome, JSON, YAML, Markdown, TOML, and Nix.
+- **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
+- **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
+- **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
+  MCP presets with account-specific connection names and conservative permissions.
+- **Anthropic subscription authentication:** a pinned Claude Pro/Max plugin.
+- **Git hygiene:** `.limitless/` is globally ignored by default.
 
-To roll back, stop the service, activate the previous Home Manager generation
-or restore the previous flake lock revision, restore the matching state backup,
-and then start the V1 service. Do not run V1 and V2 against the same writable
-state directory.
+The plugin exposes 13 core tools directly with `codemode = false`. MCP tools use
+OpenCode's native Code Mode. Every Limitless tool resolves the invoking session's
+`location.directory` as its project root.
 
-## Features
+## MCP connections
 
-- **One module to enable**: `programs.limitless.enable = true` wires `opencode`, agents, skills, plugins, MCPs, and language servers together.
-- **Anthropic subscription authentication**: a native OpenCode 2 plugin adds Claude Pro/Max OAuth while preserving normal `anthropic/*` models and API-key behavior.
-- **No ambient Vertex selection**: `google-vertex` and `google-vertex-anthropic` are disabled by default so credentials discovered through Google ADC cannot make them selectable; set `programs.limitless.providers.disabled = [ ];` to opt back in.
-- **Default agent workflow**: OpenCode starts with `limitless` as the primary agent; planning stays in the main context while specialist subagents handle research, Oracle second opinions, and mechanical execution. Native nested delegation is capped at depth 2. Select `solo` for the same workflow with subagent delegation denied.
-- **Subagent speed profiles**: choose `limitless` for Standard processing or `limitless-fast` for Fast processing on configurable OpenAI subagents, independently of your main model selection.
-- **Reusable skills**: generic local skills are copied from the top-level `skills/` directory, while companion tool skills are installed with their tools for Effect guidance and browser automation.
-- **Local code intelligence**: the Limitless plugin adds ast-grep search/replace, TypeScript/Biome diagnostics, and LSP-powered references, symbols, and rename previews.
-- **Project-scoped artifacts**: durable `.limitless/artifacts/` workspaces can be empty or hold notes, source files, assets, and generated outputs.
-- **Global Git hygiene**: Home Manager adds `.limitless/` to Git's global ignore file by default, so project-local clones and artifacts stay out of repository status.
-- **Markdown artifacts**: create durable project-scoped folders for notes and
-  scratchpads.
-- **Unified research agent**: the read-only `research` agent handles local repo discovery, docs, APIs, current references, and optional project-cached GitHub source research in one place.
-- **Ready language servers**: common TypeScript, Biome, Markdown, TOML, Nix, JSON, and YAML language servers are configured by default.
-- **Optional Linear MCP**: Home Manager writes the remote Linear MCP entry directly when enabled; OpenCode reads `LINEAR_API_KEY` from its process environment.
-- **Optional Atlassian, Notion, and Sentry CLIs**: install each CLI with its companion skill and runtime token-file authentication.
-- **Native attention hooks**: optionally run a system command when a session completes or the question tool prompts the user.
-- **Optional Slack bridge**: connect one repository and configurable agent to mentioned Slack threads over Socket Mode, including progress updates, attachments, steering, and cancellation.
-- **Safer agent permissions**: common work is allowed, while credential access, destructive git operations, broad deletion, publishing, privilege escalation, and infrastructure mutations ask first.
-- **Optional service mode**: OpenCode can run as a user service with a shell alias that attaches from the current directory.
-
-## Default configuration
+Each entry names one connection. Enable only the services you use:
 
 ```nix
-programs.limitless = {
-  enable = true;
+programs.limitless.mcp.servers = {
+  atlassian.preset = "atlassian";
+  notion-work.preset = "notion";
+  notion-personal.preset = "notion";
+  sentry.preset = "sentry";
+  linear.preset = "linear";
+};
+```
 
-  opencode = {
-    disableClaudeCode = false;
-    extraAgentsFile = null;
-    settings = {};
-    service = {
-      enable = false;
-      hostname = "127.0.0.1";
-      port = 4096;
-      alias = "oc";
-    };
-  };
+After applying Home Manager, run `/mcps`, select each connection, and sign in.
+Connections are ready only when OpenCode reports them as connected. Notion work
+and personal entries have separate OAuth identities even though their URLs match;
+authorize the intended workspace for each. Renaming a connection creates a new
+credential identity. Token refresh and OAuth state belong to OpenCode.
 
-  skills = {
-    enable = true;
-  };
+`settings` overlays the preset using native OpenCode V2 server fields. For example:
 
-  agents.fastSubagents = [ "oracle-solve" "research" "worker" ];
+```nix
+programs.limitless.mcp.servers.sentry = {
+  preset = "sentry";
+  settings.timeout.execution = 120000;
+};
+```
 
-  plugins.anthropicAuth.enable = true;
+Set `settings.disabled = true` to retain a configured connection without connecting
+it. Additional servers can use `programs.limitless.opencode.settings.mcp.servers`.
+Use one configuration path per server name. Native-only servers receive the same
+approval policy, with no automatic read exceptions.
 
-  git.ignoreStorage = true;
+### GitHub authentication
 
-  tools = {
-    acli = {
-      enable = false;
-      site = null;
-      email = null;
-      tokenFile = null;
-    };
-    agentBrowser.enable = true;
-    notion = {
-      accounts = {};
-      defaultAccount = null;
-      enable = false;
-      tokenFile = null;
-    };
-    sentry = {
-      enable = false;
-      tokenFile = null;
-    };
-  };
+The hosted GitHub server requires an explicitly configured registered OAuth client
+or a PAT. Generic OAuth discovery alone is insufficient. For a registered client:
 
-  github = {
-    enable = false;
-    tokenEnv = "GITHUB_TOKEN";
-    tokenFile = null;
-    allowedRepos = [];
-    allowUnrestrictedRepos = false;
-  };
+```nix
+programs.limitless.mcp.servers.gh = {
+  preset = "github";
+  settings.oauth.client_id = "{env:GITHUB_MCP_CLIENT_ID}";
+};
+```
 
-  notifications = {
-    enable = false;
-    command = [];
-    timeoutMs = 5000;
-    includeChildSessions = false;
-    events = {
-      complete = true;
-      permission = true;
-      question = true;
-    };
-  };
+Include the native `oauth.client_secret` and callback settings when required by
+your registered application. Alternatively, supply a PAT through the OpenCode
+process environment:
 
-  slack = {
-    enable = false;
-    repository = null;
-    agent = "gary";
-    botTokenEnv = "SLACK_BOT_TOKEN";
-    appTokenEnv = "SLACK_APP_TOKEN";
-    environmentFile = null;
-  };
-
-  lsp = {
-    enable = true;
-    extraServers = {};
-    extraPackages = [];
-    servers = {
-      biome.enable = true;
-      json.enable = true;
-      marksman.enable = true;
-      nixd.enable = true;
-      taplo.enable = true;
-      typescript.enable = true;
-      yaml.enable = true;
-    };
-  };
-
-  mcp = {
-    linear.enable = false;
+```nix
+programs.limitless.mcp.servers.gh = {
+  preset = "github";
+  settings = {
+    oauth = false;
+    headers.Authorization = "Bearer {env:GITHUB_MCP_TOKEN}";
   };
 };
 ```
 
-`tools.agentBrowser.enable` defaults to `skills.enable`. Set it explicitly to install the CLI without installing skills. Atlassian CLI, Notion CLI, and Sentry are opt-in; enabling one also installs its companion skill when skills are enabled.
+Keep token values out of Nix expressions and generated files. Ensure the credential
+is available to the background service; exporting a variable in a new terminal
+does not change an already-running service's environment. The preset enables
+context, repository, issue, pull-request, and Actions toolsets. GitHub MCP
+authentication is separate from Git clone/fetch/push credentials and the guarded
+research clone configuration below. Limitless does not install `gh`.
 
-For non-interactive Jira Cloud authentication, set `tools.acli.site`, `tools.acli.email`, and `tools.acli.tokenFile`. The token file is read lazily and never copied into the Nix store or process arguments. The wrapper keeps ACLI's generated profile under the per-user runtime directory and reauthenticates after a reboot or token-file change.
+Use `gh` or `github-mcp` as the connection name. The name `github` overlaps the
+local `github_clone` tool. The module rejects overlapping tool namespaces and
+account prefixes such as `notion` plus `notion_work`; use `notion-work` instead.
 
-Notion support uses the official beta `ntn` CLI. Enable it with:
+### Permissions and coverage
 
-```nix
-programs.limitless.tools.notion = {
-  enable = true;
-  tokenFile = config.age.secrets.notion-api-token.path;
-};
+For every configured MCP server, Limitless appends an `ask` rule and then exact
+exceptions for audited read tools. The research agent receives `deny` followed by
+the same read exceptions. New tools, mutations, and indirect tool executors require
+approval for the primary agent and are unavailable to research. Research also
+denies shell execution and edits.
+
+`readTools` replaces a preset's exact read-tool list. Add names only after checking
+their behavior and the authenticated catalog. Wildcards are rejected. Linear does
+not publish a canonical tool inventory, so its preset starts with an empty list:
+all primary-agent calls ask, and research has no Linear tools until verified names
+are configured. The optional `https://mcp.linear.app/mcp/readonly` endpoint can
+further restrict a connection at the server.
+
+These are agent permission defaults, not an operating-system sandbox. Later
+project configuration or agent definitions can override global permissions.
+Project-local MCP additions need their own permission rules. A configured server
+must be trusted to implement its advertised read operations correctly.
+
+| Preset | Daily workflows | Coverage limits |
+| --- | --- | --- |
+| [Atlassian](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/supported-tools/) | Jira and Confluence search, reads, edits, comments, transitions | Organization policies and enabled tool groups determine access. Uses the v2 flat catalog. |
+| [Notion](https://developers.notion.com/guides/mcp/mcp-supported-tools) | Pages, databases, comments, queries, uploads | Workers deployment and generic API administration are outside this preset. Tools can depend on plan. |
+| [Sentry](https://docs.sentry.io/product/sentry-mcp/) | Issues, events, traces, debugging | Release/symbol uploads and broad administration require dedicated tooling. Indirect catalog execution asks. |
+| [Linear](https://linear.app/docs/mcp) | Issues, projects, comments | Exact read exceptions require authenticated discovery. |
+| [GitHub](https://github.com/github/github-mcp-server) | Repositories, issues, PRs, reviews, Actions | Local Git and release uploads require separate tooling and authentication. |
+
+Before relying on a new connection, verify account identity, a representative read,
+an explicitly approved write, mutation denial in research, and token refresh. The
+repository checks generated configuration and policy behavior; account entitlements
+and live upstream tool catalogs require this authenticated verification.
+
+## Configuration and layout
+
+```text
+nix/modules/
+├── home.nix       # composition and Git hygiene
+├── opencode.nix   # runtime, agents, plugins, and configuration assembly
+├── lsp.nix        # language-server packages and plugin configuration
+└── mcp.nix        # named connections and permission generation
+nix/mcp-presets.nix # first-party endpoints and audited read-tool names
+opencode/          # native defaults, agents, and shared instructions
+packages/limitless/ # code-intelligence tools, artifacts, source research, policies
 ```
 
-The wrapper reads `tokenFile` for each command and passes it through the CLI environment as `NOTION_API_TOKEN`; it is never copied into the Nix store, generated OpenCode configuration, or process arguments. Without `tokenFile`, authenticate interactively with `ntn login`. The companion skill prefers Markdown page operations and bounded JSON queries, and requires reading pages before destructive replacements or trashing.
+Native server settings go in `programs.limitless.opencode.settings`. Limitless
+enforces the default agent, managed plugins, ordered permissions, generated MCP
+policies, and the managed-checkout edit denial. `opencode.extraAgentsFile` appends
+additional instructions. `opencode.disableClaudeCode = true` wraps the executable
+with `OPENCODE_DISABLE_CLAUDE_CODE=1`.
 
-For separate Notion accounts, configure named token files instead of the single `tokenFile`:
+Configure language servers through `programs.limitless.lsp`: `enable`,
+`servers.<name>.{enable,package,command,args,extensions,env}`, `extraServers`, and
+`extraPackages`. Limitless owns these definitions in plugin `options.lsp`.
+Project-local OpenCode `lsp` settings do not change Limitless's tools.
 
-```nix
-programs.limitless.tools.notion = {
-  enable = true;
-  accounts = {
-    work.tokenFile = config.age.secrets.notion-work.path;
-    personal.tokenFile = config.age.secrets.notion-personal.path;
-  };
-  defaultAccount = "work";
-};
-```
+`skills.package` can supply your own skill directories; `skills.enable = false`
+disables installation. The default package copies a top-level `skills/` directory
+when present and is otherwise empty. OpenCode's built-in skills remain available.
 
-This installs `ntn-work` and `ntn-personal`; the unqualified `ntn` command uses `defaultAccount`. Named account commands read only their own token file. Account names may contain letters, numbers, underscores, and hyphens and must start with a letter or number.
+## Agents and models
 
-Sentry support requires a runtime token file:
+`limitless` uses Standard processing for eligible OpenAI subagents;
+`limitless-fast` uses Fast processing. Both default to `openai/gpt-6-astra#xhigh`,
+and the main model remains independently selectable. `solo` denies delegation.
+OpenCode remembers a model per primary agent.
 
-```nix
-programs.limitless.tools.sentry = {
-  enable = true;
-  tokenFile = config.age.secrets.sentry-api-token.path;
-};
-```
+`agents.fastSubagents` defaults to `[ "oracle-solve" "research" "worker" ]`.
+An empty list disables the overrides. Research and worker use
+`openai/gpt-5.6-sol#medium`; the technical Oracle uses Astra; the design Oracle uses
+Fable. Planning stays in the primary context, research gathers evidence, Oracle
+agents advise, and worker performs specified mechanical transformations.
 
-The wrapper reads the file for each `sentry` command, exports it only to the CLI process, disables update checks, and prevents stored OAuth credentials from taking precedence. The packaged CLI scrubs token variables from child-process environments. Sentry's CLI is distributed under FSL-1.1-Apache-2.0, which Nixpkgs classifies as unfree; this flake allowlists only its own `sentry` derivation.
+The plugin resolves the root profile on every eligible child request, including
+nested and resumed sessions. Context, compaction, and transient generation hooks
+set the service tier without changing the stored model reference. Requests already
+dispatched retain their tier. Fast processing depends on provider availability and
+pricing. Other primary agents and unlisted subagents retain their configured tier.
 
-`git.ignoreStorage` enables Home Manager's Git module by default and adds `.limitless/` to the global ignore file. Set it to `false` if a repository should manage that directory itself.
-
-Set `opencode.disableClaudeCode = true` to launch both the installed OpenCode 2 CLI and optional server with `OPENCODE_DISABLE_CLAUDE_CODE=1`.
-
-The checked-in `opencode/opencode.json` and generated Home Manager file use only native OpenCode 2 fields. Limitless deep-merges native `opencode.settings`, then enforces the `limitless` default agent, the ordered `opencode.permissions` rules, the managed-repository edit denial, and direct Effect plugin declarations.
-
-## Subagent speed profiles
-
-Select the primary agent to choose the processing tier for eligible subagents:
-
-| Agent                 | Eligible OpenAI subagents | Main agent          |
-| --------------------- | ------------------------- | ------------------- |
-| `limitless` (default) | Standard processing       | Your selected model |
-| `limitless-fast`      | Fast processing           | Your selected model |
-
-Both primary agents default to `openai/gpt-6-astra#xhigh` and share the same instructions and permissions. The agent package generates `limitless-fast` from `limitless.md`. The `solo` primary agent carries the same instructions with every `subagent` action denied, so it works in a single context and has no speed profile. The main model remains independently selectable. OpenCode's V2 TUI remembers a model per primary agent, so switching profiles can restore that profile's remembered/default main model; select your preferred main model for each profile.
-
-Configure which subagents follow the profile with Home Manager:
-
-```nix
-programs.limitless.agents.fastSubagents = [
-  "oracle-solve"
-  "research"
-  "worker"
-];
-```
-
-`research` and `worker` use `openai/gpt-5.6-sol#medium`; `oracle-solve` uses `openai/gpt-6-astra#xhigh`. The profile selects their processing tier. The setting replaces the list; `[]` disables profile overrides. Only listed agents making requests through the `openai` provider are eligible. Anthropic requests, excluded agents, and sessions rooted in other primary agents such as `gary` retain their configured settings. With the bundled model defaults, removing a specialist from the list or running it under `gary` uses Standard processing. A custom Fast model selection still applies outside the profile overrides.
-
-The plugin resolves the root profile for each eligible child request, including nested delegation such as `limitless → oracle-design → research`. Switching profiles affects subsequent requests in existing children; requests already dispatched finish with their original tier. Each specialist keeps its model and reasoning level. Existing children can retain their previously selected Fast model reference; the Standard profile explicitly overrides its priority tier for eligible requests.
-
-OpenCode's session hooks override the request's service tier without changing its stored model reference, so the bundled specialists display their base Astra or Sol model names in both profiles. The selected profile indicates the processing tier. The plugin registers the same policy for agent-loop requests, compaction, and transient generation; automatic titles use OpenCode's own settings. Fast processing requests OpenAI's priority service tier and remains subject to provider availability and pricing.
-
-For a manually configured Limitless plugin, the corresponding plugin option is `options.agents.fastSubagents` with the same list and defaults.
+The model defaults retain short/long-context Luna and Terra aliases and Astra's
+full 1.05M context window. `providers.disabled` defaults to
+`[ "google-vertex" "google-vertex-anthropic" ]` to avoid ambient Vertex selection.
 
 ## Anthropic subscription authentication
 
-Anthropic authentication is enabled by default. Run `/connect`, select Anthropic, and choose **Claude Pro/Max** to complete the hosted PKCE code flow. Limitless packages the upstream OpenCode 2 implementation from [`ex-machina-co/opencode-anthropic-auth`](https://github.com/ex-machina-co/opencode-anthropic-auth), pinned to commit `c6921e486e9d180b1c2ace318211f7156a5f09b0`. Subscription credentials use its Claude Code-compatible request hooks, while API keys and `ANTHROPIC_API_KEY` retain standard Anthropic request behavior.
+Run `/connect`, select Anthropic, and choose **Claude Pro/Max**. The plugin is pinned
+to [`ex-machina-co/opencode-anthropic-auth`](https://github.com/ex-machina-co/opencode-anthropic-auth)
+commit `c6921e486e9d180b1c2ace318211f7156a5f09b0`. API-key authentication retains
+standard Anthropic request behavior.
 
 > [!WARNING]
-> Anthropic does not officially support using Claude Pro/Max subscriptions through OpenCode. This reverse-engineered compatibility path may violate Anthropic's terms or put an account at risk. Disable it with `programs.limitless.plugins.anthropicAuth.enable = false` if you do not accept that risk.
+> Anthropic does not officially support using Claude Pro/Max through OpenCode.
+> This compatibility path may violate its terms or put an account at risk.
+> Disable it with `programs.limitless.plugins.anthropicAuth.enable = false`.
 
-OpenCode 2 stores one saved credential per integration. Connecting Max replaces a saved Anthropic API key, and reconnecting a key replaces Max; environment and configured keys remain fallbacks when no saved credential is active. The V1 plugin's OAuth-based **Create an API Key** method is intentionally omitted because the V2 public integration API cannot faithfully persist a key from an OAuth callback. OpenCode continues to display Anthropic API prices for subscription-backed models because the upstream V2 plugin does not rewrite the model catalog.
+Connecting Max replaces the saved Anthropic API-key credential and vice versa.
+Credentials from the earlier experimental Limitless plugin require signing in
+again. OpenCode continues to display API prices for subscription models.
+The upstream plugin targets SDK `2.0.4` and identifies as Claude Code `2.1.258`;
+`ANTHROPIC_CLAUDE_CODE_VERSION` can update that compatibility identifier. Refresh
+rotation is deduplicated within a process. `ANTHROPIC_BASE_URL` can override the
+endpoint; `ANTHROPIC_INSECURE` cannot disable TLS verification.
 
-OAuth credentials created by the earlier experimental Limitless integration use a different method ID and are not recognized by the upstream plugin. Reconnect **Claude Pro/Max** once after upgrading.
-
-The packaged source targets `@opencode/plugin@2.0.4`. The compatibility profile identifies as Claude Code `2.1.258` by default; set `ANTHROPIC_CLAUDE_CODE_VERSION` before startup to report a newer version when Anthropic raises its model gate. Refresh rotation is deduplicated within one OpenCode process. `ANTHROPIC_BASE_URL` can override the request endpoint. `ANTHROPIC_INSECURE` cannot disable TLS verification through the V2 hooks and only produces a warning.
-
-When `mcp.linear.enable` is true, Home Manager adds Linear at `mcp.servers.linear` with `disabled = false`, `oauth = false`, and `Authorization = "Bearer {env:LINEAR_API_KEY}"`. No Linear plugin or generated secret is involved; `LINEAR_API_KEY` must be present in the `opencode` process environment at runtime.
-
-The Limitless plugin uses `Plugin.define`, `Tool.make`, Effect Schema contracts, scoped event and process lifecycles, and native Effect interruption. Its 16 core tools and two Slack transport tools are registered directly with `codemode = false`. Every call resolves its OpenCode session and uses exactly `session.location.directory` as the project root; Limitless does not discover a Git root or expose a root override.
-
-Language-server definitions for Limitless tools come only from validated Home Manager-generated plugin `options.lsp`. The tools intentionally do not read or merge effective OpenCode configuration, so project-local `lsp` overrides can affect OpenCode's own LSP behavior but are not observed by Limitless tools.
-
-Home Manager installs skills in the native global OpenCode 2 location, `~/.config/opencode/skills`. Service mode runs `opencode serve --service`, which registers its generated credential in OpenCode's state directory; the shell alias uses normal managed-service discovery to connect with that credential.
-
-The packaged GPT-5.6 Luna and Terra models use the 400k short-context limits by default. Separate `-long` and `-fast-long` aliases advertise a conservative 500k context limit to OpenCode so compaction starts before the provider's full 1.05M window is exhausted. GPT-6 Astra uses its full 1.05M context window for both Standard and Fast processing; Codex subscription usage does not apply an additional long-context multiplier above 272k input tokens, so Astra does not need separate long-context aliases.
-
-OpenCode 2 has no native equivalent for the former OpenAI response-header timeout option. Limitless therefore drops the old 60-second override rather than placing an unsupported value in provider settings. This remains the cutover behavior until OpenCode exposes a supported equivalent.
-
-## Research and remote source code
-
-`research` is read-only and researches local code, tests, docs, configuration, APIs, standards, current external facts, implementation source, official examples, and configured private GitHub repositories. It does not edit files or run shell commands.
-
-`oracle-solve` uses Astra for difficult technical questions that benefit from an independent conclusion, including debugging, root causes, algorithms, concurrency, correctness, and performance reasoning. It is the default Oracle for technical consultation.
-
-`oracle-design` uses Fable for consequential architecture, abstraction, API ergonomics, maintainability, and code organization decisions. To conserve Fable quota, Limitless and Gary handle routine planning and style questions directly, gather evidence before consulting it, and reuse its session for the same decision. They consult it again when new evidence materially changes the decision. For mixed questions, they resolve technical uncertainty with `oracle-solve` first and consult `oracle-design` if a material design choice remains. These routing instructions guide usage; they do not enforce a quota.
-
-Both Oracle agents advise the caller and may delegate broad evidence gathering to `research`. They inherit the normal broad tool access but cannot use the standard edit or structured-replacement tools.
-
-Enable the optional `github_clone` source tool with:
+## Guarded source research
 
 ```nix
 programs.limitless.github = {
   enable = true;
-  tokenEnv = "GITHUB_TOKEN";
-  tokenFile = null;
   allowedRepos = [ "owner/repo" ];
-  allowUnrestrictedRepos = false;
+  tokenFile = "/run/agenix/github-read-token";
 };
 ```
 
-Provide a token through either the named environment variable, for example `GITHUB_TOKEN`, or a runtime token file such as `/run/agenix/github-token` when cloning private repositories. When `tokenFile` is set, Limitless reads that file instead of `tokenEnv`. The token is passed to Git only through ephemeral, github.com-scoped environment configuration: it is never placed in a URL, command argument, tool result, generated configuration, or repository config. Limitless writes only the environment variable name, optional token file path, and repository policy into generated configuration.
+Without `tokenFile`, the tool reads `tokenEnv`, which defaults to `GITHUB_TOKEN`.
+Use a fine-grained read-only token for private repositories. The token is passed
+to Git through ephemeral github.com-scoped environment configuration and never
+written to URLs, arguments, tool results, or repository configuration.
 
-`allowedRepos` must be non-empty when GitHub support is enabled unless you explicitly set `allowUnrestrictedRepos = true`. The same policy is enforced independently for every transitive submodule, and non-GitHub submodule hosts are rejected. Use fine-grained read-only tokens.
+`allowedRepos` must be nonempty unless `allowUnrestrictedRepos = true`. The policy
+also covers every transitive submodule; non-GitHub hosts are rejected. Clones are
+depth-one, project-local snapshots. Default-branch requests refresh immediately;
+explicit branches, tags, and SHAs use distinct deterministic paths. Dirty checkouts
+are never overwritten. New clones are staged and published atomically. LFS objects
+are not materialized.
 
-`github_clone` is available to every agent. It creates depth-one snapshots under the active session directory's `.limitless/repos/` directory and returns both relative and absolute paths plus the resolved commit. Calls without `ref` use a stable `github-owner-repo` directory and refresh the repository's current default branch every time. Branches, tags, and commit SHAs use deterministic ref-suffixed directories, so snapshots for different refs do not collide. Existing checkouts are refreshed only when their identity, clean HTTPS origin, tracked files, untracked files, and recursively initialized submodules are clean; dirty state is never overwritten. Initial clones are assembled in a same-directory staging path and atomically published, so a failed first clone leaves no final checkout.
-
-Accepted submodules are rewritten to clean HTTPS origins locally and initialized one level at a time with shallow fetches so each transitive repository is validated before Git can access it. Managed repositories are read-only supporting source: clone first, then use local read, glob, grep, or ast-grep search against the returned path. The generated OpenCode `edit` policy denies normal edit, write, and patch operations beneath `.limitless/repos/`; this is an agent guardrail rather than an operating-system sandbox, so unrestricted shell commands remain capable of bypassing it. Git LFS smudging is disabled, so pointer files are present but LFS objects are not downloaded or materialized.
-
-## Attention notifications
-
-Enable a native Limitless command hook without adding a separate OpenCode notifier plugin:
-
-```nix
-programs.limitless.notifications = {
-  enable = true;
-  command = [ "notify-send" "OpenCode needs attention" ];
-  events.complete = true;
-  events.permission = true;
-  events.question = true;
-};
-```
-
-The command is executed directly, without a shell. Permission notifications consume `permission.asked`; question and other interactive-form notifications consume `form.created`. Completion notifications consume all terminal execution events: succeeded, failed, and interrupted executions all require attention. Child/subagent terminal notifications are skipped by default after resolving the session's `parentID`.
-
-## Slack bridge
-
-The optional Slack bridge runs inside the persistent OpenCode 2 service and maps one deployment to one repository and one configured agent. It uses Slack Socket Mode, so the host needs outbound network access but no public HTTP endpoint.
-
-```nix
-programs.limitless = {
-  opencode.service.enable = true;
-
-  slack = {
-    enable = true;
-    repository = "/home/me/workspace";
-    agent = "gary";
-    environmentFile = "/run/agenix/limitless-slack-environment";
-  };
-};
-```
-
-The optional environment file is read by the systemd user service at runtime and is not copied into generated OpenCode configuration or the Nix store. It must define the configured token variables, which default to `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`.
-
-Create an internal Slack app with Socket Mode enabled. Subscribe to the `app_mention` bot event and grant the app-level token `connections:write`. The bot token needs `app_mentions:read`, `chat:write`, `channels:history`, `groups:history` for private channels, `files:read`, and `files:write`. Install the bot and invite it to each channel where it should respond.
-
-Slack turns use the hidden `gary` primary agent by default. Gary mirrors the normal Limitless workflow but carries Slack-specific transport, clarification, shared-checkout, and transcript-trust instructions. Its V2 permissions deny the blocking `question` tool, allow the Slack status and attachment tools, and restrict subagents to the configured specialists. Set `slack.agent` explicitly to select a different agent with an equivalent noninteractive policy.
-
-Every turn requires an explicit bot mention. The bridge imports unseen thread messages, including unmentioned intervening replies, into the thread's OpenCode session. It accepts bounded PNG, JPEG, WebP, and GIF images; PDF documents; and UTF-8 text, Markdown, source, configuration, structured-data, log, and diff files. Unsupported, invalid, oversized, duplicate, and excess attachments become omission notes in agent context.
-
-The bridge posts a `🧠 Thinking…` trace for each mention. The agent appends milestones through `slack_status`; follow-up mentions steer unread messages into the active V2 session. Final responses stream from terminal assistant-step events, while succeeded, failed, interrupted, and deleted execution events settle the turn. Mention `@bot cancel` or `@bot stop` to interrupt the active session, wait for OpenCode to confirm it is idle, and discard pending mentions in that thread. Permission requests from an active Slack session or child session are interrupted rather than left waiting for a local UI.
-
-The Slack agent can use `slack_attach_file` to snapshot a readable local file and queue it for upload after the final text. Reattaching a path replaces its snapshot; cancellation and terminal failures discard queued files. This allows Slack users who can direct the configured agent to disclose any host file readable by the service account, including credentials and system configuration. Isolate that account accordingly.
-
-Message admission is serialized within a Slack thread; different threads intentionally run concurrently against the same checkout. Thread-to-session mappings and delivery cursors are process-local, so a service restart starts fresh OpenCode sessions and reimports the visible Slack transcript. Slack authenticates the transport but Limitless accepts every mention the installed bot can receive. Limit workspace membership, bot channel access, host credentials, and repository permissions accordingly. Slack service integration currently requires Linux systemd user services.
+Managed repositories are read-only supporting source. The edit policy denies
+normal writes below `.limitless/repos/`; shell access is not sandboxed. Set
+`git.ignoreStorage = false` if the repository should manage `.limitless/` itself.
 
 ## Artifacts
 
-Limitless stores durable project-local work products under `.limitless/artifacts/`. Create an empty artifact and write Markdown files inside it; use `scratchpad.md` for a scratchpad. Artifacts are rooted at the active session's `location.directory`; the creating session is also recorded in the manifest metadata.
+`artifact_create` creates a project-local folder under `.limitless/artifacts/` with
+a manifest recording its slug, optional title, timestamp, and creating session.
+Use normal file tools to add notes, source, assets, or generated outputs.
+`artifact_list` reports valid artifacts and folders with invalid/missing manifests.
+Explicit duplicate slugs fail; generated slugs include a random suffix. Failed
+creation cleans up only its own incomplete manifest and empty folder.
 
-The Limitless plugin exposes:
+## Native service, notifications, and browser
 
-- `artifact_create`: create a durable artifact folder with an optional title and slug.
-- `artifact_list`: list artifact workspaces for the current project.
+Use `opencode service status` and `opencode service restart` to manage the native
+background service. TUI preferences remain in `~/.config/opencode/cli.json`.
+Enable attention notifications through the TUI settings or merge this into that
+file:
 
-Create artifacts through `artifact_create`, then use the normal file tools to add and edit their contents. Each artifact starts with a `manifest.json` containing its slug, creation timestamp, optional title, and creator. Listing recognizes folders with valid manifests and reports folders with missing or invalid manifests separately.
+```json
+{
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "attention": { "notifications": true }
+}
+```
 
-Creation returns `{ ok: true, artifact }`; listing returns `{ ok: true, artifacts, invalidArtifacts? }`. Both use the same artifact summary: `{ slug, path, title?, createdAt }`. Paths are relative to the session directory. An omitted slug is generated from the title, date, and a random value; an explicit slug that already exists produces an `Artifact already exists` error.
+Native browser tools require the session to be open in the desktop app with the
+experimental browser setting enabled. A TUI-only session has no attached browser.
 
-Failed creation removes its incomplete manifest and empty folder. If cleanup cannot complete, the tool reports that failure. Cleanup preserves other files added to the folder concurrently.
+## Migration from the previous Limitless layout
 
-## Maintainers
+This release removes these options and packages:
 
-Use `nix develop`, then run the scripts in `package.json`. `bun run ci` is the full local gate. Runtime, plugin SDK, native provider API, schema, and Effect are pinned to `opencode`/`@opencode/*@2.0.12` and `effect@4.0.0-rc.112`; update them together to keep runtime and plugin APIs aligned. OpenCode 2 packages use the `@opencode` namespace and npm's `latest` tag. The Nix package preserves the upstream `opencode` executable name for the module's commands and service.
+| Removed | Migration |
+| --- | --- |
+| `slack.*`, Gary, Slack tools | Remove Slack configuration and retire its bot credentials when no longer used. |
+| `tools.agentBrowser.*`, `agent-browser` package/skill | Use OpenCode's desktop-backed browser when needed. |
+| `tools.acli.*`, Atlassian CLI skill | Add an `atlassian` MCP connection and authorize it. |
+| `tools.notion.*`, `notion-cli` package/skill | Add separately named `notion` MCP connections for each workspace. |
+| `tools.sentry.*`, `sentry` package/skill | Add a `sentry` MCP connection. Install specialized release tooling separately if required. |
+| `mcp.linear.enable` | Set `mcp.servers.linear.preset = "linear"` and sign in through `/mcps`. |
+| `notifications.*` | Use native TUI attention settings; arbitrary command hooks are retired. |
+| `opencode.service.*` and its attach alias | Use native OpenCode service discovery and service commands. |
 
-For structure and implementation details, see the module options in `nix/modules/home.nix`.
+If the old `opencode.service` systemd unit is running, stop it before applying the
+new Home Manager generation. Remove the retired option definitions, apply the
+generation, then launch OpenCode and check `opencode service status`. Do not run
+both service owners concurrently. This repository does not activate Home Manager,
+stop running sessions, migrate OAuth grants, or delete existing credential files.
+
+For an existing Linear API key, the connection's native settings can explicitly
+set `oauth = false` and `headers.Authorization = "Bearer {env:LINEAR_API_KEY}"`.
+Default connections use OAuth. Former CLI token files are not imported into MCP
+authentication; authorize and verify each new connection before retiring tokens.
+
+OpenCode 1 sessions are not migrated. Back up OpenCode state and record your flake
+revision before switching major versions. Rollback requires the matching runtime
+and state backup; never run V1 and V2 against the same writable state directory.
+
+## Development
+
+Use `nix develop`, then `bun install --frozen-lockfile` and `bun run ci`. The gate
+runs formatting/lint checks, TypeScript, tests, module checks, and all five package
+builds. Nix module checks exercise named accounts, native settings, authentication
+requirements, namespace collisions, and read/write permission outcomes.
+
+Runtime, Limitless plugin SDK, and schema are pinned to `2.0.12`, with
+`effect@4.0.0-rc.112`; update them together. Re-audit native capabilities and MCP
+read exceptions when upgrading. Vendor references for the current allowlists are
+linked in the integration table above.

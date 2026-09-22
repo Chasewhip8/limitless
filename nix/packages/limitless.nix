@@ -38,7 +38,7 @@ let
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
     '';
 
-    outputHash = "sha256-AH0d7TGFoYP/foARfYXSlTmx/QvDqv6pL0bAHwtmpfg=";
+    outputHash = "sha256-0Nyq8KQYR2IX1KiyZSCJcDZcLC7KU/HEZ1GknSIhXSo=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -63,12 +63,6 @@ pkgs.stdenvNoCC.mkDerivation {
       --format=esm \
       --packages=bundle \
       --outfile=dist/limitless.js
-
-    bun build packages/limitless/integrations/slack/image-worker.ts \
-      --target=node \
-      --format=esm \
-      --packages=bundle \
-      --outfile=dist/slack-image-worker.mjs
   '';
 
   installPhase = ''
@@ -77,9 +71,6 @@ pkgs.stdenvNoCC.mkDerivation {
       --replace-fail "@AST_GREP_BIN@" "${pkgs.ast-grep}/bin/ast-grep" \
       --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git"
     cp "$out/limitless.js" "$out/index.js"
-
-    cp ${bunDeps}/packages/limitless/node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "$out/"
-    cp dist/slack-image-worker.mjs "$out/"
     cat > "$out/package.json" <<'EOF'
     {
       "name": "limitless",
@@ -90,8 +81,10 @@ pkgs.stdenvNoCC.mkDerivation {
     EOF
   '';
 
+  passthru.dependencies = bunDeps;
+
   meta = with pkgs.lib; {
-    description = "Effect-native OpenCode 2 plugin that adds local code-intelligence tools and integrations";
+    description = "Effect-native OpenCode 2 plugin for code intelligence, artifacts, and source research";
     platforms = platforms.all;
   };
 }

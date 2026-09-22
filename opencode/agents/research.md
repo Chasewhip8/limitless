@@ -3,6 +3,9 @@ description: Research subagent for answering questions using repo code, local do
 mode: subagent
 model: openai/gpt-5.6-sol#medium
 permissions:
+    - action: shell
+      resource: "*"
+      effect: deny
     - action: question
       resource: "*"
       effect: deny

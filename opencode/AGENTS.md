@@ -11,6 +11,12 @@
 - Prefer deterministic state checks over hardcoded sleeps, arbitrary retries, or timeouts.
 - Comments explain why, not what.
 
+## Service integrations
+
+- Use configured MCP tools for connected services. Discover the exact tool and account before calling it.
+- Confirm the intended account, workspace, and target before changing external data. Ask when account selection is ambiguous.
+- If a connection needs authentication, ask the user to sign in through `/mcps`. Never read OAuth state or token files to work around a denied tool or missing connection.
+
 ## Reporting
 
 - Separate facts from inference when it affects decisions.
