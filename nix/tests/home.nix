@@ -128,6 +128,23 @@ in
       disabled.config.home.file == { } && disabled.config.home.packages == [ ]
     ) "disabled module installs files or packages";
     assert lib.assertMsg ((rendered defaults).mcp.servers == { }) "MCP connections must be opt-in";
+    assert lib.assertMsg (lib.all
+      (
+        home:
+        let
+          config = rendered home;
+        in
+        effectFor config.permissions "browser" "*" == "deny"
+        && lib.all (
+          agent: effectFor (config.permissions ++ (agent.permissions or [ ])) "browser" "*" == "deny"
+        ) (builtins.attrValues config.agents)
+      )
+      [
+        defaults
+        connected
+        custom
+      ]
+    ) "native browser tools must be denied globally and for every configured agent";
     assert lib.assertMsg (
       !(defaults.options.programs.limitless ? tools)
       && !(defaults.options.programs.limitless ? slack)

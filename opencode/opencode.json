@@ -19,6 +19,11 @@
 			"action": "edit",
 			"resource": ".limitless/repos/**",
 			"effect": "deny"
+		},
+		{
+			"action": "browser",
+			"resource": "*",
+			"effect": "deny"
 		}
 	],
 	"providers": {

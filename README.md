@@ -27,6 +27,10 @@ notifications. Home Manager owns packages and non-secret configuration.
 Run `opencode` from a project. It discovers or starts its native background
 service. Connect model providers through `/connect`.
 
+Native browser tools are currently disabled for all agents through a shared
+permission rule. They require the OpenCode desktop app's attached browser and
+fail in TUI-only sessions.
+
 ## Included capabilities
 
 - **Agents:** `limitless`, `limitless-fast`, and `solo`, with research, technical

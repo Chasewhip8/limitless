@@ -142,7 +142,7 @@ in
           "terraform apply*"
           "terraform destroy*"
         ];
-        description = "Ordered native permissions. MCP policies and managed-repository edit denials are appended.";
+        description = "Ordered native permissions. MCP policies, managed-repository edit denials, and the browser denial are appended.";
       };
     };
 
