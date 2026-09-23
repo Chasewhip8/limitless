@@ -186,6 +186,12 @@ policies, and the managed-checkout edit denial. `opencode.extraAgentsFile` appen
 additional instructions. `opencode.disableClaudeCode = true` wraps the executable
 with `OPENCODE_DISABLE_CLAUDE_CODE=1`.
 
+Native terminal settings go in `programs.limitless.opencode.cliSettings`. The
+launcher supplies them through `OPENCODE_CLI_CONFIG_CONTENT`; declared values
+override matching preferences in `~/.config/opencode/cli.json`. An explicitly
+supplied `OPENCODE_CLI_CONFIG_CONTENT` replaces the generated override. Apply
+Home Manager and relaunch the TUI after changing these Nix settings.
+
 Configure language servers through `programs.limitless.lsp`: `enable`,
 `servers.<name>.{enable,package,command,args,extensions,env}`, `extraServers`, and
 `extraPackages`. Limitless owns these definitions in plugin `options.lsp`.
@@ -339,16 +345,23 @@ On other systemd distributions, an administrator can enable lingering with
 
 ## Notifications and browser
 
-TUI preferences remain in `~/.config/opencode/cli.json`.
-Enable attention notifications through the TUI settings or merge this into that
-file:
+Limitless enables native attention sounds by default for session completion,
+permission requests, and questions. OpenCode also plays sounds for errors and
+subagent completion. Configure sound, volume, and visual notifications through
+the native CLI settings:
 
-```json
-{
-  "$schema": "https://opencode.ai/v2/cli.json",
-  "attention": { "notifications": true }
-}
+```nix
+programs.limitless.opencode.cliSettings.attention = {
+  sound = true;
+  volume = 0.4;
+  notifications = true;
+};
 ```
+
+Set `opencode.cliSettings.attention.sound = false` to disable the ding. Sound and
+visual notifications are independent; visual notifications normally appear when
+the terminal is unfocused. Preferences omitted from `cliSettings` can be changed
+through the TUI and stored in `~/.config/opencode/cli.json`.
 
 Native browser tools require the session to be open in the desktop app with the
 experimental browser setting enabled. A TUI-only session has no attached browser.
@@ -365,7 +378,7 @@ This release removes these options and packages:
 | `tools.notion.*`, `notion-cli` package/skill | Add separately named `notion` MCP connections for each workspace. |
 | `tools.sentry.*`, `sentry` package/skill | Add a `sentry` MCP connection. Install specialized release tooling separately if required. |
 | `mcp.linear.enable` | Set `mcp.servers.linear.preset = "linear"` and sign in through `/mcps`. |
-| `notifications.*` | Use native TUI attention settings; arbitrary command hooks are retired. |
+| `notifications.*` | Use `opencode.cliSettings.attention`; sound defaults to enabled, and visual notifications are configured independently. Arbitrary command hooks are retired. |
 | `opencode.service.alias` and its attach alias | Use native OpenCode service discovery. Optional Linux supervision uses `opencode.service.{enable,hostname,port}`. |
 
 If migrating from the old systemd service, remove `opencode.service.alias` and

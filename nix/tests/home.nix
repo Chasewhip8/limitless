@@ -185,6 +185,34 @@ let
   noUserManager = evaluateWith { opencode.service.enable = true; } [
     { systemd.user.enable = false; }
   ];
+  cliProbePackage = pkgs.writeShellScriptBin "opencode" ''
+    exec ${lib.getExe pkgs.jq} --null-input \
+      --argjson settings "''${OPENCODE_CLI_CONFIG_CONTENT:-null}" \
+      --arg disableClaudeCode "''${OPENCODE_DISABLE_CLAUDE_CODE:-}" \
+      --args '{settings: $settings, disableClaudeCode: $disableClaudeCode, arguments: $ARGS.positional}' -- "$@"
+  '';
+  cliDefaults = evaluate { opencode.package = cliProbePackage; };
+  cliAdditional = evaluate {
+    opencode.package = cliProbePackage;
+    opencode.cliSettings.session.thinking = "show";
+  };
+  cliCustom = evaluate {
+    opencode = {
+      package = cliProbePackage;
+      disableClaudeCode = true;
+      cliSettings = {
+        attention = {
+          sound = false;
+          volume = 0.25;
+          sounds.permission = "/tmp/opencode/permission's sound.wav";
+        };
+        theme.name = "tokyonight";
+      };
+    };
+  };
+  cliUnwrapped = evaluateWith { opencode.package = cliProbePackage; } [
+    { programs.limitless.opencode.cliSettings = lib.mkForce { }; }
+  ];
 in
 {
   home-module =
@@ -417,6 +445,53 @@ in
       ${lib.concatMapStringsSep "\n" (
         server: "test -x ${lib.escapeShellArg (builtins.head server.command)}"
       ) (builtins.attrValues (plugin defaults).options.lsp)}
+    '';
+
+  cli-settings =
+    assert lib.assertMsg (
+      defaults.config.programs.limitless.opencode.cliSettings.attention.sound
+      && cliAdditional.config.programs.limitless.opencode.cliSettings.attention.sound
+      && !cliCustom.config.programs.limitless.opencode.cliSettings.attention.sound
+    ) "CLI sound defaults or user overrides were lost";
+    assert lib.assertMsg (lib.all (home: !(home.config.home.file ? ".config/opencode/cli.json")) [
+      defaults
+      cliAdditional
+      cliCustom
+    ]) "CLI settings must preserve the editable native cli.json file";
+    assert lib.assertMsg (
+      cliUnwrapped.config.programs.limitless._generated.opencodePackage == cliProbePackage
+    ) "an empty CLI configuration creates an unnecessary wrapper";
+    pkgs.runCommand "limitless-cli-settings-check" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      mkdir -p "$out"
+      unset OPENCODE_CLI_CONFIG_CONTENT OPENCODE_DISABLE_CLAUDE_CODE
+
+      ${cliDefaults.config.programs.limitless._generated.opencodePackage}/bin/opencode \
+        "path with spaces" --version > "$out/default.json"
+      jq -e '
+        .settings == {attention: {sound: true}}
+        and .disableClaudeCode == ""
+        and .arguments == ["path with spaces", "--version"]
+      ' "$out/default.json"
+
+      ${cliAdditional.config.programs.limitless._generated.opencodePackage}/bin/opencode > "$out/additional.json"
+      jq -e '
+        .settings == {attention: {sound: true}, session: {thinking: "show"}}
+      ' "$out/additional.json"
+
+      OPENCODE_DISABLE_CLAUDE_CODE=0 \
+        ${cliCustom.config.programs.limitless._generated.opencodePackage}/bin/opencode > "$out/custom.json"
+      jq -e --argjson expected ${lib.escapeShellArg (builtins.toJSON cliCustom.config.programs.limitless.opencode.cliSettings)} '
+        .settings == $expected and .disableClaudeCode == "1"
+      ' "$out/custom.json"
+
+      OPENCODE_CLI_CONFIG_CONTENT='{"attention":{"sound":false},"theme":{"name":"override"}}' \
+        ${cliDefaults.config.programs.limitless._generated.opencodePackage}/bin/opencode > "$out/environment.json"
+      jq -e '
+        .settings == {attention: {sound: false}, theme: {name: "override"}}
+      ' "$out/environment.json"
+
+      ${cliUnwrapped.config.programs.limitless._generated.opencodePackage}/bin/opencode > "$out/unwrapped.json"
+      jq -e '.settings == null and .disableClaudeCode == ""' "$out/unwrapped.json"
     '';
 
   service =

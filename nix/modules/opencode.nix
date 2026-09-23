@@ -12,14 +12,25 @@ let
   opencodeDir = ".config/opencode";
   permissionRule = action: resource: effect: { inherit action resource effect; };
 
+  wrapperArgs =
+    lib.optionals cfg.opencode.disableClaudeCode [
+      "--set"
+      "OPENCODE_DISABLE_CLAUDE_CODE"
+      "1"
+    ]
+    ++ lib.optionals (cfg.opencode.cliSettings != { }) [
+      "--set-default"
+      "OPENCODE_CLI_CONFIG_CONTENT"
+      (builtins.toJSON cfg.opencode.cliSettings)
+    ];
   opencodePackage =
-    if cfg.opencode.disableClaudeCode then
+    if wrapperArgs != [ ] then
       pkgs.symlinkJoin {
-        name = "opencode-disable-claude-code";
+        name = "opencode-configured";
         paths = [ cfg.opencode.package ];
         nativeBuildInputs = [ pkgs.makeWrapper ];
         postBuild = ''
-          wrapProgram $out/bin/opencode --set OPENCODE_DISABLE_CLAUDE_CODE 1
+          wrapProgram "$out/bin/opencode" ${lib.escapeShellArgs wrapperArgs}
         '';
       }
     else
@@ -84,6 +95,17 @@ in
         type = lib.types.attrsOf jsonFormat.type;
         default = { };
         description = "Native OpenCode V2 settings. Limitless enforces its default agent, managed plugins, and permission rules.";
+      };
+      cliSettings = lib.mkOption {
+        type = lib.types.attrsOf jsonFormat.type;
+        default = { };
+        example = {
+          attention = {
+            sound = true;
+            volume = 0.4;
+          };
+        };
+        description = "Native OpenCode CLI settings supplied through OPENCODE_CLI_CONFIG_CONTENT. Override cli.json without managing that file. An explicit environment value replaces these settings. Sound is enabled by default.";
       };
       extraAgentsFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
@@ -186,11 +208,12 @@ in
       type = lib.types.package;
       internal = true;
       readOnly = true;
-      description = "Configured OpenCode executable, including the optional Claude Code wrapper.";
+      description = "Configured OpenCode executable with CLI settings and optional Claude Code integration disablement.";
     };
   };
 
   config = lib.mkIf cfg.enable {
+    programs.limitless.opencode.cliSettings.attention.sound = lib.mkDefault true;
     programs.limitless._generated.opencodePackage = opencodePackage;
     assertions = [
       {
