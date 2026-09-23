@@ -166,11 +166,7 @@ let
       if matches rule.action action && matches rule.resource resource then rule.effect else effect
     ) "ask" rules;
   primaryEffect = action: effectFor connectedConfig.permissions action "*";
-  readOnlyAgents = [
-    "research"
-    "oracle-solve"
-    "oracle-design"
-  ];
+  readOnlyAgents = [ "research" ];
   readOnlyEffect =
     name: action:
     effectFor (connectedConfig.permissions ++ connectedConfig.agents.${name}.permissions) action "*";

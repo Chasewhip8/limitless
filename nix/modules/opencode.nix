@@ -59,16 +59,12 @@ let
     mcp = (mergedConfig.mcp or { }) // {
       servers = cfg._generated.mcpServers;
     };
-    agents =
-      (mergedConfig.agents or { })
-      // lib.genAttrs [ "research" "oracle-solve" "oracle-design" ] (
-        name:
-        (mergedConfig.agents.${name} or { })
-        // {
-          permissions =
-            (mergedConfig.agents.${name}.permissions or [ ]) ++ cfg._generated.readOnlyMcpPermissions;
-        }
-      );
+    agents = (mergedConfig.agents or { }) // {
+      research = (mergedConfig.agents.research or { }) // {
+        permissions =
+          (mergedConfig.agents.research.permissions or [ ]) ++ cfg._generated.readOnlyMcpPermissions;
+      };
+    };
   };
 in
 {
@@ -99,7 +95,7 @@ in
         default = [
           (permissionRule "*" "*" "allow")
         ];
-        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials and the browser denial are appended; research and both Oracles receive read-only MCP rules.";
+        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials and the browser denial are appended; research receives read-only MCP rules.";
       };
     };
 

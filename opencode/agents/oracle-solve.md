@@ -3,25 +3,7 @@ description: Oracle problem-solving adviser for difficult debugging, root causes
 mode: subagent
 model: openai/gpt-6-astra#max
 permissions:
-    - action: shell
-      resource: "*"
-      effect: deny
     - action: question
-      resource: "*"
-      effect: deny
-    - action: edit
-      resource: "*"
-      effect: deny
-    - action: artifact_create
-      resource: "*"
-      effect: deny
-    - action: ast_grep_replace
-      resource: "*"
-      effect: deny
-    - action: opencode_session_move
-      resource: "*"
-      effect: deny
-    - action: opencode_session_rename
       resource: "*"
       effect: deny
     - action: subagent

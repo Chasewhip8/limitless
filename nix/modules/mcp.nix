@@ -86,7 +86,7 @@ in
               readTools = lib.mkOption {
                 type = lib.types.listOf (lib.types.strMatching "[A-Za-z0-9_-]+");
                 default = presets.${config.preset}.readTools;
-                description = "Exact read-only tool names available to research and both Oracle agents. Replaces the preset list.";
+                description = "Exact read-only tool names available to research. Replaces the preset list.";
               };
             };
           }

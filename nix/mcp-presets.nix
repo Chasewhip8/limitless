@@ -1,5 +1,5 @@
 {
-  # Keep read exceptions exact so new tools cannot silently gain adviser access.
+  # Keep read exceptions exact so new tools cannot silently gain research access.
   # Catalogs audited against first-party documentation and live discovery on 2026-09-23.
   atlassian = {
     settings = {

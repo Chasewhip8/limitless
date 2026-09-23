@@ -37,8 +37,15 @@ function effectFor(rules, action, resource) {
 	return effect
 }
 
-const executionAgents = ['limitless', 'limitless-fast', 'solo', 'worker']
-const readOnlyAgents = ['research', 'oracle-solve', 'oracle-design']
+const executionAgents = [
+	'limitless',
+	'limitless-fast',
+	'solo',
+	'worker',
+	'oracle-solve',
+	'oracle-design',
+]
+const readOnlyAgents = ['research']
 const sharedActions = [
 	'read',
 	'glob',
@@ -90,6 +97,9 @@ for (const file of files) {
 		for (const action of sharedActions) expectEffect(action, '*', 'allow')
 		for (const action of writeActions) {
 			expectEffect(action, '*', readOnlyAgents.includes(name) ? 'deny' : 'allow')
+		}
+		for (const resource of ['/tmp/opencode/oracle-draft.md', 'src/example.ts']) {
+			expectEffect('edit', resource, readOnlyAgents.includes(name) ? 'deny' : 'allow')
 		}
 		for (const resource of [
 			'~/.ssh/id_ed25519',

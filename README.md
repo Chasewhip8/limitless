@@ -43,7 +43,7 @@ fail in TUI-only sessions.
 - **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
 - **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
 - **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
-  MCP presets with account-specific connection names and read-only adviser access.
+  MCP presets with account-specific connection names and read-only research access.
 - **Anthropic subscription authentication:** a pinned Claude Pro/Max plugin.
 - **Git hygiene:** `.limitless/` is globally ignored by default.
 
@@ -83,7 +83,7 @@ programs.limitless.mcp.servers.sentry = {
 Set `settings.disabled = true` to retain a configured connection without connecting
 it. Additional servers can use `programs.limitless.opencode.settings.mcp.servers`.
 Use one configuration path per server name. Native-only servers receive the same
-role-based permissions, with no automatic read exceptions for advisers.
+role-based permissions, with no automatic read exceptions for research.
 
 ### GitHub authentication
 
@@ -128,26 +128,26 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless`, `limitless-fast`, `solo`, `worker` | Automatic approval for reads, writes, shell commands, and all MCP tools |
-| `research`, `oracle-solve`, `oracle-design` | Local read tools and audited MCP reads; deny shell, edits, AST replacement, artifact creation, and session changes |
+| `limitless`, `limitless-fast`, `solo`, `worker`, `oracle-solve`, `oracle-design` | Automatic approval for reads, writes, shell commands, and all MCP tools |
+| `research` | Local read tools and audited MCP reads; deny shell, edits, AST replacement, artifact creation, and session changes |
 
-For each configured MCP server, read-only agents receive a `deny` rule followed by
+For each configured MCP server, research receives a `deny` rule followed by
 exact exceptions for audited read tools. Unknown tools, mutations, and mixed-purpose
-executors are unavailable to these agents. Read tools such as web fetch and artifact
+executors are unavailable to research. Read tools such as web fetch and artifact
 listing inherit the global allow rule.
 
 Sensitive-file reads and potentially destructive shell commands no longer have
 default approval prompts. Shared instructions still require explicit user direction
 for destructive work. Managed-checkout edits and native browser tools remain denied.
 
-`readTools` replaces a preset's exact read-tool list for research and both Oracles.
+`readTools` replaces a preset's exact read-tool list for research.
 Add names only after checking their behavior and the authenticated catalog.
 Wildcards are rejected. The optional `https://mcp.linear.app/mcp/readonly` endpoint
 can further restrict a Linear connection at the server. Linear's read-tool list
 is empty until verified names from an authenticated catalog are configured.
 
 These rules control named-tool access. Code Mode's raw HTTP `fetch` can still send
-write requests, so read-only profiles do not provide a sandbox. Later project
+write requests, so research's read-only profile does not provide a sandbox. Later project
 configuration or agent definitions can override global permissions. Project-local
 MCP additions need their own permission rules. A configured server must be trusted
 to implement its advertised read operations correctly.
@@ -156,12 +156,12 @@ to implement its advertised read operations correctly.
 | --- | --- | --- |
 | [Atlassian](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/supported-tools/) | Jira and Confluence search, reads, edits, comments, transitions | Organization policies and enabled tool groups determine access. Uses the v2 flat catalog. |
 | [Notion](https://developers.notion.com/guides/mcp/mcp-supported-tools) | Pages, databases, comments, queries, uploads | Workers deployment and generic API administration are outside this preset. Tools can depend on plan. |
-| [Sentry](https://docs.sentry.io/product/sentry-mcp/) | Issues, events, traces, debugging | Release/symbol uploads and broad administration require dedicated tooling. Mixed-purpose catalog execution is unavailable to read-only agents. |
+| [Sentry](https://docs.sentry.io/product/sentry-mcp/) | Issues, events, traces, debugging | Release/symbol uploads and broad administration require dedicated tooling. Mixed-purpose catalog execution is unavailable to research. |
 | [Linear](https://linear.app/docs/mcp) | Issues, projects, comments | Exact read exceptions require authenticated discovery. |
 | [GitHub](https://github.com/github/github-mcp-server) | Repositories, issues, PRs, reviews, Actions | Local Git and release uploads require separate tooling and authentication. |
 
 Before relying on a new connection, verify account identity, a representative read,
-an explicitly requested write, mutation denial in read-only agents, and token
+an explicitly requested write, mutation denial in research, and token
 refresh. The repository checks generated configuration and policy behavior;
 account entitlements and live upstream tool catalogs require this authenticated
 verification.
