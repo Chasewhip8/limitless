@@ -45,8 +45,9 @@ let
     map (tool: rule "${normalize name}_${tool}" "allow") (
       if builtins.hasAttr name connections then connections.${name}.readTools else [ ]
     );
-  permissionRules =
-    effect: lib.concatMap (name: [ (rule "${normalize name}_*" effect) ] ++ readRules name) names;
+  readOnlyPermissions = lib.concatMap (
+    name: [ (rule "${normalize name}_*" "deny") ] ++ readRules name
+  ) names;
   generatedOption =
     type:
     lib.mkOption {
@@ -85,7 +86,7 @@ in
               readTools = lib.mkOption {
                 type = lib.types.listOf (lib.types.strMatching "[A-Za-z0-9_-]+");
                 default = presets.${config.preset}.readTools;
-                description = "Exact read-only tool names allowed without approval and available to research. Replaces the preset list.";
+                description = "Exact read-only tool names available to research and both Oracle agents. Replaces the preset list.";
               };
             };
           }
@@ -94,16 +95,14 @@ in
     };
     _generated = {
       mcpServers = generatedOption (lib.types.attrsOf jsonFormat.type);
-      mcpPermissions = generatedOption (lib.types.listOf jsonFormat.type);
-      researchMcpPermissions = generatedOption (lib.types.listOf jsonFormat.type);
+      readOnlyMcpPermissions = generatedOption (lib.types.listOf jsonFormat.type);
     };
   };
 
   config = {
     programs.limitless._generated = {
       mcpServers = servers;
-      mcpPermissions = permissionRules "ask";
-      researchMcpPermissions = permissionRules "deny";
+      readOnlyMcpPermissions = readOnlyPermissions;
     };
     assertions = lib.mkIf cfg.enable (
       [

@@ -54,17 +54,21 @@ let
   mergedConfig = lib.recursiveUpdate baseConfig cfg.opencode.settings;
   opencodeConfig = mergedConfig // {
     default_agent = "limitless";
-    permissions = cfg.opencode.permissions ++ cfg._generated.mcpPermissions ++ baseConfig.permissions;
+    permissions = cfg.opencode.permissions ++ baseConfig.permissions;
     plugins = (cfg.opencode.settings.plugins or [ ]) ++ managedPlugins;
     mcp = (mergedConfig.mcp or { }) // {
       servers = cfg._generated.mcpServers;
     };
-    agents = (mergedConfig.agents or { }) // {
-      research = (mergedConfig.agents.research or { }) // {
-        permissions =
-          (mergedConfig.agents.research.permissions or [ ]) ++ cfg._generated.researchMcpPermissions;
-      };
-    };
+    agents =
+      (mergedConfig.agents or { })
+      // lib.genAttrs [ "research" "oracle-solve" "oracle-design" ] (
+        name:
+        (mergedConfig.agents.${name} or { })
+        // {
+          permissions =
+            (mergedConfig.agents.${name}.permissions or [ ]) ++ cfg._generated.readOnlyMcpPermissions;
+        }
+      );
   };
 in
 {
@@ -94,55 +98,8 @@ in
         inherit (jsonFormat) type;
         default = [
           (permissionRule "*" "*" "allow")
-        ]
-        ++ map (resource: permissionRule "read" resource "ask") [
-          "~/.ssh/**"
-          "$HOME/.ssh/**"
-          "~/.aws/**"
-          "$HOME/.aws/**"
-          "~/.gnupg/**"
-          "$HOME/.gnupg/**"
-          "~/.config/gh/hosts.yml"
-          "$HOME/.config/gh/hosts.yml"
-        ]
-        ++ map (resource: permissionRule "shell" resource "ask") [
-          "git reset*"
-          "git clean*"
-          "git checkout -- *"
-          "git restore *"
-          "git rebase*"
-          "git push --force*"
-          "git push -f*"
-          "git branch -D *"
-          "rm -rf *"
-          "rm -fr *"
-          "trash *"
-          "shred *"
-          "dd *"
-          "mkfs*"
-          "fdisk*"
-          "parted*"
-          "wipefs*"
-          "sudo *"
-          "su *"
-          "doas *"
-          "chmod -R *"
-          "chown -R *"
-          "curl * | sh*"
-          "curl * | bash*"
-          "wget * | sh*"
-          "wget * | bash*"
-          "npm publish*"
-          "bun publish*"
-          "pnpm publish*"
-          "yarn publish*"
-          "docker push*"
-          "kubectl delete*"
-          "kubectl apply*"
-          "terraform apply*"
-          "terraform destroy*"
         ];
-        description = "Ordered native permissions. MCP policies, managed-repository edit denials, and the browser denial are appended.";
+        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials and the browser denial are appended; research and both Oracles receive read-only MCP rules.";
       };
     };
 

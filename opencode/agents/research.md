@@ -18,9 +18,12 @@ permissions:
     - action: ast_grep_replace
       resource: "*"
       effect: deny
-    - action: webfetch
+    - action: opencode_session_move
       resource: "*"
-      effect: allow
+      effect: deny
+    - action: opencode_session_rename
+      resource: "*"
+      effect: deny
     - action: subagent
       resource: "*"
       effect: deny

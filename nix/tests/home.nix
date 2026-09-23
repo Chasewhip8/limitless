@@ -111,6 +111,16 @@ let
       model = "openai/test";
       plugins = [ "custom-plugin" ];
       formatter = true;
+      agents.oracle-solve = {
+        description = "Custom Oracle";
+        permissions = [
+          {
+            action = "read";
+            resource = "private/*";
+            effect = "ask";
+          }
+        ];
+      };
     };
   };
   connected = evaluate {
@@ -156,9 +166,14 @@ let
       if matches rule.action action && matches rule.resource resource then rule.effect else effect
     ) "ask" rules;
   primaryEffect = action: effectFor connectedConfig.permissions action "*";
-  researchEffect =
-    action:
-    effectFor (connectedConfig.permissions ++ connectedConfig.agents.research.permissions) action "*";
+  readOnlyAgents = [
+    "research"
+    "oracle-solve"
+    "oracle-design"
+  ];
+  readOnlyEffect =
+    name: action:
+    effectFor (connectedConfig.permissions ++ connectedConfig.agents.${name}.permissions) action "*";
   invalidServer = name: evaluate { mcp.servers.${name}.preset = "notion"; };
   supervised = evaluate {
     opencode.service = {
@@ -209,7 +224,15 @@ in
     assert lib.assertMsg (
       customReadTools.mcp.servers.notion.disabled
       && effectFor customReadTools.permissions "notion_notion-fetch" "*" == "allow"
-      && effectFor customReadTools.permissions "notion_notion-search" "*" == "ask"
+      && effectFor customReadTools.permissions "notion_notion-search" "*" == "allow"
+      && lib.all (
+        name:
+        let
+          rules = customReadTools.permissions ++ customReadTools.agents.${name}.permissions;
+        in
+        effectFor rules "notion_notion-fetch" "*" == "allow"
+        && effectFor rules "notion_notion-search" "*" == "deny"
+      ) readOnlyAgents
     ) "custom read exceptions or disabled connection settings were lost";
     assert lib.assertMsg (
       !(builtins.tryEval (
@@ -250,6 +273,10 @@ in
       (rendered custom).model == "openai/test" && (rendered custom).formatter
     ) "native settings were lost";
     assert lib.assertMsg (
+      (rendered custom).agents.oracle-solve.description == "Custom Oracle"
+      && effectFor (rendered custom).agents.oracle-solve.permissions "read" "private/file.txt" == "ask"
+    ) "custom agent settings or permissions were lost";
+    assert lib.assertMsg (
       builtins.length (rendered custom).plugins == 2
       && builtins.head (rendered custom).plugins == "custom-plugin"
     ) "custom plugins or Anthropic toggle were lost";
@@ -272,32 +299,60 @@ in
       connectedConfig.mcp.servers.custom.command == [ "test-mcp" ]
     ) "custom native MCP was lost";
     assert lib.assertMsg (lib.all
-      (action: primaryEffect action == "allow" && researchEffect action == "allow")
+      (
+        action:
+        primaryEffect action == "allow"
+        && lib.all (name: readOnlyEffect name action == "allow") readOnlyAgents
+      )
       [
         "notion-work_notion-fetch"
+        "notion-work_notion-download-skill"
+        "notion-work_notion-get-session-status"
         "notion-personal_notion-search"
+        "notion-personal_notion-download-attachment"
         "atlassian_getJiraIssue"
+        "atlassian_listJiraBoards"
+        "atlassian_getConfluenceContentPermissions"
+        "atlassian_getBitbucketRepoPullRequestDiff"
+        "atlassian_getCodeSymbol"
+        "atlassian_getLoomVideo"
+        "atlassian_getFocusAreaTypes"
         "sentry_search_issues"
+        "sentry_search_sentry_tools"
         "gh_pull_request_read"
+        "gh_get_file_blame"
+        "gh_issue_dependency_read"
       ]
-    ) "audited reads are not allowed for both agents";
+    ) "audited reads are not allowed for every agent";
     assert lib.assertMsg (lib.all
-      (action: primaryEffect action == "ask" && researchEffect action == "deny")
+      (
+        action:
+        primaryEffect action == "allow"
+        && lib.all (name: readOnlyEffect name action == "deny") readOnlyAgents
+      )
       [
         "notion-work_notion-create-pages"
         "notion-work_new-tool"
         "notion-work_notion-fetch-and-delete"
+        "notion-work_notion-spawn-session"
+        "notion-personal_notion-create-attachment"
         "atlassian_editJiraIssue"
+        "atlassian_exportConfluenceContent"
+        "atlassian_executeRead"
+        "atlassian_executeWrite"
+        "atlassian_executeDestructive"
         "sentry_update_issue"
         "sentry_execute_sentry_tool"
+        "sentry_analyze_issue_with_seer"
         "gh_create_pull_request"
+        "gh_run_workflow"
         "linear_unknown-tool"
         "custom_write"
       ]
-    ) "unknown or mutating MCP tools escape the policy";
-    assert lib.assertMsg (
-      researchEffect "github_clone" == "allow"
-    ) "GitHub MCP policy captured the local clone tool";
+    ) "unknown or mutating MCP tools must be allowed for execution and denied for read-only agents";
+    assert lib.assertMsg (lib.all (
+      name: readOnlyEffect name "github_clone" == "allow"
+    ) readOnlyAgents) "GitHub MCP policy captured the local clone tool";
     assert lib.assertMsg (
       effectFor connectedConfig.permissions "edit" ".limitless/repos/example/file.ts" == "deny"
     ) "managed checkout edit denial was lost";
@@ -362,7 +417,7 @@ in
         self.packages.${pkgs.stdenv.hostPlatform.system}.limitless.dependencies
       }/packages/limitless/node_modules node_modules
       cp ${./validate-config.mjs} validate-config.mjs
-      bun validate-config.mjs "$out/default.json" "$out/connected.json" "$out/custom.json"
+      bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/custom.json"
       ${lib.concatMapStringsSep "\n" (
         server: "test -x ${lib.escapeShellArg (builtins.head server.command)}"
       ) (builtins.attrValues (plugin defaults).options.lsp)}

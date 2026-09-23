@@ -3,13 +3,25 @@ description: Oracle design adviser for consequential architecture, abstraction, 
 mode: subagent
 model: anthropic/claude-fable-5-1#max
 permissions:
+    - action: shell
+      resource: "*"
+      effect: deny
     - action: question
       resource: "*"
       effect: deny
     - action: edit
       resource: "*"
       effect: deny
+    - action: artifact_create
+      resource: "*"
+      effect: deny
     - action: ast_grep_replace
+      resource: "*"
+      effect: deny
+    - action: opencode_session_move
+      resource: "*"
+      effect: deny
+    - action: opencode_session_rename
       resource: "*"
       effect: deny
     - action: subagent
