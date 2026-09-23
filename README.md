@@ -4,8 +4,9 @@
 
 Limitless pins OpenCode `2.0.12`, supplies coding agents and local code-intelligence
 tools, and configures optional first-party MCP connections. OpenCode owns its
-background service, OAuth credentials, Code Mode, browser integration, and TUI
-notifications. Home Manager owns packages and non-secret configuration.
+service discovery, OAuth credentials, Code Mode, browser integration, and TUI
+notifications. Home Manager owns packages and non-secret configuration, with
+optional Linux service supervision.
 
 ## Use it
 
@@ -160,6 +161,7 @@ and live upstream tool catalogs require this authenticated verification.
 nix/modules/
 ├── home.nix       # composition and Git hygiene
 ├── opencode.nix   # runtime, agents, plugins, and configuration assembly
+├── service.nix    # optional Linux supervision and native service binding
 ├── lsp.nix        # language-server packages and plugin configuration
 └── mcp.nix        # named connections and permission generation
 nix/mcp-presets.nix # first-party endpoints and audited read-tool names
@@ -260,10 +262,73 @@ Use normal file tools to add notes, source, assets, or generated outputs.
 Explicit duplicate slugs fail; generated slugs include a random suffix. Failed
 creation cleans up only its own incomplete manifest and empty folder.
 
-## Native service, notifications, and browser
+## Native service and Tailscale
 
-Use `opencode service status` and `opencode service restart` to manage the native
-background service. TUI preferences remain in `~/.config/opencode/cli.json`.
+OpenCode starts its native background service on demand by default. Use
+`opencode service status` and `opencode service restart` to inspect and manage it.
+
+For automatic startup at user login and process supervision on Linux, enable the
+Home Manager systemd user service:
+
+```nix
+programs.limitless.opencode.service = {
+  enable = true;
+  hostname = "127.0.0.1";
+  port = 4096;
+};
+```
+
+`hostname` defaults to `127.0.0.1`; `port` defaults to OpenCode's native `49374`.
+Declare `4096` explicitly to retain an existing Tailscale proxy target:
+
+```text
+Tailscale HTTPS → 127.0.0.1:4096 → OpenCode
+```
+
+Reuse the declared port in your proxy configuration. The listener stays on
+loopback, and OpenCode's native authentication still applies through the proxy.
+
+The service persists hostname and port through native `opencode service` commands
+when they differ, stops any existing native daemon, then runs `serve --service`
+in the foreground. It preserves the private password, CORS configuration, and
+configured service environment. Private service files remain writable and outside
+the Nix store. Disabling supervision leaves the last persisted binding in place.
+
+**Enabling, starting, or restarting this unit can interrupt active work and
+persistent terminals.** The unit takes ownership of the shared native daemon.
+While enabled, use systemd for lifecycle commands:
+
+```sh
+systemctl --user status opencode
+systemctl --user restart opencode
+systemctl --user stop opencode
+```
+
+`opencode service stop` is normally undone by supervision. A local OpenCode client
+can still start a native daemon after the unit is stopped. Keep local clients on
+the configured OpenCode version; clients that replace the daemon with another
+version can conflict with supervision. Restarting a failed process is automatic;
+this unit does not detect a live but unhealthy process.
+
+Home Manager applies changed units automatically when `systemd.user.startServices`
+is enabled. Changes to the runtime, binding, configuration, agents, or installed
+skills trigger a restart. With service switching disabled, apply the suggested
+systemd commands yourself.
+
+The unit starts with the systemd user manager, normally at login. Boot startup is
+optional: user lingering starts that manager before login and keeps it running
+after logout. To opt in, set this in your **NixOS system configuration**:
+
+```nix
+users.users."your-user".linger = true;
+```
+
+On other systemd distributions, an administrator can enable lingering with
+`loginctl enable-linger <your-user>`. Tailscale's proxy must also start at boot.
+
+## Notifications and browser
+
+TUI preferences remain in `~/.config/opencode/cli.json`.
 Enable attention notifications through the TUI settings or merge this into that
 file:
 
@@ -290,13 +355,14 @@ This release removes these options and packages:
 | `tools.sentry.*`, `sentry` package/skill | Add a `sentry` MCP connection. Install specialized release tooling separately if required. |
 | `mcp.linear.enable` | Set `mcp.servers.linear.preset = "linear"` and sign in through `/mcps`. |
 | `notifications.*` | Use native TUI attention settings; arbitrary command hooks are retired. |
-| `opencode.service.*` and its attach alias | Use native OpenCode service discovery and service commands. |
+| `opencode.service.alias` and its attach alias | Use native OpenCode service discovery. Optional Linux supervision uses `opencode.service.{enable,hostname,port}`. |
 
-If the old `opencode.service` systemd unit is running, stop it before applying the
-new Home Manager generation. Remove the retired option definitions, apply the
-generation, then launch OpenCode and check `opencode service status`. Do not run
-both service owners concurrently. This repository does not activate Home Manager,
-stop running sessions, migrate OAuth grants, or delete existing credential files.
+If migrating from the old systemd service, remove `opencode.service.alias` and
+declare `port = 4096` to preserve its old default. Applying the generation with
+supervision enabled replaces the old unit and takes over any native daemon. If
+using native on-demand startup instead, disable the unit before launching OpenCode.
+Do not keep a separate OpenCode supervisor alongside this unit. Applying these
+settings is a Home Manager operation; repository checks use isolated fixtures.
 
 For an existing Linear API key, the connection's native settings can explicitly
 set `oauth = false` and `headers.Authorization = "Bearer {env:LINEAR_API_KEY}"`.
@@ -312,7 +378,8 @@ and state backup; never run V1 and V2 against the same writable state directory.
 Use `nix develop`, then `bun install --frozen-lockfile` and `bun run ci`. The gate
 runs formatting/lint checks, TypeScript, tests, module checks, and all five package
 builds. Nix module checks exercise named accounts, native settings, authentication
-requirements, namespace collisions, and read/write permission outcomes.
+requirements, namespace collisions, read/write permission outcomes, and native
+service configuration and supervision.
 
 Runtime, Limitless plugin SDK, and schema are pinned to `2.0.12`, with
 `effect@4.0.0-rc.112`; update them together. Re-audit native capabilities and MCP

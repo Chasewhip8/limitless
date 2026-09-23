@@ -228,9 +228,17 @@ in
       ];
       description = "Providers removed from the catalog. Vertex defaults to disabled to prevent ambient Google ADC selection.";
     };
+
+    _generated.opencodePackage = lib.mkOption {
+      type = lib.types.package;
+      internal = true;
+      readOnly = true;
+      description = "Configured OpenCode executable, including the optional Claude Code wrapper.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
+    programs.limitless._generated.opencodePackage = opencodePackage;
     assertions = [
       {
         assertion =

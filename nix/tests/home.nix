@@ -11,14 +11,54 @@ let
         type = lib.types.listOf lib.types.attrs;
         default = [ ];
       };
+      warnings = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+      };
       home = {
         file = lib.mkOption {
           type = lib.types.attrsOf lib.types.attrs;
           default = { };
+          apply = lib.mapAttrs (
+            name: file:
+            file
+            // lib.optionalAttrs (file ? text && !(file ? source)) {
+              source = pkgs.writeText (builtins.baseNameOf name) file.text;
+            }
+          );
         };
         packages = lib.mkOption {
           type = lib.types.listOf lib.types.package;
           default = [ ];
+        };
+        homeDirectory = lib.mkOption {
+          type = lib.types.str;
+          default = "/home/test";
+        };
+        profileDirectory = lib.mkOption {
+          type = lib.types.str;
+          default = "/home/test/.nix-profile";
+        };
+      };
+      xdg = lib.genAttrs [ "configHome" "dataHome" "stateHome" "cacheHome" ] (
+        name:
+        lib.mkOption {
+          type = lib.types.str;
+          default = "/home/test/${name}";
+        }
+      );
+      systemd.user = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = pkgs.stdenv.hostPlatform.isLinux;
+        };
+        startServices = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+        };
+        services = lib.mkOption {
+          type = lib.types.attrsOf lib.types.attrs;
+          default = { };
         };
       };
       programs.git = {
@@ -33,16 +73,18 @@ let
       };
     };
   };
-  evaluate =
-    settings:
+  evaluateWith =
+    settings: extraModules:
     lib.evalModules {
       specialArgs = { inherit pkgs; };
       modules = [
         (import ../modules/home.nix { inherit self; })
         homeStubs
         { programs.limitless = lib.recursiveUpdate { enable = true; } settings; }
-      ];
+      ]
+      ++ extraModules;
     };
+  evaluate = settings: evaluateWith settings [ ];
   rendered =
     home:
     builtins.fromJSON (
@@ -118,6 +160,20 @@ let
     action:
     effectFor (connectedConfig.permissions ++ connectedConfig.agents.research.permissions) action "*";
   invalidServer = name: evaluate { mcp.servers.${name}.preset = "notion"; };
+  supervised = evaluate {
+    opencode.service = {
+      enable = true;
+      port = 4096;
+    };
+    opencode.disableClaudeCode = true;
+  };
+  serviceUnit = supervised.config.systemd.user.services.opencode;
+  noServiceSwitching = evaluateWith { opencode.service.enable = true; } [
+    { systemd.user.startServices = false; }
+  ];
+  noUserManager = evaluateWith { opencode.service.enable = true; } [
+    { systemd.user.enable = false; }
+  ];
 in
 {
   home-module =
@@ -149,7 +205,6 @@ in
       !(defaults.options.programs.limitless ? tools)
       && !(defaults.options.programs.limitless ? slack)
       && !(defaults.options.programs.limitless ? notifications)
-      && !(defaults.options.programs.limitless.opencode ? service)
     ) "retired module options remain available";
     assert lib.assertMsg (
       customReadTools.mcp.servers.notion.disabled
@@ -311,6 +366,74 @@ in
       ${lib.concatMapStringsSep "\n" (
         server: "test -x ${lib.escapeShellArg (builtins.head server.command)}"
       ) (builtins.attrValues (plugin defaults).options.lsp)}
+    '';
+
+  service =
+    assert lib.assertMsg (
+      defaults.config.systemd.user.services == { } && disabled.config.systemd.user.services == { }
+    ) "service supervision must be opt-in";
+    assert lib.assertMsg (
+      (evaluate {
+        enable = false;
+        opencode.service.enable = true;
+      }).config.systemd.user.services == { }
+    ) "disabled Limitless still creates a service";
+    assert lib.assertMsg (
+      defaults.config.programs.limitless.opencode.service.hostname == "127.0.0.1"
+      && defaults.config.programs.limitless.opencode.service.port == 49374
+    ) "service defaults must match native OpenCode";
+    assert lib.assertMsg (
+      valid supervised == pkgs.stdenv.hostPlatform.isLinux
+    ) "supervision must reject unsupported platforms";
+    assert lib.assertMsg (!valid noUserManager) "supervision must require a user manager";
+    assert lib.assertMsg (
+      !pkgs.stdenv.hostPlatform.isLinux || builtins.length noServiceSwitching.config.warnings == 1
+    ) "disabled service switching must warn about manual activation";
+    assert lib.assertMsg (
+      !(supervised.config.home.file ? ".config/opencode/service.json")
+    ) "private native service configuration must not enter the Nix store";
+    assert lib.assertMsg (
+      !(builtins.tryEval (
+        builtins.deepSeq
+          (evaluate {
+            opencode.service.port = 0;
+          }).config.programs.limitless.opencode.service.port
+          true
+      )).success
+    ) "invalid service port passed option validation";
+    assert lib.assertMsg (
+      !(builtins.tryEval (
+        builtins.deepSeq
+          (evaluate {
+            opencode.service.hostname = "";
+          }).config.programs.limitless.opencode.service.hostname
+          true
+      )).success
+    ) "empty service hostname passed option validation";
+    assert lib.assertMsg (
+      !pkgs.stdenv.hostPlatform.isLinux
+      || (
+        serviceUnit.Service.Type == "exec"
+        && serviceUnit.Service.Restart == "always"
+        && serviceUnit.Install.WantedBy == [ "default.target" ]
+        && !(serviceUnit.Service ? ExecStop)
+        && serviceUnit.Unit.StartLimitIntervalSec == 0
+        && builtins.length serviceUnit.Unit.X-Restart-Triggers == 4
+        &&
+          builtins.elem supervised.config.home.file.".config/opencode/opencode.json".source
+            serviceUnit.Unit.X-Restart-Triggers
+      )
+    ) "supervised service lifecycle or restart triggers changed";
+    pkgs.runCommand "limitless-service-check" { nativeBuildInputs = [ pkgs.nodejs ]; } ''
+      cp ${../packages/opencode-service.mjs} opencode-service.mjs
+      cp ${../packages/opencode-service.test.mjs} opencode-service.test.mjs
+      node --test opencode-service.test.mjs
+      ${lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+        test -x ${serviceUnit.Service.ExecStart}
+        grep -F ${lib.escapeShellArg "${supervised.config.programs.limitless._generated.opencodePackage}/bin/opencode"} ${serviceUnit.Service.ExecStart}
+        grep -F '127.0.0.1 4096' ${serviceUnit.Service.ExecStart}
+      ''}
+      touch "$out"
     '';
 
   subagent-profiles =

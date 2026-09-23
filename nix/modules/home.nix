@@ -3,6 +3,7 @@
 {
   imports = [
     (import ./opencode.nix { inherit self; })
+    ./service.nix
     ./lsp.nix
     ./mcp.nix
   ];
