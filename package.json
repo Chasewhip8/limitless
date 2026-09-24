@@ -7,7 +7,7 @@
 		"packages/*"
 	],
 	"scripts": {
-		"build": "nix build --no-link .#skills .#opencode-agents .#anthropic-auth .#limitless .#opencode",
+		"build": "nix build --no-link .#skills .#opencode-agents .#anthropic-auth .#limitless .#opencode .#opencode-desktop",
 		"ci": "bun run lint && bun run typecheck && bun run test && nix flake check && bun run build",
 		"format": "bun run format:biome && bun run format:nix && bun run format:md",
 		"format:biome": "biome check --write .",

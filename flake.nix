@@ -40,6 +40,12 @@
           anthropic-auth = import ./nix/packages/anthropic-auth.nix { inherit pkgs; };
           limitless = import ./nix/packages/limitless.nix { inherit pkgs self; };
           opencode = import ./nix/packages/opencode.nix { inherit pkgs; };
+        }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          opencode-desktop = import ./nix/packages/opencode-desktop.nix {
+            inherit pkgs;
+            opencode = self.packages.${system}.opencode;
+          };
         };
         checks = import ./nix/tests/home.nix { inherit pkgs self agentsPackage; };
         devShells.default = pkgs.mkShell {

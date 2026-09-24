@@ -223,6 +223,15 @@ in
         github.enable = true;
       })
     ) "GitHub clones became unrestricted without explicit opt-in";
+    assert lib.assertMsg (
+      valid (evaluate {
+        desktop.enable = true;
+      }) == pkgs.stdenv.hostPlatform.isLinux
+      && !valid (evaluate {
+        desktop.enable = true;
+        opencode.package = cliProbePackage;
+      })
+    ) "the desktop app must share the pinned OpenCode runtime version";
     pkgs.runCommand "limitless-home-module-check"
       {
         nativeBuildInputs = [
