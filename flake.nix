@@ -30,8 +30,6 @@
         agentsPackage = pkgs.runCommand "limitless-opencode-agents" { } ''
           mkdir -p $out
           cp -r ${self}/opencode/agents/. $out/
-          sed '2,/^---$/s/^description: .*/description: Primary user-facing OpenCode agent with Fast processing for configured subagents./' \
-            "$out/limitless.md" > "$out/limitless-fast.md"
         '';
       in
       {

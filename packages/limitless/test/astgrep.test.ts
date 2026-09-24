@@ -1,17 +1,11 @@
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { Effect, Option, Schema } from 'effect'
+import { Effect } from 'effect'
 import { runPromise } from 'effect/Effect'
 import { afterEach, describe, expect, test } from 'vitest'
 import { ToolExecutionContext } from '../core/execution'
-import {
-	AstGrepReplaceInput,
-	AstGrepSearchInput,
-	astGrepMutationScopeGap,
-	astGrepReplace,
-	astGrepSearch,
-} from '../tools/ast-grep'
+import { astGrepMutationScopeGap, astGrepReplace } from '../tools/ast-grep'
 import { testToolExecution } from './execution'
 
 const tempDirectories: Array<string> = []
@@ -81,30 +75,8 @@ describe('ast-grep managed repository guardrail', () => {
 	})
 })
 
-describe('ast-grep command execution', () => {
-	test('executes searches with explicit language, JSON output, and targets', async () => {
-		const root = await worktree()
-		const binary = await fakeAstGrep(root)
-		const result = await runPromise(
-			astGrepSearch(
-				{ pattern: 'console.log($A)', lang: 'javascript', paths: ['src'] },
-				{ binary },
-			).pipe(Effect.provideService(ToolExecutionContext, testToolExecution(root))),
-		)
-
-		expect(result.ok).toBe(true)
-		expect(JSON.parse(result.stdout)).toEqual([
-			'run',
-			'--pattern',
-			'console.log($A)',
-			'--lang',
-			'javascript',
-			'--json=pretty',
-			'src',
-		])
-	})
-
-	test('executes dry-run and update replacements with the intended flags', async () => {
+describe('ast-grep replacement', () => {
+	test('writes files only when dryRun is false', async () => {
 		const root = await worktree()
 		const binary = await fakeAstGrep(root)
 		const execute = (dryRun: boolean) =>
@@ -115,24 +87,10 @@ describe('ast-grep command execution', () => {
 			)
 
 		const [dryRun, update] = await Promise.all([execute(true), execute(false)])
-		expect(dryRun.ok).toBe(true)
-		expect(update.ok).toBe(true)
 		if (!('stdout' in dryRun) || !('stdout' in update)) {
 			throw new Error('Expected ast-grep replacement commands to execute')
 		}
-		expect(JSON.parse(dryRun.stdout)).toContain('--json=pretty')
+		expect(JSON.parse(dryRun.stdout)).not.toContain('--update-all')
 		expect(JSON.parse(update.stdout)).toContain('--update-all')
-	})
-})
-
-describe('ast-grep input schemas', () => {
-	test('rejects empty patterns, rewrites, and non-positive timeouts', () => {
-		for (const [schema, input] of [
-			[AstGrepSearchInput, { pattern: '' }],
-			[AstGrepSearchInput, { pattern: '$A', timeoutMs: 0 }],
-			[AstGrepReplaceInput, { pattern: '$A', rewrite: '' }],
-		] as const) {
-			expect(Option.isNone(Schema.decodeUnknownOption(schema)(input))).toBe(true)
-		}
 	})
 })

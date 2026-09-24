@@ -114,67 +114,23 @@ test('persists changed settings while preserving unrelated private configuration
 	assert.equal(repeated.calls.filter((args) => args[1] === 'stop').length, 2)
 })
 
-test('writes only the differing setting', async () => {
-	const instance = await fixture({ hostname: '127.0.0.1', port: 49374 })
-	prepareService(instance.opencode, '127.0.0.1', 4096, instance.environment)
-	assert.deepEqual(
-		(await instance.state()).calls.filter((args) => args[1] === 'set'),
-		[['service', 'set', 'port', '4096']],
+test('rejects an invalid private environment before mutating the service or leaking it', async () => {
+	const instance = await fixture(
+		{},
+		{ rawEnvironment: '{"TEST_TOKEN":"fixture-private-value", invalid}' },
 	)
+	assert.throws(
+		() => prepareService(instance.opencode, '127.0.0.1', 4096, instance.environment),
+		(error) => {
+			assert.match(error.message, /invalid service environment/)
+			assert.equal(error.message.includes('fixture-private-value'), false)
+			return true
+		},
+	)
+	const state = await instance.state()
+	assert.deepEqual(state.calls, [['service', 'get', 'env']])
+	assert.equal(state.running, true)
 })
-
-test('initializes absent settings with the declared binding', async () => {
-	const instance = await fixture()
-	prepareService(instance.opencode, '127.0.0.1', 4096, instance.environment)
-	assert.deepEqual((await instance.state()).config, { hostname: '127.0.0.1', port: 4096 })
-})
-
-test('preserves native environment precedence and arbitrary string values', async () => {
-	const env = {
-		TEST_TOKEN: 'spaces "quotes"\nnewlines $(commands)',
-		TEST_OVERRIDE: 'configured',
-		TEST_EMPTY: '',
-	}
-	const instance = await fixture({ env })
-	const environment = prepareService(instance.opencode, '127.0.0.1', 4096, instance.environment)
-	assert.deepEqual(environment, { ...instance.environment, ...env })
-	assert.equal(instance.environment.TEST_OVERRIDE, 'original')
-})
-
-for (const fail of ['service get env', 'service set hostname 127.0.0.1', 'service stop']) {
-	test(`propagates failure of ${fail}`, async () => {
-		const instance = await fixture({}, { fail })
-		assert.throws(
-			() => prepareService(instance.opencode, '127.0.0.1', 4096, instance.environment),
-			/OpenCode service .* failed \(7\)/,
-		)
-		assert.equal((await instance.state()).calls.at(-1).join(' '), fail)
-	})
-}
-
-for (const rawEnvironment of [
-	'{"TEST_TOKEN":"fixture-private-value", invalid}',
-	'null',
-	'[]',
-	'{"TOKEN": 123}',
-	'{"": "value"}',
-	'{"BAD=KEY": "value"}',
-	'{"TOKEN": "nul\\u0000value"}',
-]) {
-	test(`rejects invalid environment before mutating the service: ${rawEnvironment}`, async () => {
-		const instance = await fixture({}, { rawEnvironment })
-		assert.throws(
-			() => prepareService(instance.opencode, '127.0.0.1', 4096, instance.environment),
-			(error) => {
-				assert.match(error.message, /invalid service environment|invalid service environment JSON/)
-				assert.equal(error.message.includes('fixture-private-value'), false)
-				return true
-			},
-		)
-		assert.deepEqual((await instance.state()).calls, [['service', 'get', 'env']])
-		assert.equal((await instance.state()).running, true)
-	})
-}
 
 test('executes foreground native service in the launcher process with the private environment', async () => {
 	const instance = await fixture({

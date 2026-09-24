@@ -25,8 +25,8 @@ optional Linux service supervision.
 }
 ```
 
-Run `opencode` from a project. It discovers or starts its native background
-service. Connect model providers through `/connect`.
+Run `opencode`, or its `oc` shell alias, from a project. It discovers or starts
+its native background service. Connect model providers through `/connect`.
 
 Native browser tools are currently disabled for all agents through a shared
 permission rule. They require the OpenCode desktop app's attached browser and
@@ -34,7 +34,7 @@ fail in TUI-only sessions.
 
 ## Included capabilities
 
-- **Agents:** `limitless`, `limitless-fast`, and `solo`, with research, technical
+- **Agents:** `limitless` and `solo`, with research, technical
   and design Oracle advisers, and a worker for mechanical transformations.
 - **Code intelligence:** ast-grep search and replacement, TypeScript/Biome
   diagnostics, and seven LSP tools for definitions, hover, implementations,
@@ -128,7 +128,7 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless`, `limitless-fast`, `solo`, `worker`, `oracle-solve`, `oracle-design` | Automatic approval for reads, writes, shell commands, and all MCP tools |
+| `limitless`, `solo`, `worker`, `oracle-solve`, `oracle-design` | Automatic approval for reads, writes, shell commands, and all MCP tools |
 | `research` | Local read tools and audited MCP reads; deny shell, edits, AST replacement, artifact creation, and session changes |
 
 For each configured MCP server, research receives a `deny` rule followed by
@@ -203,22 +203,14 @@ when present and is otherwise empty. OpenCode's built-in skills remain available
 
 ## Agents and models
 
-`limitless` uses Standard processing for eligible OpenAI subagents;
-`limitless-fast` uses Fast processing. Both default to `openai/gpt-6-astra#xhigh`,
-and the main model remains independently selectable. `solo` denies delegation.
-OpenCode remembers a model per primary agent.
+`limitless` and `solo` default to `openai/gpt-6-astra#xhigh`, and the main model
+remains independently selectable. `solo` denies delegation. OpenCode remembers a
+model per primary agent.
 
-`agents.fastSubagents` defaults to `[ "oracle-solve" "research" "worker" ]`.
-An empty list disables the overrides. Research and worker use
-`openai/gpt-5.6-sol#medium`; the technical Oracle uses Astra; the design Oracle uses
-Fable. Planning stays in the primary context, research gathers evidence, Oracle
-agents advise, and worker performs specified mechanical transformations.
-
-The plugin resolves the root profile on every eligible child request, including
-nested and resumed sessions. Context, compaction, and transient generation hooks
-set the service tier without changing the stored model reference. Requests already
-dispatched retain their tier. Fast processing depends on provider availability and
-pricing. Other primary agents and unlisted subagents retain their configured tier.
+Research and worker use `anthropic/claude-opus-5-5#high`; the technical Oracle uses
+Astra; the design Oracle uses Fable. Planning stays in the primary context, research
+gathers evidence, Oracle agents advise, and worker performs specified mechanical
+transformations. Subagents keep the processing tier of their configured model.
 
 The model defaults retain short/long-context Luna and Terra aliases and Astra's
 full 1.05M context window. `providers.disabled` defaults to
@@ -409,6 +401,7 @@ This release removes these options and packages:
 | `mcp.linear.enable` | Set `mcp.servers.linear.preset = "linear"` and sign in through `/mcps`. |
 | `notifications.*` | Use `opencode.cliSettings.attention`; sound defaults to enabled, and visual notifications are configured independently. Arbitrary command hooks are retired. |
 | `opencode.service.alias` and its attach alias | Use native OpenCode service discovery. Optional Linux supervision uses `opencode.service.{enable,hostname,port}`. |
+| `limitless-fast` agent, `agents.fastSubagents` | Use `limitless`. Select a `-fast` model alias to request Fast processing for a session. |
 
 If migrating from the old systemd service, remove `opencode.service.alias` and
 declare `port = 4096` to preserve its old default. Applying the generation with
@@ -430,9 +423,10 @@ and state backup; never run V1 and V2 against the same writable state directory.
 
 Use `nix develop`, then `bun install --frozen-lockfile` and `bun run ci`. The gate
 runs formatting/lint checks, TypeScript, tests, module checks, and all five package
-builds. Nix module checks exercise named accounts, native settings, authentication
-requirements, namespace collisions, read/write permission outcomes, and native
-service configuration and supervision.
+builds. The suite covers Limitless-owned behavior: tool safety and lifecycle,
+role permission outcomes, MCP namespace collisions, launcher environment handling,
+and native service supervision. It leaves configuration values and upstream
+packages to their owners.
 
 Runtime, Limitless plugin SDK, and schema are pinned to `2.0.12`, with
 `effect@4.0.0-rc.112`; update them together. Re-audit native capabilities and MCP

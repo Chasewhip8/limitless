@@ -113,31 +113,12 @@ describe('lspDiagnostics', () => {
 })
 
 describe('summarizeDiagnostics', () => {
-	test('all passed => { ok: true, status: "passed" }', () => {
-		expect(summarize([passedCheck('typescript'), passedCheck('biome')])).toMatchObject({
-			ok: true,
-			status: 'passed',
-		})
-	})
-
-	test('pass + skipped => { ok: false, status: "partial" }', () => {
-		expect(summarize([passedCheck('typescript'), skippedCheck('biome')])).toMatchObject({
-			ok: false,
-			status: 'partial',
-		})
-	})
-
-	test('fail + skipped => { ok: false, status: "failed" }', () => {
-		expect(summarize([failedCheck('typescript'), skippedCheck('biome')])).toMatchObject({
-			ok: false,
-			status: 'failed',
-		})
-	})
-
-	test('all skipped => { ok: false, status: "skipped" }', () => {
-		expect(summarize([skippedCheck('typescript'), skippedCheck('biome')])).toMatchObject({
-			ok: false,
-			status: 'skipped',
-		})
+	test.each([
+		{ checks: [passedCheck('typescript'), passedCheck('biome')], ok: true, status: 'passed' },
+		{ checks: [passedCheck('typescript'), skippedCheck('biome')], ok: false, status: 'partial' },
+		{ checks: [failedCheck('typescript'), skippedCheck('biome')], ok: false, status: 'failed' },
+		{ checks: [skippedCheck('typescript'), skippedCheck('biome')], ok: false, status: 'skipped' },
+	])('reports $status and succeeds only when every check passed', ({ checks, ok, status }) => {
+		expect(summarize(checks)).toMatchObject({ ok, status })
 	})
 })

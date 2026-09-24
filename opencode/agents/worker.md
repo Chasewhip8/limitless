@@ -1,7 +1,7 @@
 ---
 description: Execution subagent for substantial mechanical work that applies a fixed rule across files or items.
 mode: subagent
-model: openai/gpt-5.6-sol#medium
+model: anthropic/claude-opus-5-5#medium
 permissions:
     - action: question
       resource: "*"

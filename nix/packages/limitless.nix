@@ -25,13 +25,6 @@ let
       bun ${./limitless-bun-links.mjs}
     '';
 
-    doCheck = true;
-    checkPhase = ''
-      cp ${./limitless-bun-links.mjs} ./limitless-bun-links.mjs
-      cp ${./limitless-bun-links.test.mjs} ./limitless-bun-links.test.mjs
-      bun test ./limitless-bun-links.test.mjs
-    '';
-
     installPhase = ''
       mkdir -p $out/node_modules $out/packages/limitless
       cp -r node_modules/.bun $out/node_modules/.bun

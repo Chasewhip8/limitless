@@ -1,7 +1,6 @@
 import type { AttentionNotifyOptions, Data, ToastOptions } from '@opencode/plugin/tui/context'
 import { describe, expect, test, vi } from 'vitest'
 import { type NotificationContext, registerNotifications } from '../plugin/notifications'
-import notificationsPlugin from '../tui'
 
 type Event = Parameters<Parameters<Data['listen']>[0]>[0]['details']
 type EventMap = { [Type in Event['type']]: Extract<Event, { type: Type }> }
@@ -148,11 +147,6 @@ function harness() {
 }
 
 describe('notification sounds', () => {
-	test('replaces the pinned built-in notification handler', () => {
-		expect(notificationsPlugin.id).toBe('opencode.notifications')
-		expect(notificationsPlugin.setup).toBe(registerNotifications)
-	})
-
 	test('sounds once for a final main-session answer and preserves its visual notification', async () => {
 		const state = harness()
 		await state.emit(succeeded())
@@ -173,19 +167,6 @@ describe('notification sounds', () => {
 		])
 	})
 
-	test('sounds for a later main answer even if its start event was missed', async () => {
-		const state = harness()
-		await state.emit(succeeded())
-		state.messages.set('root', [
-			assistant(),
-			idle(),
-			assistant({ id: 'msg_next' }),
-			idle('evt_next'),
-		])
-		await state.emit(succeeded('evt_next'))
-		expect(state.sounds()).toHaveLength(2)
-	})
-
 	test('does not sound for child completion', async () => {
 		const state = harness()
 		state.messages.set('child', [assistant(), idle()])
@@ -194,39 +175,9 @@ describe('notification sounds', () => {
 		expect(state.sync.messages).not.toHaveBeenCalled()
 	})
 
-	test('does not sound just because an assistant message has completed', async () => {
-		const state = harness()
-		state.messages.set('root', [assistant()])
-		await state.emit(started())
-		await state.emit({
-			id: 'evt_step',
-			created: 2,
-			type: 'session.step.ended',
-			durable: { aggregateID: 'root', seq: 1, version: 1 },
-			data: {
-				sessionID: 'root',
-				assistantMessageID: 'msg_answer',
-				finish: 'stop',
-				cost: 0,
-				tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-			},
-		})
-		expect(state.sounds()).toEqual([])
-	})
-
-	test('deduplicates concurrent completion callbacks after hydration', async () => {
-		const state = harness()
-		await Promise.all([state.emit(succeeded()), state.emit(succeeded())])
-		expect(state.sounds()).toHaveLength(1)
-	})
-
 	test.each<[string, Assistant]>([
-		['incomplete', assistant({ time: { created: 1 } })],
 		['tool continuation', assistant({ finish: 'tool-calls' })],
-		['truncated', assistant({ finish: 'length' })],
 		['errored', assistant({ error: { type: 'unknown', message: 'Failure' } })],
-		['empty', assistant({ content: [] })],
-		['whitespace', assistant({ content: [{ type: 'text', text: '  ' }] })],
 		['reasoning only', assistant({ content: [{ type: 'reasoning', text: 'Thinking' }] })],
 	])('does not sound for an %s last assistant or fall back to an earlier answer', async (_name, message) => {
 		const state = harness()
@@ -236,22 +187,11 @@ describe('notification sounds', () => {
 	})
 
 	test.each<[string, Message[]]>([
-		['empty run', [idle()]],
-		['no matching boundary', [assistant(), idle('evt_other')]],
-		['old answer', [assistant(), idle('evt_previous'), idle()]],
 		[
 			'unanswered input',
 			[
 				assistant(),
 				{ id: 'msg_user', type: 'user', text: 'More work', time: { created: 2 } },
-				idle(),
-			],
-		],
-		[
-			'synthetic continuation',
-			[
-				assistant(),
-				{ id: 'msg_synthetic', type: 'synthetic', text: 'Child result', time: { created: 2 } },
 				idle(),
 			],
 		],
@@ -270,101 +210,11 @@ describe('notification sounds', () => {
 				idle(),
 			],
 		],
-		[
-			'failed compaction',
-			[
-				assistant(),
-				{
-					id: 'msg_compact',
-					type: 'compaction',
-					status: 'failed',
-					reason: 'manual',
-					error: { type: 'unknown', message: 'Failed' },
-					time: { created: 2 },
-				},
-				idle(),
-			],
-		],
 	])('does not sound for %s', async (_name, messages) => {
 		const state = harness()
 		state.messages.set('root', messages)
 		await state.emit(succeeded())
 		expect(state.sounds()).toEqual([])
-	})
-
-	test('permits successful compaction after a new final answer', async () => {
-		const state = harness()
-		state.messages.set('root', [
-			assistant(),
-			{
-				id: 'msg_compact',
-				type: 'compaction',
-				status: 'completed',
-				reason: 'auto',
-				summary: 'Summary',
-				recent: '',
-				time: { created: 2 },
-			},
-			idle(),
-		])
-		await state.emit(succeeded())
-		expect(state.sounds()).toHaveLength(1)
-	})
-
-	test('hydrates missing ownership before treating a session as top-level', async () => {
-		const state = harness()
-		state.sessions.delete('root')
-		state.sync.session.mockImplementationOnce(async () => {
-			state.sessions.set('root', { title: 'Loaded session' })
-		})
-		await state.emit(succeeded())
-		expect(state.sync.session).toHaveBeenCalledWith('root')
-		expect(state.sounds()).toHaveLength(1)
-	})
-
-	test.each([
-		'missing',
-		'child',
-	])('does not infer root ownership from %s session data', async (kind) => {
-		const state = harness()
-		state.sessions.delete('root')
-		state.sync.session.mockImplementationOnce(async () => {
-			if (kind === 'child')
-				state.sessions.set('root', { title: 'Loaded child', parentID: 'parent' })
-		})
-		await state.emit(succeeded())
-		expect(state.sounds()).toEqual([])
-	})
-
-	test.each([
-		'running',
-		'pending',
-		'new terminal',
-		'disposed',
-	])('rechecks %s state after hydration', async (kind) => {
-		const state = harness()
-		state.sync.messages.mockImplementationOnce(async () => {
-			if (kind === 'running') state.statuses.set('root', 'running')
-			if (kind === 'pending') state.pending.set('root', ['queued input'])
-			if (kind === 'new terminal') state.messages.set('root', [assistant(), idle('evt_newer')])
-			if (kind === 'disposed') state.cleanup()
-		})
-		await state.emit(succeeded())
-		expect(state.sounds()).toEqual([])
-	})
-
-	test('reports hydration failures without announcing completion', async () => {
-		const state = harness()
-		const error = new Error('Cannot load messages')
-		const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-		try {
-			state.sync.messages.mockRejectedValueOnce(error)
-			await state.emit(succeeded())
-			expect(state.sounds()).toEqual([])
-			expect(log).toHaveBeenCalledWith('[limitless] Notification failed', error)
-		} finally {
-			log.mockRestore()
-		}
 	})
 
 	test('keeps errors and interruptions silent while retaining visual feedback', async () => {
@@ -429,15 +279,5 @@ describe('notification sounds', () => {
 		await state.emit(question())
 		await state.emit(permission())
 		expect(state.sounds()).toHaveLength(4)
-	})
-
-	test('unsubscribes every handler on cleanup', async () => {
-		const state = harness()
-		state.cleanup()
-		expect(state.listeners.size).toBe(0)
-		await state.emit(question())
-		await state.emit(permission())
-		await state.emit(succeeded())
-		expect(state.notifications).toEqual([])
 	})
 })

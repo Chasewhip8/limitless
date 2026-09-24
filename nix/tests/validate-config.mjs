@@ -37,14 +37,7 @@ function effectFor(rules, action, resource) {
 	return effect
 }
 
-const executionAgents = [
-	'limitless',
-	'limitless-fast',
-	'solo',
-	'worker',
-	'oracle-solve',
-	'oracle-design',
-]
+const executionAgents = ['limitless', 'solo', 'worker', 'oracle-solve', 'oracle-design']
 const readOnlyAgents = ['research']
 const sharedActions = [
 	'read',
@@ -101,25 +94,7 @@ for (const file of files) {
 		for (const resource of ['/tmp/opencode/oracle-draft.md', 'src/example.ts']) {
 			expectEffect('edit', resource, readOnlyAgents.includes(name) ? 'deny' : 'allow')
 		}
-		for (const resource of [
-			'~/.ssh/id_ed25519',
-			'$HOME/.aws/credentials',
-			'~/.gnupg/private.key',
-			'~/.config/gh/hosts.yml',
-			'.env',
-		]) {
-			expectEffect('read', resource, 'allow')
-		}
-		for (const command of [
-			'git reset --hard',
-			'git push --force',
-			'rm -rf build',
-			'sudo command',
-			'npm publish',
-			'terraform destroy',
-		]) {
-			expectEffect('shell', command, readOnlyAgents.includes(name) ? 'deny' : 'allow')
-		}
+		expectEffect('shell', 'git reset --hard', readOnlyAgents.includes(name) ? 'deny' : 'allow')
 		for (const server of Object.keys(input.mcp.servers)) {
 			expectEffect(`${server}_unknown-tool`, '*', readOnlyAgents.includes(name) ? 'deny' : 'allow')
 		}

@@ -2,7 +2,7 @@
 description: Primary user-facing OpenCode agent that works alone without subagents.
 mode: primary
 model: openai/gpt-6-astra#xhigh
-color: "#F8BBD0"
+color: "#D1C4E9"
 permissions:
     - action: subagent
       resource: "*"

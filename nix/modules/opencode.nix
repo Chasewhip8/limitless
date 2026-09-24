@@ -45,7 +45,6 @@ let
       cfg.opencode.package;
 
   pluginOptions = {
-    agents = { inherit (cfg.agents) fastSubagents; };
     github = {
       inherit (cfg.github)
         enable
@@ -143,15 +142,6 @@ in
     };
 
     agents = {
-      fastSubagents = lib.mkOption {
-        type = lib.types.listOf lib.types.nonEmptyStr;
-        default = [
-          "oracle-solve"
-          "research"
-          "worker"
-        ];
-        description = "OpenAI subagents whose processing tier follows the root Limitless profile. An empty list disables tier overrides.";
-      };
       package = lib.mkOption {
         type = lib.types.package;
         default = self.packages.${system}."opencode-agents";
@@ -246,6 +236,7 @@ in
     ];
     home = {
       packages = [ opencodePackage ];
+      shellAliases.oc = "opencode";
       file = {
         "${opencodeDir}/opencode.json".text = builtins.toJSON opencodeConfig;
         "${opencodeDir}/AGENTS.md".text =

@@ -18,40 +18,26 @@ const BoundaryOutput = Schema.Struct({
 })
 
 describe('OpenCode 2 tool execution boundary', () => {
-	test('uses the Effect client decoded session without decoding it a second time', async () => {
+	test('roots every call at session.location.directory and provides invocation identity', async () => {
+		const calls: Array<string> = []
+		const execution = testToolExecution('/ignored', 'ses_test')
 		const session = Schema.decodeUnknownSync(Session.Info)({
 			id: 'ses_test',
 			projectID: 'project_test',
 			cost: 0,
-			tokens: {
-				input: 0,
-				output: 0,
-				reasoning: 0,
-				cache: { read: 0, write: 0 },
-			},
+			tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
 			time: { created: 0, updated: 0 },
 			title: 'Test session',
 			location: { directory: '/session/directory' },
 		})
-		const resolve = makeSessionDirectoryResolver({
-			get: () => Effect.succeed(session),
-		})
-
-		expect(typeof session.time.created).toBe('object')
-		expect(await Effect.runPromise(resolve(Session.ID.make('ses_test')))).toBe('/session/directory')
-	})
-
-	test('roots every call at session.location.directory and provides invocation identity', async () => {
-		const calls: Array<string> = []
-		const execution = testToolExecution('/ignored', 'ses_test')
-		const execute = makeToolExecutor(
-			(sessionID) =>
+		const resolveDirectory = makeSessionDirectoryResolver({
+			get: ({ sessionID }) =>
 				Effect.sync(() => {
 					calls.push(sessionID)
-					return '/session/directory'
+					return session
 				}),
-			LspConfig.of({ servers: [] }),
-		)
+		})
+		const execute = makeToolExecutor(resolveDirectory, LspConfig.of({ servers: [] }))
 		const definition = defineLimitlessTool({
 			name: 'boundary_test',
 			description: 'Boundary test',

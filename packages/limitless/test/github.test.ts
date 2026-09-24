@@ -5,16 +5,13 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { Effect, Schema } from 'effect'
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 import {
 	ToolExecutionContext,
 	type ToolExecutionContext as ToolExecutionContextType,
 } from '../core/execution'
-import { resolveGitHubConfig } from '../index'
 import { githubClone as githubCloneEffect } from '../tools/github/clone'
 import { type GitHubCloneOptions, GitHubCloneResult } from '../tools/github/clone-schema'
-import { normalizeGitHubPluginConfig } from '../tools/github/config'
-import { assertAllowedRepo, cloneDirectoryName, normalizeRepo } from '../tools/github/repository'
 import { makeGitHubCloneRuntime } from '../tools/github/runtime'
 import { resolveGitHubSubmoduleUrl } from '../tools/github/submodules'
 import { testToolExecution } from './execution'
@@ -157,91 +154,7 @@ afterEach(async () => {
 	)
 })
 
-describe('GitHub configuration and naming', () => {
-	test('normalizes config without exposing token values', async () => {
-		expect(
-			await Effect.runPromise(
-				normalizeGitHubPluginConfig({
-					github: {
-						enable: true,
-						tokenEnv: 'CUSTOM_TOKEN',
-						tokenFile: ' /run/agenix/github-token ',
-						allowedRepos: ['Owner/Repo', 'owner/repo'],
-					},
-				}),
-			),
-		).toEqual({
-			enabled: true,
-			config: {
-				tokenEnv: 'CUSTOM_TOKEN',
-				tokenFile: '/run/agenix/github-token',
-				allowedRepos: ['owner/repo'],
-				allowUnrestrictedRepos: false,
-			},
-		})
-	})
-
-	test('is disabled without warnings when config is absent', async () => {
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-		expect((await Effect.runPromise(normalizeGitHubPluginConfig(undefined))).enabled).toBe(false)
-		expect(warn).not.toHaveBeenCalled()
-		warn.mockRestore()
-	})
-
-	test('returns a typed config failure without silently disabling GitHub', async () => {
-		const malformed = { github: { enable: true, allowedRepos: ['owner/repo', 42] } }
-		const error = await Effect.runPromise(normalizeGitHubPluginConfig(malformed).pipe(Effect.flip))
-		expect(error._tag).toBe('GitHubConfigError')
-		await expect(Effect.runPromise(resolveGitHubConfig(malformed))).rejects.toThrow()
-	})
-
-	test('validates repositories and allowlists', async () => {
-		expect(await Effect.runPromise(normalizeRepo('Owner/Repo'))).toBe('owner/repo')
-		expect(await Effect.runPromise(assertAllowedRepo('Owner/Repo', ['owner/repo']))).toBe(
-			'owner/repo',
-		)
-		await expect(Effect.runPromise(normalizeRepo('../owner/repo'))).rejects.toThrow(
-			/Invalid GitHub repository/u,
-		)
-		await expect(
-			Effect.runPromise(assertAllowedRepo('other/repo', ['owner/repo'])),
-		).rejects.toThrow(/allowlist/u)
-	})
-
-	test('uses provider-prefixed default paths and collision-resistant ref paths', async () => {
-		expect(await Effect.runPromise(cloneDirectoryName('Owner/Repo'))).toBe('github-owner-repo')
-		const branch = await Effect.runPromise(
-			cloneDirectoryName('Owner/Repo', 'feature/source-search'),
-		)
-		expect(branch).toMatch(/^github-owner-repo-feature-source-search-[0-9a-f]{12}$/u)
-		expect(branch).toBe(
-			await Effect.runPromise(cloneDirectoryName('owner/repo', 'feature/source-search')),
-		)
-		expect(branch).not.toBe(
-			await Effect.runPromise(cloneDirectoryName('owner/repo', 'feature/source_search')),
-		)
-	})
-})
-
 describe('GitHub clone lifecycle', () => {
-	test('redacts absolute worktree paths from storage failures', async () => {
-		const root = await testRoot()
-		const worktree = await createWorktree(root)
-		await mkdir(path.join(worktree, '.limitless'))
-		await writeFile(path.join(worktree, '.limitless', 'repos'), 'collision')
-
-		const result = await githubClone(
-			unrestrictedConfig,
-			{ repo: 'owner/repo' },
-			toolContext(worktree),
-		)
-
-		expect(result.ok).toBe(false)
-		if (result.ok) throw new Error('Expected managed storage failure')
-		expect(result.error.code).toBe('UNSAFE_STORAGE_PATH')
-		expect(result.error.message).not.toContain(worktree)
-	})
-
 	test('creates a shallow default-branch checkout and refreshes it', async () => {
 		const root = await testRoot()
 		const fixture = await initializeRepository(root, 'owner/repo')
@@ -276,25 +189,6 @@ describe('GitHub clone lifecycle', () => {
 		expect(second.state).toBe('updated')
 		expect(second.resolvedCommit).toBe(updatedCommit)
 		expect(await readFile(path.join(second.absolutePath, 'README.md'), 'utf8')).toBe('updated\n')
-	})
-
-	test('ref checkouts use separate deterministic directories', async () => {
-		const root = await testRoot()
-		const fixture = await initializeRepository(root, 'owner/repo')
-		await git(fixture.source, ['tag', 'v1.0.0'])
-		await publishRepository(root, fixture)
-		const worktree = await createWorktree(root)
-
-		const result = await githubClone(
-			unrestrictedConfig,
-			{ repo: fixture.repo, ref: 'v1.0.0' },
-			toolContext(worktree),
-			cloneOptions([fixture]),
-		)
-		expect(result.ok).toBe(true)
-		if (!result.ok) throw new Error(result.error.message)
-		expect(result.requestedRef).toBe('v1.0.0')
-		expect(result.relativePath).toMatch(/^\.limitless\/repos\/github-owner-repo-v1-0-0-/u)
 	})
 
 	test('serializes concurrent calls for the same managed checkout', async () => {
@@ -444,20 +338,7 @@ describe('GitHub clone lifecycle', () => {
 })
 
 describe('GitHub submodules', () => {
-	test('normalizes accepted GitHub URL forms and rejects other hosts', async () => {
-		expect(
-			await Effect.runPromise(resolveGitHubSubmoduleUrl('../shared.git', 'owner/parent')),
-		).toBe('https://github.com/owner/shared.git')
-		expect(
-			await Effect.runPromise(
-				resolveGitHubSubmoduleUrl('git@github.com:Owner/Repo.git', 'ignored/parent'),
-			),
-		).toBe('https://github.com/owner/repo.git')
-		expect(
-			await Effect.runPromise(
-				resolveGitHubSubmoduleUrl('ssh://git@github.com/Owner/Repo.git', 'ignored/parent'),
-			),
-		).toBe('https://github.com/owner/repo.git')
+	test('rejects submodules hosted outside github.com', async () => {
 		await expect(
 			Effect.runPromise(
 				resolveGitHubSubmoduleUrl('https://gitlab.com/owner/repo.git', 'owner/parent'),

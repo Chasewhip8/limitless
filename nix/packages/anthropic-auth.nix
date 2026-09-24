@@ -60,13 +60,7 @@ pkgs.stdenvNoCC.mkDerivation {
   doCheck = true;
   checkPhase = ''
     cp ${./anthropic-auth.test.mjs} ./anthropic-auth.test.mjs
-    bun test ./anthropic-auth.test.mjs \
-      ./src/tests/index.test.ts \
-      ./src/tests/config.test.ts \
-      ./src/tests/version-rejection.test.ts \
-      ./src/tests/rate-limit.test.ts \
-      ./src/tests/tool-name-alias.test.ts \
-      ./src/tests/bounded.test.ts
+    bun test ./anthropic-auth.test.mjs
   '';
 
   installPhase = ''

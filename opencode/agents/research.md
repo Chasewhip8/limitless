@@ -1,7 +1,7 @@
 ---
 description: Research subagent for answering questions using repo code, local docs, external docs, APIs, standards, dependencies, migrations, and source evidence.
 mode: subagent
-model: openai/gpt-5.6-sol#medium
+model: anthropic/claude-opus-5-5#high
 permissions:
     - action: shell
       resource: "*"

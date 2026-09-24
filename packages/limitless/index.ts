@@ -4,12 +4,6 @@ import { Tool } from '@opencode/schema/tool'
 import { Effect } from 'effect'
 import { applyProviderPolicy, normalizeProviderPolicyConfig } from './plugin/provider-policy'
 import {
-	makeSubagentProfileHook,
-	normalizeSubagentProfileConfig,
-	registerSubagentProfileHooks,
-	SubagentProfileError,
-} from './plugin/subagent-profiles'
-import {
 	makeToolExecutor,
 	type SessionDirectoryResolver,
 	type ToolExecutor,
@@ -31,13 +25,11 @@ export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* 
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
 	const lspConfig = yield* decodeLspConfig(options)
 	const providerPolicy = yield* normalizeProviderPolicyConfig(options)
-	const subagentProfiles = yield* normalizeSubagentProfileConfig(options)
 	return {
 		githubConfig,
 		githubCloneRuntime,
 		lspConfig,
 		providerPolicy,
-		subagentProfiles,
 	}
 })
 
@@ -110,16 +102,5 @@ export default Plugin.define({
 		yield* ctx.provider.transform((providers) => {
 			applyProviderPolicy(providers, configs.providerPolicy)
 		})
-		const applySubagentProfile = makeSubagentProfileHook(configs.subagentProfiles, (sessionID) =>
-			ctx.session.get({ sessionID }).pipe(
-				Effect.mapError(
-					() =>
-						new SubagentProfileError({
-							message: `Unable to resolve session ${sessionID} for its subagent profile.`,
-						}),
-				),
-			),
-		)
-		yield* registerSubagentProfileHooks(ctx.session, applySubagentProfile)
 	}),
 })
