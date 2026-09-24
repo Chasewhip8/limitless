@@ -24,6 +24,7 @@
 		"src/**/*",
 		"packages/*/src/**/*",
 		"packages/*/index.ts",
+		"packages/*/tui.ts",
 		"packages/limitless/core/**/*.ts",
 		"packages/limitless/lib/**/*.ts",
 		"packages/limitless/plugin/**/*.ts",

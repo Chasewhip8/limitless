@@ -1,13 +1,13 @@
 { pkgs }:
 let
-  rev = "c6921e486e9d180b1c2ace318211f7156a5f09b0";
-  packageVersion = "2.0.0-next.1-${builtins.substring 0 7 rev}";
+  rev = "e03f023c8ea1771a829cee51024b8675ffede24c";
+  packageVersion = "2.0.0-next.3-${builtins.substring 0 7 rev}";
   upstreamPluginSdkVersion = "2.0.4";
   src = pkgs.fetchFromGitHub {
     owner = "ex-machina-co";
     repo = "opencode-anthropic-auth";
     inherit rev;
-    hash = "sha256-Ym7kbbET2yhGFKM8Ohp1jfTSrXkJBl7CK+Dlzml4Oto=";
+    hash = "sha256-a6sLO9aN3t1DnmOT9VwFbYkLoTQXyhdiIbyVPcrBrVk=";
   };
 
   bunDeps = pkgs.stdenvNoCC.mkDerivation {
@@ -29,7 +29,7 @@ let
       cp -r node_modules $out/node_modules
     '';
 
-    outputHash = "sha256-f7/r26LtMwT0K+68q4shpJMLpxS12D+G5eb7icFOcMU=";
+    outputHash = "sha256-Rs7ghwiW+HyVVfdR+/zboJURLC75UzOZa7N9pjxfM0A=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -60,7 +60,13 @@ pkgs.stdenvNoCC.mkDerivation {
   doCheck = true;
   checkPhase = ''
     cp ${./anthropic-auth.test.mjs} ./anthropic-auth.test.mjs
-    bun test ./anthropic-auth.test.mjs ./src/tests/index.test.ts
+    bun test ./anthropic-auth.test.mjs \
+      ./src/tests/index.test.ts \
+      ./src/tests/config.test.ts \
+      ./src/tests/version-rejection.test.ts \
+      ./src/tests/rate-limit.test.ts \
+      ./src/tests/tool-name-alias.test.ts \
+      ./src/tests/bounded.test.ts
   '';
 
   installPhase = ''

@@ -4,8 +4,8 @@
 
 Limitless pins OpenCode `2.0.12`, supplies coding agents and local code-intelligence
 tools, and configures optional first-party MCP connections. OpenCode owns its
-service discovery, OAuth credentials, Code Mode, browser integration, and TUI
-notifications. Home Manager owns packages and non-secret configuration, with
+service discovery, OAuth credentials, Code Mode, browser integration, and native
+notification delivery. Home Manager owns packages and non-secret configuration, with
 optional Linux service supervision.
 
 ## Use it
@@ -228,7 +228,7 @@ full 1.05M context window. `providers.disabled` defaults to
 
 Run `/connect`, select Anthropic, and choose **Claude Pro/Max**. The plugin is pinned
 to [`ex-machina-co/opencode-anthropic-auth`](https://github.com/ex-machina-co/opencode-anthropic-auth)
-commit `c6921e486e9d180b1c2ace318211f7156a5f09b0`. API-key authentication retains
+release `v2.0.0-next.3`, commit `e03f023c8ea1771a829cee51024b8675ffede24c`. API-key authentication retains
 standard Anthropic request behavior.
 
 > [!WARNING]
@@ -239,10 +239,27 @@ standard Anthropic request behavior.
 Connecting Max replaces the saved Anthropic API-key credential and vice versa.
 Credentials from the earlier experimental Limitless plugin require signing in
 again. OpenCode continues to display API prices for subscription models.
-The upstream plugin targets SDK `2.0.4` and identifies as Claude Code `2.1.258`;
-`ANTHROPIC_CLAUDE_CODE_VERSION` can update that compatibility identifier. Refresh
-rotation is deduplicated within a process. `ANTHROPIC_BASE_URL` can override the
-endpoint; `ANTHROPIC_INSECURE` cannot disable TLS verification.
+The upstream plugin targets SDK `2.0.4` and reports Claude Code compatibility
+version `2.1.280`. When Anthropic returns a structured newer-version requirement,
+it adopts that exact minimum and permits one retry for the affected session,
+agent, and model. Ordinary errors and rate limits do not trigger this recovery.
+
+An optional override is available when an explicit version is required:
+
+```nix
+programs.limitless.plugins.anthropicAuth.claudeCodeVersion = "2.1.280";
+```
+
+The option defaults to `null`, preserving the bundled version and automatic
+recovery. Setting a version supplies `ANTHROPIC_CLAUDE_CODE_VERSION` to both managed
+and on-demand OpenCode servers and disables automatic version adoption. An
+explicit environment value takes precedence. The plugin reads it at startup and
+uses it for both the user-agent and billing metadata; apply Home Manager and restart
+the OpenCode server after changing it. This setting controls the plugin's reported
+compatibility version, independently of any installed Claude Code executable.
+
+Refresh rotation is deduplicated within a process. `ANTHROPIC_BASE_URL` can override
+the endpoint; `ANTHROPIC_INSECURE` cannot disable TLS verification.
 
 ## Guarded source research
 
@@ -345,10 +362,18 @@ On other systemd distributions, an administrator can enable lingering with
 
 ## Notifications and browser
 
-Limitless enables native attention sounds by default for session completion,
-permission requests, and questions. OpenCode also plays sounds for errors and
-subagent completion. Configure sound, volume, and visual notifications through
-the native CLI settings:
+Limitless enables sound by default and supplies a TUI handler that dings for:
+
+- A newly completed final assistant response in a top-level session.
+- A permission request.
+- A question or other input prompt.
+
+Completion requires successful execution, a normally finished answer, and an empty
+inbox. Child completion, errors, interruptions, and compaction-only runs are silent.
+A later background result can resume the main session and produce another response.
+The handler uses OpenCode's native sound playback and preserves visual notifications
+and error toasts. Configure sound, volume, and visual notifications through the
+native CLI settings:
 
 ```nix
 programs.limitless.opencode.cliSettings.attention = {
@@ -362,6 +387,10 @@ Set `opencode.cliSettings.attention.sound = false` to disable the ding. Sound an
 visual notifications are independent; visual notifications normally appear when
 the terminal is unfocused. Preferences omitted from `cliSettings` can be changed
 through the TUI and stored in `~/.config/opencode/cli.json`.
+
+The package's `./tui` entry replaces the pinned built-in `opencode.notifications`
+handler by ID. Existing `-opencode.notifications` directives also disable this
+handler. OpenCode loads the TUI entry automatically from the Limitless plugin.
 
 Native browser tools require the session to be open in the desktop app with the
 experimental browser setting enabled. A TUI-only session has no attached browser.
@@ -409,3 +438,8 @@ Runtime, Limitless plugin SDK, and schema are pinned to `2.0.12`, with
 `effect@4.0.0-rc.112`; update them together. Re-audit native capabilities and MCP
 read exceptions when upgrading. Vendor references for the current allowlists are
 linked in the integration table above.
+
+When upgrading OpenCode, verify that the TUI still replaces a built-in handler with
+a later external definition of the same ID, that the built-in notifications ID is
+still `opencode.notifications`, and that execution events still project matching
+idle-message boundaries. The sound filter depends on these pinned behaviors.

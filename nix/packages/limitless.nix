@@ -63,6 +63,11 @@ pkgs.stdenvNoCC.mkDerivation {
       --format=esm \
       --packages=bundle \
       --outfile=dist/limitless.js
+    bun build packages/limitless/tui.ts \
+      --target=node \
+      --format=esm \
+      --packages=bundle \
+      --outfile=dist/tui.js
   '';
 
   installPhase = ''
@@ -71,12 +76,16 @@ pkgs.stdenvNoCC.mkDerivation {
       --replace-fail "@AST_GREP_BIN@" "${pkgs.ast-grep}/bin/ast-grep" \
       --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git"
     cp "$out/limitless.js" "$out/index.js"
+    cp "dist/tui.js" "$out/tui.js"
     cat > "$out/package.json" <<'EOF'
     {
       "name": "limitless",
       "version": "1.0.0",
       "type": "module",
-      "exports": "./limitless.js"
+      "exports": {
+        ".": "./limitless.js",
+        "./tui": "./tui.js"
+      }
     }
     EOF
   '';

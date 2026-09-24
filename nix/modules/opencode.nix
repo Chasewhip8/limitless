@@ -22,7 +22,15 @@ let
       "--set-default"
       "OPENCODE_CLI_CONFIG_CONTENT"
       (builtins.toJSON cfg.opencode.cliSettings)
-    ];
+    ]
+    ++
+      lib.optionals
+        (cfg.plugins.anthropicAuth.enable && cfg.plugins.anthropicAuth.claudeCodeVersion != null)
+        [
+          "--set-default"
+          "ANTHROPIC_CLAUDE_CODE_VERSION"
+          cfg.plugins.anthropicAuth.claudeCodeVersion
+        ];
   opencodePackage =
     if wrapperArgs != [ ] then
       pkgs.symlinkJoin {
@@ -157,6 +165,16 @@ in
           type = lib.types.bool;
           default = true;
           description = "Enable the pinned Claude Pro/Max OAuth plugin. Anthropic does not officially support this use.";
+        };
+        claudeCodeVersion = lib.mkOption {
+          type = lib.types.nullOr (
+            lib.types.addCheck (lib.types.strMatching "(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)") (
+              version: builtins.stringLength version <= 64
+            )
+          );
+          default = null;
+          example = "2.1.280";
+          description = "Optional Claude Code compatibility version override for the OAuth plugin. Null uses the bundled version and permits automatic recovery from a newer Anthropic version requirement. A version sets ANTHROPIC_CLAUDE_CODE_VERSION and disables that recovery; an explicit environment value takes precedence. Restart the server after changing it.";
         };
         package = lib.mkOption {
           type = lib.types.package;

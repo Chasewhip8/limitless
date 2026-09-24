@@ -189,7 +189,8 @@ let
     exec ${lib.getExe pkgs.jq} --null-input \
       --argjson settings "''${OPENCODE_CLI_CONFIG_CONTENT:-null}" \
       --arg disableClaudeCode "''${OPENCODE_DISABLE_CLAUDE_CODE:-}" \
-      --args '{settings: $settings, disableClaudeCode: $disableClaudeCode, arguments: $ARGS.positional}' -- "$@"
+      --arg claudeCodeVersion "''${ANTHROPIC_CLAUDE_CODE_VERSION:-}" \
+      --args '{settings: $settings, disableClaudeCode: $disableClaudeCode, claudeCodeVersion: $claudeCodeVersion, arguments: $ARGS.positional}' -- "$@"
   '';
   cliDefaults = evaluate { opencode.package = cliProbePackage; };
   cliAdditional = evaluate {
@@ -197,6 +198,7 @@ let
     opencode.cliSettings.session.thinking = "show";
   };
   cliCustom = evaluate {
+    plugins.anthropicAuth.claudeCodeVersion = "2.1.281";
     opencode = {
       package = cliProbePackage;
       disableClaudeCode = true;
@@ -209,6 +211,11 @@ let
         theme.name = "tokyonight";
       };
     };
+  };
+  cliAuthDisabled = evaluate {
+    opencode.package = cliProbePackage;
+    plugins.anthropicAuth.enable = false;
+    plugins.anthropicAuth.claudeCodeVersion = "2.1.281";
   };
   cliUnwrapped = evaluateWith { opencode.package = cliProbePackage; } [
     { programs.limitless.opencode.cliSettings = lib.mkForce { }; }
@@ -424,28 +431,37 @@ in
         github.enable = true;
       })
     ) "unrestricted GitHub clones were enabled implicitly";
-    pkgs.runCommand "limitless-home-module-check" { nativeBuildInputs = [ pkgs.bun ]; } ''
-      mkdir -p "$out"
-      cp ${
-        pkgs.writeText "default-opencode.json"
-          defaults.config.home.file.".config/opencode/opencode.json".text
-      } "$out/default.json"
-      cp ${
-        pkgs.writeText "connected-opencode.json"
-          connected.config.home.file.".config/opencode/opencode.json".text
-      } "$out/connected.json"
-      cp ${
-        pkgs.writeText "custom-opencode.json" custom.config.home.file.".config/opencode/opencode.json".text
-      } "$out/custom.json"
-      ln -s ${
-        self.packages.${pkgs.stdenv.hostPlatform.system}.limitless.dependencies
-      }/packages/limitless/node_modules node_modules
-      cp ${./validate-config.mjs} validate-config.mjs
-      bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/custom.json"
-      ${lib.concatMapStringsSep "\n" (
-        server: "test -x ${lib.escapeShellArg (builtins.head server.command)}"
-      ) (builtins.attrValues (plugin defaults).options.lsp)}
-    '';
+    pkgs.runCommand "limitless-home-module-check"
+      {
+        nativeBuildInputs = [
+          pkgs.bun
+          pkgs.nodejs
+        ];
+      }
+      ''
+        mkdir -p "$out"
+        cp ${
+          pkgs.writeText "default-opencode.json"
+            defaults.config.home.file.".config/opencode/opencode.json".text
+        } "$out/default.json"
+        cp ${
+          pkgs.writeText "connected-opencode.json"
+            connected.config.home.file.".config/opencode/opencode.json".text
+        } "$out/connected.json"
+        cp ${
+          pkgs.writeText "custom-opencode.json" custom.config.home.file.".config/opencode/opencode.json".text
+        } "$out/custom.json"
+        ln -s ${
+          self.packages.${pkgs.stdenv.hostPlatform.system}.limitless.dependencies
+        }/packages/limitless/node_modules node_modules
+        cp ${./validate-config.mjs} validate-config.mjs
+        bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/custom.json"
+        cp ${./validate-plugin.mjs} validate-plugin.mjs
+        node validate-plugin.mjs ${defaults.config.programs.limitless.plugins.limitless.package}
+        ${lib.concatMapStringsSep "\n" (
+          server: "test -x ${lib.escapeShellArg (builtins.head server.command)}"
+        ) (builtins.attrValues (plugin defaults).options.lsp)}
+      '';
 
   cli-settings =
     assert lib.assertMsg (
@@ -460,16 +476,35 @@ in
     ]) "CLI settings must preserve the editable native cli.json file";
     assert lib.assertMsg (
       cliUnwrapped.config.programs.limitless._generated.opencodePackage == cliProbePackage
-    ) "an empty CLI configuration creates an unnecessary wrapper";
+    ) "disabled launcher settings create an unnecessary wrapper";
+    assert lib.assertMsg (lib.all
+      (
+        version:
+        !(builtins.tryEval
+          (evaluate { plugins.anthropicAuth.claudeCodeVersion = version; })
+          .config.programs.limitless.plugins.anthropicAuth.claudeCodeVersion
+        ).success
+      )
+      [
+        ""
+        "latest"
+        "2.1"
+        "v2.1.280"
+        "02.1.280"
+        "2.1.280-beta"
+        ("2.1." + lib.concatStrings (lib.replicate 65 "1"))
+      ]
+    ) "invalid Claude Code compatibility versions passed validation";
     pkgs.runCommand "limitless-cli-settings-check" { nativeBuildInputs = [ pkgs.jq ]; } ''
       mkdir -p "$out"
-      unset OPENCODE_CLI_CONFIG_CONTENT OPENCODE_DISABLE_CLAUDE_CODE
+      unset OPENCODE_CLI_CONFIG_CONTENT OPENCODE_DISABLE_CLAUDE_CODE ANTHROPIC_CLAUDE_CODE_VERSION
 
       ${cliDefaults.config.programs.limitless._generated.opencodePackage}/bin/opencode \
         "path with spaces" --version > "$out/default.json"
       jq -e '
         .settings == {attention: {sound: true}}
         and .disableClaudeCode == ""
+        and .claudeCodeVersion == ""
         and .arguments == ["path with spaces", "--version"]
       ' "$out/default.json"
 
@@ -481,17 +516,22 @@ in
       OPENCODE_DISABLE_CLAUDE_CODE=0 \
         ${cliCustom.config.programs.limitless._generated.opencodePackage}/bin/opencode > "$out/custom.json"
       jq -e --argjson expected ${lib.escapeShellArg (builtins.toJSON cliCustom.config.programs.limitless.opencode.cliSettings)} '
-        .settings == $expected and .disableClaudeCode == "1"
+        .settings == $expected and .disableClaudeCode == "1" and .claudeCodeVersion == "2.1.281"
       ' "$out/custom.json"
 
       OPENCODE_CLI_CONFIG_CONTENT='{"attention":{"sound":false},"theme":{"name":"override"}}' \
+        ANTHROPIC_CLAUDE_CODE_VERSION=2.1.282 \
         ${cliDefaults.config.programs.limitless._generated.opencodePackage}/bin/opencode > "$out/environment.json"
       jq -e '
         .settings == {attention: {sound: false}, theme: {name: "override"}}
+        and .claudeCodeVersion == "2.1.282"
       ' "$out/environment.json"
 
+      ${cliAuthDisabled.config.programs.limitless._generated.opencodePackage}/bin/opencode > "$out/auth-disabled.json"
+      jq -e '.settings.attention.sound == true and .claudeCodeVersion == ""' "$out/auth-disabled.json"
+
       ${cliUnwrapped.config.programs.limitless._generated.opencodePackage}/bin/opencode > "$out/unwrapped.json"
-      jq -e '.settings == null and .disableClaudeCode == ""' "$out/unwrapped.json"
+      jq -e '.settings == null and .disableClaudeCode == "" and .claudeCodeVersion == ""' "$out/unwrapped.json"
     '';
 
   service =

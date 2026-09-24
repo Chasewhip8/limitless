@@ -5,6 +5,10 @@
 	"type": "module",
 	"main": "./index.ts",
 	"types": "./index.ts",
+	"exports": {
+		".": "./index.ts",
+		"./tui": "./tui.ts"
+	},
 	"dependencies": {
 		"@opencode/plugin": "2.0.12",
 		"@opencode/schema": "2.0.12",
