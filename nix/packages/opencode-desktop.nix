@@ -1,15 +1,15 @@
 { pkgs, opencode }:
 let
   inherit (pkgs) lib;
-  version = "2.0.12";
+  version = "2.0.19";
   sources = {
     x86_64-linux = {
       platform = "x86_64";
-      hash = "sha256-RA+wAPrnVgaZMdoK6wkDsh4SHCufO14zuwerOP6p8dk=";
+      hash = "sha256-vMlP6EcdM4b5FL2n0w14/pqX8OY1sRj+KMozgN0EQ08=";
     };
     aarch64-linux = {
       platform = "arm64";
-      hash = "sha256-j1NoMFgk3ROQcOnX7/hw4dyt6z4vGrcDqJA0A/ub5sg=";
+      hash = "sha256-WbsvgSVYVtYND+HjTFUtqcEsoig2o+BSUyvsS2YogFk=";
     };
   };
   source =
@@ -98,7 +98,7 @@ pkgs.stdenv.mkDerivation {
     desktopMain=$(echo "$app"/resources/app/out/main/desktop-*.js)
     substituteInPlace "$desktopMain" \
       --replace-fail \
-        'a=z.isPackaged||e?yield*l_(r,i):r;return{version:i,binary:a,command:[a]}' \
+        'a=z.isPackaged||e?yield*m_(r,i):r;return{version:i,binary:a,command:[a]}' \
         'a=r;return{version:i,binary:a,command:[a]}'
 
     # Run the given OpenCode runtime so desktop-started services match the CLI's.

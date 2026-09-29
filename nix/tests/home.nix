@@ -130,9 +130,14 @@ let
   };
   connectedConfig = rendered connected;
   primaryEffect = action: effectFor connectedConfig.permissions action "*";
-  researchEffect =
-    action:
-    effectFor (connectedConfig.permissions ++ connectedConfig.agents.research.permissions) action "*";
+  supportAgents = [
+    "research"
+    "oracle-solve"
+    "oracle-design"
+  ];
+  supportEffect =
+    name: action:
+    effectFor (connectedConfig.permissions ++ connectedConfig.agents.${name}.permissions) action "*";
   withServers = servers: evaluate { mcp.servers = servers; };
 
   supervised = evaluate {
@@ -174,7 +179,11 @@ in
       && disabled.config.systemd.user.services == { }
     ) "a disabled module changed the home configuration";
     assert lib.assertMsg (lib.all
-      (action: primaryEffect action == "allow" && researchEffect action == "allow")
+      (
+        action:
+        primaryEffect action == "allow"
+        && lib.all (name: supportEffect name action == "allow") supportAgents
+      )
       [
         "notion-work_notion-fetch"
         "atlassian_getJiraIssue"
@@ -182,9 +191,12 @@ in
         "gh_pull_request_read"
         "github_clone"
       ]
-    ) "audited MCP reads and local research tools must stay available to research";
+    ) "audited MCP reads and local investigation tools must stay available to support agents";
     assert lib.assertMsg (lib.all
-      (action: primaryEffect action == "allow" && researchEffect action == "deny")
+      (
+        action:
+        primaryEffect action == "allow" && lib.all (name: supportEffect name action == "deny") supportAgents
+      )
       [
         "notion-work_notion-create-pages"
         "notion-work_new-tool"
@@ -194,7 +206,7 @@ in
         "linear_unknown-tool"
         "custom_write"
       ]
-    ) "MCP mutations and unaudited tools must run for execution agents and be denied to research";
+    ) "MCP mutations and unaudited tools must run for primary agents and be denied to support agents";
     assert lib.assertMsg (lib.all
       (
         name:

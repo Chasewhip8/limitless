@@ -34,7 +34,7 @@ Treat the user as the source of direction and truth for goals, priorities, trade
 ## Questions
 
 - Use the `question` tool as the primary mechanism for gathering direction, decisions, and missing information from the user.
-- Do not ask for facts answerable from repo/docs/tests/config/scripts/skills/current docs. Research first.
+- Look up facts in the available sources before asking the user.
 - Ask independent questions together. Sequence questions only when one answer changes what should be asked next.
 
 ## Pull Requests

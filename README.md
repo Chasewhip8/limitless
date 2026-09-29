@@ -2,7 +2,7 @@
 
 > A Home Manager module for a ready-to-use OpenCode 2 workspace.
 
-Limitless pins OpenCode `2.0.12`, supplies coding agents and local code-intelligence
+Limitless pins OpenCode `2.0.19`, supplies coding agents and local code-intelligence
 tools, and configures optional first-party MCP connections. OpenCode owns its
 service discovery, OAuth credentials, Code Mode, browser integration, and native
 notification delivery. Home Manager owns packages and non-secret configuration, with
@@ -34,8 +34,8 @@ fail in TUI-only sessions.
 
 ## Included capabilities
 
-- **Agents:** `limitless` and `solo`, with research, technical
-  and design Oracle advisers, and a worker for mechanical transformations.
+- **Agents:** `limitless` and `solo`, a research subagent, and technical and design
+  Oracle advisers.
 - **Code intelligence:** ast-grep search and replacement, TypeScript/Biome
   diagnostics, and seven LSP tools for definitions, hover, implementations,
   call hierarchy, references, symbols, and rename previews.
@@ -43,7 +43,7 @@ fail in TUI-only sessions.
 - **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
 - **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
 - **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
-  MCP presets with account-specific connection names and read-only research access.
+  MCP presets with account-specific connection names and audited reads for support agents.
 - **Anthropic subscription authentication:** a pinned Claude Pro/Max plugin.
 - **Git hygiene:** `.limitless/` is globally ignored by default.
 - **Desktop app:** optional OpenCode Desktop on Linux, sharing the Limitless runtime.
@@ -84,7 +84,7 @@ programs.limitless.mcp.servers.sentry = {
 Set `settings.disabled = true` to retain a configured connection without connecting
 it. Additional servers can use `programs.limitless.opencode.settings.mcp.servers`.
 Use one configuration path per server name. Native-only servers receive the same
-role-based permissions, with no automatic read exceptions for research.
+role-based permissions, with no automatic read exceptions for support agents.
 
 ### GitHub authentication
 
@@ -129,40 +129,42 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless`, `solo`, `worker`, `oracle-solve`, `oracle-design` | Automatic approval for reads, writes, shell commands, and all MCP tools |
-| `research` | Local read tools and audited MCP reads; deny shell, edits, AST replacement, artifact creation, and session changes |
+| `limitless`, `solo` | Automatic approval for reads, writes, shell commands, and all MCP tools |
+| `research`, `oracle-solve`, `oracle-design` | Read, shell, edit, and AST tools for investigations and focused diagnostic changes; audited MCP reads; deny artifact creation and session changes |
 
-For each configured MCP server, research receives a `deny` rule followed by
+For each configured MCP server, support agents receive a `deny` rule followed by
 exact exceptions for audited read tools. Unknown tools, mutations, and mixed-purpose
-executors are unavailable to research. Read tools such as web fetch and artifact
+executors are unavailable to support agents. Read tools such as web fetch and artifact
 listing inherit the global allow rule.
 
 Sensitive-file reads and potentially destructive shell commands no longer have
 default approval prompts. Shared instructions still require explicit user direction
 for destructive work. Managed-checkout edits and native browser tools remain denied.
 
-`readTools` replaces a preset's exact read-tool list for research.
+`readTools` replaces a preset's exact read-tool list for support agents.
 Add names only after checking their behavior and the authenticated catalog.
 Wildcards are rejected. The optional `https://mcp.linear.app/mcp/readonly` endpoint
 can further restrict a Linear connection at the server. Linear's read-tool list
 is empty until verified names from an authenticated catalog are configured.
 
-These rules control named-tool access. Code Mode's raw HTTP `fetch` can still send
-write requests, so research's read-only profile does not provide a sandbox. Later project
-configuration or agent definitions can override global permissions. Project-local
-MCP additions need their own permission rules. A configured server must be trusted
-to implement its advertised read operations correctly.
+These rules control named-tool access. Shell commands can write files or call
+services, and Code Mode's raw HTTP `fetch` can send write requests. Support-agent
+instructions reserve implementation and external mutations for the primary agent;
+the tool permissions do not provide a sandbox. Later project configuration or agent
+definitions can override global permissions. Project-local MCP additions need their
+own permission rules. A configured server must be trusted to implement its advertised
+read operations correctly.
 
 | Preset | Daily workflows | Coverage limits |
 | --- | --- | --- |
 | [Atlassian](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/supported-tools/) | Jira and Confluence search, reads, edits, comments, transitions | Organization policies and enabled tool groups determine access. Uses the v2 flat catalog. |
 | [Notion](https://developers.notion.com/guides/mcp/mcp-supported-tools) | Pages, databases, comments, queries, uploads | Workers deployment and generic API administration are outside this preset. Tools can depend on plan. |
-| [Sentry](https://docs.sentry.io/product/sentry-mcp/) | Issues, events, traces, debugging | Release/symbol uploads and broad administration require dedicated tooling. Mixed-purpose catalog execution is unavailable to research. |
+| [Sentry](https://docs.sentry.io/product/sentry-mcp/) | Issues, events, traces, debugging | Release/symbol uploads and broad administration require dedicated tooling. Mixed-purpose catalog execution is unavailable to support agents. |
 | [Linear](https://linear.app/docs/mcp) | Issues, projects, comments | Exact read exceptions require authenticated discovery. |
 | [GitHub](https://github.com/github/github-mcp-server) | Repositories, issues, PRs, reviews, Actions | Local Git and release uploads require separate tooling and authentication. |
 
 Before relying on a new connection, verify account identity, a representative read,
-an explicitly requested write, mutation denial in research, and token
+an explicitly requested write, mutation denial in support agents, and token
 refresh. The repository checks generated configuration and policy behavior;
 account entitlements and live upstream tool catalogs require this authenticated
 verification.
@@ -209,13 +211,39 @@ when present and is otherwise empty. OpenCode's built-in skills remain available
 remains independently selectable. `solo` denies delegation. OpenCode remembers a
 model per primary agent.
 
-Research and worker use `anthropic/claude-opus-5-5#high`; the technical Oracle uses
-Astra; the design Oracle uses Fable. Planning stays in the primary context, research
-gathers evidence, Oracle agents advise, and worker performs specified mechanical
-transformations. Subagents keep the processing tier of their configured model.
+Research uses `openai/gpt-6.1-sol#max`; Oracle Solve uses
+`openai/gpt-6-astra#max`; Oracle Design uses `anthropic/claude-opus-5-5#xhigh`.
+Subagents keep the processing tier of their configured model.
 
-The model defaults retain short/long-context Luna and Terra aliases and Astra's
-full 1.05M context window. `providers.disabled` defaults to
+Limitless owns implementation, integration, and final validation.
+Research owns focused investigations: explaining behavior, diagnosing complex bugs,
+testing hypotheses, and proposing complete solutions. Oracle Solve provides independent
+technical judgment when evidence conflicts, an investigation stalls, correctness is
+uncertain, or the consequences warrant deeper scrutiny. Oracle Design advises on
+consequential architecture, interfaces, ownership, and maintainability. Research can
+resolve a question without an Oracle consultation; either Oracle can be consulted
+directly when its judgment is needed.
+
+All support agents can run tests and make focused diagnostic edits directly in the
+shared workspace, including reproduction tests, fixtures, and temporary instrumentation.
+They report changed files, their purpose, commands, results, and material interference.
+Limitless reviews the diagnostic changes and decides what to retain or remove;
+automatic cleanup is not required. Limitless waits when work could conflict or an
+investigation gates the next change, and otherwise works on independent tasks.
+All agents account for shared files, services, and test resources and preserve
+concurrent work. Diagnostic scope and implementation ownership are instruction-level
+policies; edit permissions cannot distinguish those purposes.
+
+Astra, Sol 6.1, and their Fast modes use conservative client budgets of 872,000
+context tokens and 828,400 input tokens, overriding OpenCode's 400K subscription
+default. These derive from the
+[Codex catalog's override ceiling](https://github.com/openai/codex/blob/5937592c07e7321f6b0469ef34dd58a03c39a84c/codex-rs/models-manager/models.json)
+with 5% input headroom. These budgets have not been verified against the subscription
+backend. With OpenCode's default 10% compaction buffer, automatic compaction starts
+at approximately 745,560 input tokens. Reasoning variants, Fast mode, and output
+limits come from the upstream catalog.
+
+`providers.disabled` defaults to
 `[ "google-vertex" "google-vertex-anthropic" ]` to avoid ambient Vertex selection.
 
 ## Anthropic subscription authentication
@@ -362,7 +390,7 @@ On Linux, install OpenCode Desktop alongside the CLI:
 programs.limitless.desktop.enable = true;
 ```
 
-The desktop package is pinned to the same `2.0.12` release as the CLI. It connects
+The desktop package is pinned to the same `2.0.19` release as the CLI. It connects
 to the running native service, including the supervised unit, and otherwise starts
 one with the Limitless-configured `opencode` executable in place of its bundled CLI.
 Desktop sessions therefore use the same configuration, plugins, agents, and launcher
@@ -450,7 +478,7 @@ role permission outcomes, MCP namespace collisions, launcher environment handlin
 and native service supervision. It leaves configuration values and upstream
 packages to their owners.
 
-Runtime, desktop app, Limitless plugin SDK, and schema are pinned to `2.0.12`, with
+Runtime, desktop app, Limitless plugin SDK, and schema are pinned to `2.0.19`, with
 `effect@4.0.0-rc.112`; update them together. Re-audit native capabilities and MCP
 read exceptions when upgrading. Vendor references for the current allowlists are
 linked in the integration table above.

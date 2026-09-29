@@ -37,9 +37,11 @@ function effectFor(rules, action, resource) {
 	return effect
 }
 
-const executionAgents = ['limitless', 'solo', 'worker', 'oracle-solve', 'oracle-design']
-const readOnlyAgents = ['research']
+const primaryAgents = ['limitless', 'solo']
+const supportAgents = ['research', 'oracle-solve', 'oracle-design']
 const sharedActions = [
+	'shell',
+	'edit',
 	'read',
 	'glob',
 	'grep',
@@ -50,6 +52,7 @@ const sharedActions = [
 	'external_directory',
 	'artifact_list',
 	'ast_grep_search',
+	'ast_grep_replace',
 	'github_clone',
 	'lsp_diagnostics',
 	'lsp_definition',
@@ -61,19 +64,12 @@ const sharedActions = [
 	'lsp_rename',
 	'opencode_models',
 ]
-const writeActions = [
-	'shell',
-	'edit',
-	'artifact_create',
-	'ast_grep_replace',
-	'opencode_session_move',
-	'opencode_session_rename',
-]
+const primaryOnlyActions = ['artifact_create', 'opencode_session_move', 'opencode_session_rename']
 
 for (const file of files) {
 	const input = JSON.parse(await readFile(file, 'utf8'))
 	Schema.decodeUnknownSync(Config.Info)(input, { onExcessProperty: 'error' })
-	for (const name of [...executionAgents, ...readOnlyAgents]) {
+	for (const name of [...primaryAgents, ...supportAgents]) {
 		assert(agents[name], `Missing packaged agent: ${name}`)
 		const rules = [
 			...input.permissions,
@@ -88,15 +84,26 @@ for (const file of files) {
 			)
 		}
 		for (const action of sharedActions) expectEffect(action, '*', 'allow')
-		for (const action of writeActions) {
-			expectEffect(action, '*', readOnlyAgents.includes(name) ? 'deny' : 'allow')
+		for (const action of primaryOnlyActions) {
+			expectEffect(action, '*', supportAgents.includes(name) ? 'deny' : 'allow')
 		}
-		for (const resource of ['/tmp/opencode/oracle-draft.md', 'src/example.ts']) {
-			expectEffect('edit', resource, readOnlyAgents.includes(name) ? 'deny' : 'allow')
+		for (const resource of [
+			'src/example.ts',
+			'test/smoke.test.ts',
+			'/home/test/src/example.ts',
+			'/tmp/opencode/diagnosis/repro.ts',
+		]) {
+			expectEffect('edit', resource, 'allow')
 		}
-		expectEffect('shell', 'git reset --hard', readOnlyAgents.includes(name) ? 'deny' : 'allow')
+		expectEffect('shell', 'bun run test', 'allow')
 		for (const server of Object.keys(input.mcp.servers)) {
-			expectEffect(`${server}_unknown-tool`, '*', readOnlyAgents.includes(name) ? 'deny' : 'allow')
+			expectEffect(`${server}_unknown-tool`, '*', supportAgents.includes(name) ? 'deny' : 'allow')
+		}
+		if (supportAgents.includes(name)) {
+			expectEffect('question', '*', 'deny')
+			expectEffect('subagent', 'research', name === 'research' ? 'deny' : 'allow')
+			expectEffect('subagent', 'oracle-solve', 'deny')
+			expectEffect('subagent', 'oracle-design', 'deny')
 		}
 		expectEffect('edit', '.limitless/repos/example/file.ts', 'deny')
 		expectEffect('browser', '*', 'deny')
