@@ -29,9 +29,12 @@ let
       mkdir -p $out/node_modules $out/packages/limitless
       cp -r node_modules/.bun $out/node_modules/.bun
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
+
+      # Patch-cache markers vary across Bun versions and are unused by bun build.
+      find "$out/node_modules/.bun" -type f -name '.bun-tag-*' -empty -delete
     '';
 
-    outputHash = "sha256-V3NYBS8Jwp0IqOKZ/Ew7kLkhUQA1+uDMFyDbL5xSE8Q=";
+    outputHash = "sha256-Nb8byRq4eHOHbRlKohKW46QdG5Ep8BOJX7t65eFBM2w=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
