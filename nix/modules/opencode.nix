@@ -128,7 +128,7 @@ in
         default = [
           (permissionRule "*" "*" "allow")
         ];
-        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials and the browser denial are appended; research and Oracle agents receive read-only MCP rules.";
+        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials are appended; research and Oracle agents receive read-only MCP rules.";
       };
     };
 

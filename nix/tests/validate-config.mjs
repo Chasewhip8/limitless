@@ -20,6 +20,7 @@ for (const file of await readdir(agentsDirectory)) {
 	agents[basename(file, '.md')] = YAML.parse(frontmatter[1])
 }
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
+assert.equal(agents.limitless?.model, 'openai/gpt-6.1-sol#max')
 
 function matches(pattern, value) {
 	const expression = pattern
@@ -47,6 +48,7 @@ const sharedActions = [
 	'grep',
 	'webfetch',
 	'websearch',
+	'browser',
 	'skill',
 	'execute',
 	'external_directory',
@@ -106,7 +108,6 @@ for (const file of files) {
 			expectEffect('subagent', 'oracle-design', 'deny')
 		}
 		expectEffect('edit', '.limitless/repos/example/file.ts', 'deny')
-		expectEffect('browser', '*', 'deny')
 	}
 	console.log(`Validated ${file} and packaged agent permissions against the pinned OpenCode schema`)
 }

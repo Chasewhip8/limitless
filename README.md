@@ -28,9 +28,8 @@ optional Linux service supervision.
 Run `opencode`, or its `oc` shell alias, from a project. It discovers or starts
 its native background service. Connect model providers through `/connect`.
 
-Native browser tools are currently disabled for all agents through a shared
-permission rule. They require the OpenCode desktop app's attached browser and
-fail in TUI-only sessions.
+Native browser tools are allowed for all agents. They require the OpenCode desktop
+app's attached browser and fail in TUI-only sessions.
 
 ## Included capabilities
 
@@ -139,7 +138,7 @@ listing inherit the global allow rule.
 
 Sensitive-file reads and potentially destructive shell commands no longer have
 default approval prompts. Shared instructions still require explicit user direction
-for destructive work. Managed-checkout edits and native browser tools remain denied.
+for destructive work. Managed-checkout edits remain denied.
 
 `readTools` replaces a preset's exact read-tool list for support agents.
 Add names only after checking their behavior and the authenticated catalog.
@@ -207,9 +206,9 @@ when present and is otherwise empty. OpenCode's built-in skills remain available
 
 ## Agents and models
 
-`limitless` and `solo` default to `openai/gpt-6-astra#xhigh`, and the main model
-remains independently selectable. `solo` denies delegation. OpenCode remembers a
-model per primary agent.
+`limitless` defaults to `openai/gpt-6.1-sol#max`; `solo` defaults to
+`openai/gpt-6-astra#xhigh`. The main model remains independently selectable.
+`solo` denies delegation. OpenCode remembers a model per primary agent.
 
 Research uses `openai/gpt-6.1-sol#max`; Oracle Solve uses
 `openai/gpt-6-astra#max`; Oracle Design uses `anthropic/claude-opus-5-5#xhigh`.
@@ -399,8 +398,7 @@ version, so the module rejects an `opencode.package` of another version. Upgrade
 both pins together.
 
 The app runs from the Nix store; its built-in updater stays inactive. Update it by
-updating Limitless. Enabling the desktop leaves the native browser-tool denial in
-place.
+updating Limitless.
 
 ## Notifications and browser
 
