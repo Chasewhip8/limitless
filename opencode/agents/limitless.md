@@ -1,7 +1,7 @@
 ---
 description: Primary user-facing OpenCode agent that delegates to research and Oracle subagents.
 mode: primary
-model: openai/gpt-6.1-sol#max
+model: openai/gpt-6.1-sol-fast#max
 color: "#F8BBD0"
 permissions:
     - action: subagent

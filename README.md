@@ -206,11 +206,11 @@ when present and is otherwise empty. OpenCode's built-in skills remain available
 
 ## Agents and models
 
-`limitless` defaults to `openai/gpt-6.1-sol#max`; `solo` defaults to
+`limitless` defaults to `openai/gpt-6.1-sol-fast#max`; `solo` defaults to
 `openai/gpt-6-astra#xhigh`. The main model remains independently selectable.
 `solo` denies delegation. OpenCode remembers a model per primary agent.
 
-Research uses `openai/gpt-6.1-sol#max`; Oracle Solve uses
+Research uses `openai/gpt-6.1-sol-fast#max`; Oracle Solve uses
 `openai/gpt-6-astra#max`; Oracle Design uses `anthropic/claude-opus-5-5#xhigh`.
 Subagents keep the processing tier of their configured model.
 
