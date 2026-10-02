@@ -23,6 +23,11 @@
 	],
 	"providers": {
 		"openai": {
+			"settings": {
+				"compaction": {
+					"type": "native"
+				}
+			},
 			"models": {
 				"gpt-6-astra": {
 					"limit": {

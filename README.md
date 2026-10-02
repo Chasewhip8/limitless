@@ -242,6 +242,10 @@ backend. With OpenCode's default 10% compaction buffer, automatic compaction sta
 at approximately 745,560 input tokens. Reasoning variants, Fast mode, and output
 limits come from the upstream catalog.
 
+OpenAI models use native provider compaction for automatic and manual requests
+by default. Configure `providers.openai.settings.compaction.type` through
+`opencode.settings`; individual model settings can override the provider policy.
+
 `providers.disabled` defaults to
 `[ "google-vertex" "google-vertex-anthropic" ]` to avoid ambient Vertex selection.
 

@@ -71,6 +71,11 @@ const primaryOnlyActions = ['artifact_create', 'opencode_session_move', 'opencod
 for (const file of files) {
 	const input = JSON.parse(await readFile(file, 'utf8'))
 	Schema.decodeUnknownSync(Config.Info)(input, { onExcessProperty: 'error' })
+	assert.equal(
+		input.providers?.openai?.settings?.compaction?.type,
+		'native',
+		`${file}: OpenAI models must default to native compaction`,
+	)
 	for (const name of [...primaryAgents, ...supportAgents]) {
 		assert(agents[name], `Missing packaged agent: ${name}`)
 		const rules = [
