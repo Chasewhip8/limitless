@@ -1,59 +1,47 @@
 {
-	"$schema": "https://opencode.ai/config.json",
-	"default_agent": "limitless",
-	"experimental": {
-		"subagent_depth": 2
-	},
-	"permissions": [
-		{
-			"action": "edit",
-			"resource": "*",
-			"effect": "allow"
-		},
-		{
-			"action": "edit",
-			"resource": ".limitless/repos",
-			"effect": "deny"
-		},
-		{
-			"action": "edit",
-			"resource": ".limitless/repos/**",
-			"effect": "deny"
-		}
-	],
-	"providers": {
-		"openai": {
-			"settings": {
-				"compaction": {
-					"type": "native"
-				}
-			},
-			"models": {
-				"gpt-6-astra": {
-					"limit": {
-						"context": 872000,
-						"input": 828400
-					}
-				},
-				"gpt-6-astra-fast": {
-					"limit": {
-						"context": 872000,
-						"input": 828400
-					}
-				},
-				"gpt-6.1-sol": {
-					"limit": {
-						"context": 872000,
-						"input": 828400
-					}
-				},
-				"gpt-6.1-sol-fast": {
-					"limit": {
-						"context": 872000,
-						"input": 828400
-					}
-				}
-			}
-		}
-	}
+    "$schema": "https://opencode.ai/config.json",
+    "default_agent": "limitless",
+    "experimental": {
+        "subagent_depth": 2
+    },
+    "permissions": [
+        {
+            "action": "edit",
+            "resource": "*",
+            "effect": "allow"
+        },
+        {
+            "action": "edit",
+            "resource": ".limitless/repos",
+            "effect": "deny"
+        },
+        {
+            "action": "edit",
+            "resource": ".limitless/repos/**",
+            "effect": "deny"
+        }
+    ],
+    "providers": {
+        "openai": {
+            "settings": {
+                "compaction": {
+                    "type": "native"
+                }
+            },
+            "models": {
+                "gpt-6-astra": {
+                    "limit": {
+                        "context": 872000,
+                        "input": 828400
+                    }
+                },
+                "gpt-6-astra-fast": {
+                    "limit": {
+                        "context": 872000,
+                        "input": 828400
+                    }
+                }
+            }
+        }
+    }
 }

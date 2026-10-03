@@ -1,7 +1,7 @@
 ---
 description: Investigation and diagnosis subagent that explains behavior, solves bugs, tests hypotheses, and proposes evidence-backed solutions using code, diagnostics, and external sources.
 mode: subagent
-model: openai/gpt-6.1-sol-fast#max
+model: openai/gpt-6.1-sol#xhigh
 permissions:
     - action: question
       resource: "*"
