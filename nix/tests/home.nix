@@ -244,6 +244,14 @@ in
         opencode.package = cliProbePackage;
       })
     ) "the desktop app must share the pinned OpenCode runtime version";
+    assert lib.assertMsg (
+      defaults.config.home.file.".config/opencode/plugins/limitless-cache-status".source
+      == "${defaults.config.programs.limitless.plugins.limitless.package}/cache-status"
+      && !(
+        (evaluate { plugins.limitless.cacheStatus.enable = false; }).config.home.file
+        ? ".config/opencode/plugins/limitless-cache-status"
+      )
+    ) "the cache-status TUI plugin must follow its enable option";
     pkgs.runCommand "limitless-home-module-check"
       {
         nativeBuildInputs = [

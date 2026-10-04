@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import { Host } from '@opencode/plugin/host'
 
 const [directory] = process.argv.slice(2)
@@ -17,4 +18,9 @@ assert.equal(typeof server.default.effect, 'function')
 const tui = await Host.load(entrypoints.tui)
 assert.equal(tui.default.id, 'opencode.notifications')
 assert.equal(typeof tui.default.setup, 'function')
+
+// The TUI discovers this directory as a TUI-only plugin; a server entrypoint would make the server load it too.
+const cacheStatus = Host.resolve({ directory: join(directory, 'cache-status') })
+assert(cacheStatus.tui?.endsWith('/cache-status/tui.tsx'), 'Missing cache-status TUI entrypoint')
+assert.equal(cacheStatus.server, undefined)
 console.log(`Validated server and TUI entrypoints in ${directory}`)

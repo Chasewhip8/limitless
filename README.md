@@ -439,6 +439,26 @@ handler. OpenCode loads the TUI entry automatically from the Limitless plugin.
 Native browser tools require the session to be open in the desktop app with the
 experimental browser setting enabled. A TUI-only session has no attached browser.
 
+## Prompt-cache status
+
+A dot in the prompt footer estimates whether the provider still holds the
+session's prompt cache:
+
+| Color | Meaning |
+| --- | --- |
+| Green | A request is running, or the latest reply finished within the cache lifetime. |
+| Red | The cache lifetime has elapsed since the latest reply; the next request likely rewrites it. |
+| Gray | The provider's cache lifetime is unknown. |
+
+Lifetimes are 5 minutes for `anthropic` (OpenCode sends only 5-minute cache
+breakpoints) and 30 minutes for `openai` (GPT-5.6 and later guarantee at least
+30 minutes). The dot is a timer estimate: warming requests are invisible to the
+TUI, and providers can evict early.
+
+The plugin is TUI-only and ships as Solid source that OpenCode compiles at load.
+Home Manager links it into `~/.config/opencode/plugins/limitless-cache-status`.
+Disable it with `programs.limitless.plugins.limitless.cacheStatus.enable = false`.
+
 ## Migration from the previous Limitless layout
 
 This release removes these options and packages:
@@ -481,7 +501,9 @@ and native service supervision. It leaves configuration values and upstream
 packages to their owners.
 
 Runtime, desktop app, Limitless plugin SDK, and schema are pinned to `2.0.19`, with
-`effect@4.0.0-rc.112`; update them together. Re-audit native capabilities and MCP
+`effect@4.0.0-rc.112`; update them together. The cache-status plugin's type-only
+dev dependencies (`@opencode/theme`, `@opentui/*`, `solid-js`) follow the same
+OpenCode release. Re-audit native capabilities and MCP
 read exceptions when upgrading. Vendor references for the current allowlists are
 linked in the integration table above.
 

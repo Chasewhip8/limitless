@@ -20,7 +20,7 @@
 		"lint:nix": "git ls-files --cached --others --exclude-standard '*.nix' -z | xargs -0 -r sh -c 'for file do [ ! -e \"$file\" ] || nixfmt --check \"$file\"; done' sh && statix check . && deadnix --fail .",
 		"prepare": "effect-language-service patch",
 		"test": "vitest run",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit && tsc --noEmit -p packages/limitless/cache-status"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.4",

@@ -34,7 +34,7 @@ let
       find "$out/node_modules/.bun" -type f -name '.bun-tag-*' -empty -delete
     '';
 
-    outputHash = "sha256-Nb8byRq4eHOHbRlKohKW46QdG5Ep8BOJX7t65eFBM2w=";
+    outputHash = "sha256-8CR4pRd023CjZ6+aiF4QCCubf2tEckkywyCTaXLwZjg=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -73,6 +73,9 @@ pkgs.stdenvNoCC.mkDerivation {
       --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git"
     cp "$out/limitless.js" "$out/index.js"
     cp "dist/tui.js" "$out/tui.js"
+    # OpenCode's TUI compiles discovered Solid sources and links them to its own runtime.
+    mkdir -p "$out/cache-status"
+    cp packages/limitless/cache-status/tui.tsx packages/limitless/cache-status/status.ts "$out/cache-status/"
     cat > "$out/package.json" <<'EOF'
     {
       "name": "limitless",

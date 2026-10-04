@@ -176,10 +176,17 @@ in
           description = "Package containing the Anthropic OAuth plugin.";
         };
       };
-      limitless.package = lib.mkOption {
-        type = lib.types.package;
-        default = self.packages.${system}.limitless;
-        description = "Package containing the Limitless plugin.";
+      limitless = {
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = self.packages.${system}.limitless;
+          description = "Package containing the Limitless plugin.";
+        };
+        cacheStatus.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Show a prompt-cache status dot in the TUI prompt footer: green while the provider cache is likely warm, red once it has likely expired, gray for providers with unknown cache lifetimes.";
+        };
       };
     };
 
@@ -258,6 +265,11 @@ in
           source = cfg.skills.package;
           recursive = true;
         };
+      }
+      # The TUI discovers TUI-only plugin directories here; the server skips them for lacking a server entrypoint.
+      // lib.optionalAttrs cfg.plugins.limitless.cacheStatus.enable {
+        "${opencodeDir}/plugins/limitless-cache-status".source =
+          "${cfg.plugins.limitless.package}/cache-status";
       };
     };
   };

@@ -1,0 +1,11 @@
+{
+	"extends": "../../../tsconfig.json",
+	"compilerOptions": {
+		// Solid's JSX element type references DOM `Node`; without it, JSX children degrade to `any`.
+		"lib": ["ES2022", "DOM"],
+		"jsx": "preserve",
+		"jsxImportSource": "@opentui/solid",
+		"incremental": false
+	},
+	"include": ["./**/*.ts", "./**/*.tsx"]
+}
