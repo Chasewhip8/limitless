@@ -20,7 +20,7 @@ for (const file of await readdir(agentsDirectory)) {
 	agents[basename(file, '.md')] = YAML.parse(frontmatter[1])
 }
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
-assert.equal(agents.limitless?.model, 'openai/gpt-6.1-sol#max')
+assert.equal(agents.limitless?.model, 'openai/gpt-6-astra#xhigh')
 
 function matches(pattern, value) {
 	const expression = pattern
@@ -38,7 +38,7 @@ function effectFor(rules, action, resource) {
 	return effect
 }
 
-const primaryAgents = ['limitless', 'solo']
+const primaryAgents = ['limitless']
 const supportAgents = ['research', 'oracle-solve', 'oracle-design']
 const sharedActions = [
 	'shell',

@@ -33,7 +33,7 @@ app's attached browser and fail in TUI-only sessions.
 
 ## Included capabilities
 
-- **Agents:** `limitless` and `solo`, a research subagent, and technical and design
+- **Agents:** `limitless`, a research subagent, and technical and design
   Oracle advisers.
 - **Code intelligence:** ast-grep search and replacement, TypeScript/Biome
   diagnostics, and seven LSP tools for definitions, hover, implementations,
@@ -128,7 +128,7 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless`, `solo` | Automatic approval for reads, writes, shell commands, and all MCP tools |
+| `limitless` | Automatic approval for reads, writes, shell commands, and all MCP tools |
 | `research`, `oracle-solve`, `oracle-design` | Read, shell, edit, and AST tools for investigations and focused diagnostic changes; audited MCP reads; deny artifact creation and session changes |
 
 For each configured MCP server, support agents receive a `deny` rule followed by
@@ -206,9 +206,8 @@ when present and is otherwise empty. OpenCode's built-in skills remain available
 
 ## Agents and models
 
-`limitless` defaults to `openai/gpt-6.1-sol-fast#max`; `solo` defaults to
-`openai/gpt-6-astra#xhigh`. The main model remains independently selectable.
-`solo` denies delegation. OpenCode remembers a model per primary agent.
+`limitless` is the primary user-facing agent. Its default model is configured in
+`opencode/agents/limitless.md` and remains independently selectable in OpenCode.
 
 Research uses `openai/gpt-6.1-sol-fast#max`; Oracle Solve uses
 `openai/gpt-6-astra#max`; Oracle Design uses `anthropic/claude-opus-5-5#xhigh`.
