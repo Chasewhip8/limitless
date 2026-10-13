@@ -53,6 +53,13 @@ pkgs.stdenv.mkDerivation {
 
   doInstallCheck = true;
   nativeInstallCheckInputs = [ pkgs.versionCheckHook ];
+  # `opencode --version` creates its log directory under HOME. The Darwin sandbox
+  # sets HOME to the read-only /var/empty, and the hook otherwise scrubs the
+  # environment, so supply a writable HOME explicitly.
+  preInstallCheck = ''
+    export HOME="$(mktemp -d)"
+  '';
+  versionCheckKeepEnvironment = [ "HOME" ];
   versionCheckProgramArg = "--version";
 
   meta = {
