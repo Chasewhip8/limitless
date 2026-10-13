@@ -19,6 +19,16 @@
 			"action": "edit",
 			"resource": ".limitless/repos/**",
 			"effect": "deny"
+		},
+		{
+			"action": "t3-code-*",
+			"resource": "*",
+			"effect": "deny"
+		},
+		{
+			"action": "t3-code_*",
+			"resource": "*",
+			"effect": "deny"
 		}
 	],
 	"providers": {

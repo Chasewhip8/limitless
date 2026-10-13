@@ -98,6 +98,8 @@ for (const file of files) {
 			)
 		}
 		for (const action of sharedActions) expectEffect(action, '*', 'allow')
+		expectEffect('t3-code-thread_preview_open', '*', 'deny')
+		expectEffect('t3-code-thread_delegate_task', '*', 'deny')
 		for (const action of primaryOnlyActions) {
 			expectEffect(action, '*', supportAgents.includes(name) ? 'deny' : 'allow')
 		}

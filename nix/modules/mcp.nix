@@ -134,6 +134,10 @@ in
           ) normalizedNames;
           message = "An MCP name overlaps an OpenCode or Limitless tool namespace. Use gh or github-mcp for GitHub.";
         }
+        {
+          assertion = lib.all (name: name != "t3-code" && !lib.hasPrefix "t3-code-" name) names;
+          message = "The t3-code namespace is reserved for opencode-t3 thread connections. Use t3-external for an independently configured T3 OAuth connection.";
+        }
       ]
       ++ lib.mapAttrsToList (name: connection: {
         assertion = connection.preset != "github" || githubAuthConfigured presetServers.${name};

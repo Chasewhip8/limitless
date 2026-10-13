@@ -127,8 +127,8 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless` | Automatic approval for reads, writes, shell commands, and all MCP tools |
-| `research`, `oracle-solve`, `oracle-design` | Read, shell, edit, and AST tools for investigations and focused diagnostic changes; audited MCP reads; deny artifact creation and session changes |
+| `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation |
+| `research`, `oracle-solve`, `oracle-design` | Read, shell, edit, and AST tools for investigations and focused diagnostic changes; audited MCP reads and the T3 browser allowlist; deny artifact creation and session changes |
 
 For each configured MCP server, support agents receive a `deny` rule followed by
 exact exceptions for audited read tools. Unknown tools, mutations, and mixed-purpose
@@ -152,6 +152,8 @@ the tool permissions do not provide a sandbox. Later project configuration or ag
 definitions can override global permissions. Project-local MCP additions need their
 own permission rules. A configured server must be trusted to implement its advertised
 read operations correctly.
+
+For T3's role-specific tool access and shared-service setup, see [T3 Code](#t3-code).
 
 | Preset | Daily workflows | Coverage limits |
 | --- | --- | --- |
@@ -383,6 +385,86 @@ users.users."your-user".linger = true;
 
 On other systemd distributions, an administrator can enable lingering with
 `loginctl enable-linger <your-user>`. Tailscale's proxy must also start at boot.
+
+## T3 Code
+
+Use the packaged `opencode-t3` launcher to connect T3 to the existing managed
+OpenCode service. It starts only a loopback proxy, never another OpenCode server.
+OpenCode's native `subagent` tool owns Research and Oracle delegation and preserves
+native child sessions and events. Both Oracles can invoke Research; Research cannot
+delegate further. Resume an investigation with its `sessionID`.
+
+### Setup
+
+1. Finish or stop active work before applying Home Manager or restarting OpenCode;
+   a service restart can interrupt sessions. Load the updated plugin with
+   `systemctl --user restart opencode` when supervised, or `opencode service restart`
+   otherwise. Check the endpoint with `opencode service status`.
+2. In **T3 Settings → Providers → OpenCode**, set **Binary path** to `opencode-t3`
+   and leave **Server URL** blank. If T3 does not inherit your PATH, use the absolute
+   path printed by `command -v opencode-t3`. Reconnect the provider.
+
+Leaving Server URL blank lets T3 attach its thread-scoped MCP credentials, including
+browser access. The launcher discovers and authenticates to the existing service;
+no password needs copying into T3 settings. Other CLI use still goes through `opencode`.
+
+### Behavior
+
+All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`. Limitless
+retains T3's other tools, including requested top-level thread creation and management.
+Support agents receive only these 21 browser tools:
+
+```text
+preview_click              preview_dialog             preview_drag
+preview_evaluate           preview_hover              preview_navigate
+preview_open               preview_press              preview_recording_start
+preview_recording_stop     preview_resize             preview_scroll
+preview_select             preview_set_appearance     preview_snapshot
+preview_status             preview_type               preview_upload
+preview_wait_for           t3_preview_close           t3_preview_list
+```
+
+Other T3 tools, including future additions, are hidden from support agents in Code
+Mode and `search`; there is no execution-only deny hook. Support agents return
+findings and blockers to their caller. Browser access does not authorize external
+mutations. By default, unbound TUI/CLI sessions do not receive thread-bound tools.
+
+T3 Full access no longer installs a blanket session allow that erases native role
+restrictions. Native configuration remains authoritative, with T3's operator asks,
+Plan restrictions and specific grants preserved. Normal mode selects the actual
+configured default agent. Limitless ships with the built-in Plan agent disabled:
+T3 Plan turns fail with agent-not-found unless a Plan agent is configured. Returning
+to normal mode restores the default agent.
+
+Only T3's named `t3-code` instruction entry is replaced, with a neutral marker before
+persistence. The plugin expands that marker into the appropriate T3-only Markdown
+template for primary agents when preparing model requests. Native children inherit
+T3 permission bindings rather than the marker; bound children receive the support
+section directly at request preparation. Templates live
+in `packages/limitless/t3/prompts/`; the base agent Markdown files are unchanged.
+Ordinary sessions receive no T3 guidance. Other context, conversation content, and
+subagent events pass through unchanged. Existing provider history is not retroactively
+erased; use a fresh thread for the cleanest instruction cutover.
+
+Closing or reconnecting T3 only detaches the bridge. Native sessions and background
+children keep running, and can continue consuming tokens and changing files. Use
+explicit Stop before disconnecting when cancellation is wanted. T3's MCP cleanup
+calls pass through; browser/app capabilities may be unavailable while disconnected.
+The bridge never interrupts sessions or stops the service.
+
+### Compatibility boundary
+
+The bridge and native-child prompt hook route permission writes through one
+session-scoped plugin queue, preserving concurrent grants. Direct backend writes
+outside this integration are not coordinated. This is not a shell or HTTP sandbox.
+
+The `t3-code` and `t3-code-*` connection names are reserved; use `t3-external` for
+independent T3 OAuth connections. Underscore-containing thread namespaces receive
+stable `t3-code-<32 hex>` aliases so prefix-related names cannot grant sibling tools.
+
+This adapter targets OpenCode `2.0.19` and T3
+`0.0.46-nightly.20261012.3021`. Missing plugin RPCs fail permission updates rather
+than forwarding unfiltered writes. Keep the integration checks with runtime upgrades.
 
 ## Notifications
 

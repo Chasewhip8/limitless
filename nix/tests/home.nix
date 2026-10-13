@@ -172,6 +172,9 @@ let
     };
   };
   launcherOf = home: "${home.config.programs.limitless._generated.opencodePackage}/bin/opencode";
+  t3Launcher = lib.findFirst (
+    package: package.name == "opencode-t3"
+  ) (throw "Missing opencode-t3 launcher") defaults.config.home.packages;
 in
 {
   home-module =
@@ -225,6 +228,8 @@ in
         "artifact"
         "browser"
         "opencode"
+        "t3-code"
+        "t3-code-custom"
         "bad name"
       ]
     ) "MCP namespaces that shadow local tools passed assertions";
@@ -298,6 +303,22 @@ in
         jq -e '
           .settings == {theme: {name: "override"}} and .claudeCodeVersion == "2.1.282"
         ' "$out/environment.json"
+      '';
+
+  t3-runtime =
+    pkgs.runCommand "limitless-t3-runtime-check"
+      {
+        nativeBuildInputs = [ pkgs.bun ];
+      }
+      ''
+        cp ${./validate-t3-runtime.mjs} validate-t3-runtime.mjs
+        cp ${./t3-fake-mcp.mjs} t3-fake-mcp.mjs
+        test "$(${lib.getExe t3Launcher} --version)" = "$(${launcherOf defaults} --version)"
+        bun validate-t3-runtime.mjs \
+          ${self.packages.${pkgs.stdenv.hostPlatform.system}.limitless} \
+          ${lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.opencode} \
+          ${self}/packages/limitless/test/fixtures/t3-tool-names.json
+        touch "$out"
       '';
 
   service =

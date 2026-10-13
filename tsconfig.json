@@ -28,6 +28,7 @@
 		"packages/limitless/core/**/*.ts",
 		"packages/limitless/lib/**/*.ts",
 		"packages/limitless/plugin/**/*.ts",
+		"packages/limitless/t3/**/*.ts",
 		"packages/limitless/tools/**/*.ts",
 		"packages/*/test/**/*"
 	],

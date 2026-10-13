@@ -37,7 +37,7 @@ let
       find "$out/node_modules/.bun" -type f -name '.bun-tag-*' -empty -delete
     '';
 
-    outputHash = "sha256-6bloaLP8k/spgvatvjpQUxU8xPPvf5XerNPcovCDIsA=";
+    outputHash = "sha256-D1GT/SK1eJqs9Wy41m72PFm6g2lCAC62ujC+g4SVV4w=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -67,6 +67,11 @@ pkgs.stdenvNoCC.mkDerivation {
       --format=esm \
       --packages=bundle \
       --outfile=dist/tui.js
+    bun build packages/limitless/t3/cli.ts \
+      --target=node \
+      --format=esm \
+      --packages=bundle \
+      --outfile=dist/t3.js
   '';
 
   installPhase = ''
@@ -76,6 +81,8 @@ pkgs.stdenvNoCC.mkDerivation {
       --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git"
     cp "$out/limitless.js" "$out/index.js"
     cp "dist/tui.js" "$out/tui.js"
+    cp "dist/t3.js" "$out/t3.js"
+    cp -r packages/limitless/t3/prompts "$out/prompts"
     # OpenCode's TUI compiles discovered Solid sources and links them to its own runtime.
     mkdir -p "$out/cache-status"
     cp packages/limitless/cache-status/tui.tsx packages/limitless/cache-status/status.ts "$out/cache-status/"

@@ -10,6 +10,7 @@
 		"./tui": "./tui.ts"
 	},
 	"dependencies": {
+		"@opencode/client": "2.0.19",
 		"@opencode/plugin": "2.0.19",
 		"@opencode/schema": "2.0.19",
 		"effect": "4.0.0-rc.112",

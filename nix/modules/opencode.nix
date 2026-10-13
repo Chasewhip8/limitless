@@ -57,6 +57,10 @@ let
     lsp = cfg._generated.lsp;
     providers = { inherit (cfg.providers) disabled; };
   };
+  t3Launcher = pkgs.writeShellScriptBin "opencode-t3" ''
+    export LIMITLESS_OPENCODE_BIN=${lib.escapeShellArg "${opencodePackage}/bin/opencode"}
+    exec ${lib.getExe pkgs.bun} ${lib.escapeShellArg "${cfg.plugins.limitless.package}/t3.js"} "$@"
+  '';
   managedPlugins =
     # T3's session permissions can override agent denials, so remove the native browser plugin.
     [ "-opencode.browser" ]
@@ -248,7 +252,10 @@ in
       }
     ];
     home = {
-      packages = [ opencodePackage ];
+      packages = [
+        opencodePackage
+        t3Launcher
+      ];
       shellAliases.oc = "opencode";
       file = {
         "${opencodeDir}/opencode.json".text = builtins.toJSON opencodeConfig;
