@@ -30,11 +30,14 @@ let
       cp -r node_modules/.bun $out/node_modules/.bun
       cp -r packages/limitless/node_modules $out/packages/limitless/node_modules
 
+      # Bun races when linking dependency executables; bundling uses no package bins.
+      find "$out" -type d -path '*/node_modules/.bin' -prune -exec rm -rf {} +
+
       # Patch-cache markers vary across Bun versions and are unused by bun build.
       find "$out/node_modules/.bun" -type f -name '.bun-tag-*' -empty -delete
     '';
 
-    outputHash = "sha256-8CR4pRd023CjZ6+aiF4QCCubf2tEckkywyCTaXLwZjg=";
+    outputHash = "sha256-6bloaLP8k/spgvatvjpQUxU8xPPvf5XerNPcovCDIsA=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };

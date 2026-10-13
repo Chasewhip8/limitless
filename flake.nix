@@ -47,7 +47,12 @@
             opencode = self.packages.${system}.opencode;
           };
         };
-        checks = import ./nix/tests/home.nix { inherit pkgs self agentsPackage; };
+        checks = (import ./nix/tests/home.nix { inherit pkgs self agentsPackage; }) // {
+          limitless-dependencies = import ./nix/tests/limitless-dependencies.nix {
+            inherit pkgs;
+            dependencies = self.packages.${system}.limitless.dependencies;
+          };
+        };
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             actionlint
