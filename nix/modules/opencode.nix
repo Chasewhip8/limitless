@@ -58,7 +58,9 @@ let
     providers = { inherit (cfg.providers) disabled; };
   };
   managedPlugins =
-    lib.optional cfg.plugins.anthropicAuth.enable {
+    # T3's session permissions can override agent denials, so remove the native browser plugin.
+    [ "-opencode.browser" ]
+    ++ lib.optional cfg.plugins.anthropicAuth.enable {
       package = "file://${cfg.plugins.anthropicAuth.package}";
     }
     ++ [

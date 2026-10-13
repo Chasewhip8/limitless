@@ -110,6 +110,10 @@ let
   defaults = evaluate { };
   disabled = evaluate { enable = false; };
   connected = evaluate {
+    opencode.settings.plugins = [
+      "*"
+      "opencode.browser"
+    ];
     mcp.servers = {
       atlassian.preset = "atlassian";
       notion-work.preset = "notion";
@@ -236,14 +240,8 @@ in
       })
     ) "GitHub clones became unrestricted without explicit opt-in";
     assert lib.assertMsg (
-      valid (evaluate {
-        desktop.enable = true;
-      }) == pkgs.stdenv.hostPlatform.isLinux
-      && !valid (evaluate {
-        desktop.enable = true;
-        opencode.package = cliProbePackage;
-      })
-    ) "the desktop app must share the pinned OpenCode runtime version";
+      !(self.packages.${pkgs.stdenv.hostPlatform.system} ? opencode-desktop)
+    ) "OpenCode Desktop must not be packaged";
     assert lib.assertMsg (
       defaults.config.home.file.".config/opencode/plugins/limitless-cache-status".source
       == "${defaults.config.programs.limitless.plugins.limitless.package}/cache-status"

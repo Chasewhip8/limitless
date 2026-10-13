@@ -4,7 +4,7 @@
 
 Limitless pins OpenCode `2.0.19`, supplies coding agents and local code-intelligence
 tools, and configures optional first-party MCP connections. OpenCode owns its
-service discovery, OAuth credentials, Code Mode, browser integration, and native
+service discovery, OAuth credentials, Code Mode, and native
 notification delivery. Home Manager owns packages and non-secret configuration, with
 optional Linux service supervision.
 
@@ -28,8 +28,8 @@ optional Linux service supervision.
 Run `opencode`, or its `oc` shell alias, from a project. It discovers or starts
 its native background service. Connect model providers through `/connect`.
 
-Native browser tools are allowed for all agents. They require the OpenCode desktop
-app's attached browser and fail in TUI-only sessions.
+Limitless disables OpenCode's built-in browser plugin (`opencode.browser`) to
+avoid conflicts with T3 Code's browser tools. Use T3 Code for browser access.
 
 ## Included capabilities
 
@@ -45,7 +45,6 @@ app's attached browser and fail in TUI-only sessions.
   MCP presets with account-specific connection names and audited reads for support agents.
 - **Anthropic subscription authentication:** a pinned Claude Pro/Max plugin.
 - **Git hygiene:** `.limitless/` is globally ignored by default.
-- **Desktop app:** optional OpenCode Desktop on Linux, sharing the Limitless runtime.
 
 The plugin exposes 13 core tools directly with `codemode = false`. MCP tools use
 OpenCode's native Code Mode. Every Limitless tool resolves the invoking session's
@@ -174,7 +173,6 @@ verification.
 nix/modules/
 ├── home.nix       # composition and Git hygiene
 ├── opencode.nix   # runtime, agents, plugins, and configuration assembly
-├── desktop.nix    # optional OpenCode Desktop on the same runtime
 ├── service.nix    # optional Linux supervision and native service binding
 ├── lsp.nix        # language-server packages and plugin configuration
 └── mcp.nix        # named connections and permission generation
@@ -185,9 +183,11 @@ packages/limitless/ # code-intelligence tools, artifacts, source research, polic
 
 Native server settings go in `programs.limitless.opencode.settings`. Limitless
 enforces the default agent, managed plugins, ordered permissions, generated MCP
-policies, and the managed-checkout edit denial. `opencode.extraAgentsFile` appends
-additional instructions. `opencode.disableClaudeCode = true` wraps the executable
-with `OPENCODE_DISABLE_CLAUDE_CODE=1`.
+policies, and the managed-checkout edit denial. Managed plugin directives disable
+`opencode.browser` independently of agent and session permissions.
+`opencode.extraAgentsFile` appends additional instructions.
+`opencode.disableClaudeCode = true` wraps the executable with
+`OPENCODE_DISABLE_CLAUDE_CODE=1`.
 
 Native terminal settings go in `programs.limitless.opencode.cliSettings`. The
 launcher supplies them through `OPENCODE_CLI_CONFIG_CONTENT`; declared values
@@ -384,26 +384,7 @@ users.users."your-user".linger = true;
 On other systemd distributions, an administrator can enable lingering with
 `loginctl enable-linger <your-user>`. Tailscale's proxy must also start at boot.
 
-## Desktop app
-
-On Linux, install OpenCode Desktop alongside the CLI:
-
-```nix
-programs.limitless.desktop.enable = true;
-```
-
-The desktop package is pinned to the same `2.0.19` release as the CLI. It connects
-to the running native service, including the supervised unit, and otherwise starts
-one with the Limitless-configured `opencode` executable in place of its bundled CLI.
-Desktop sessions therefore use the same configuration, plugins, agents, and launcher
-environment as the TUI. The desktop replaces any background service with a different
-version, so the module rejects an `opencode.package` of another version. Upgrade
-both pins together.
-
-The app runs from the Nix store; its built-in updater stays inactive. Update it by
-updating Limitless.
-
-## Notifications and browser
+## Notifications
 
 Limitless enables sound by default and supplies a TUI handler that dings for:
 
@@ -435,9 +416,6 @@ The package's `./tui` entry replaces the pinned built-in `opencode.notifications
 handler by ID. Existing `-opencode.notifications` directives also disable this
 handler. OpenCode loads the TUI entry automatically from the Limitless plugin.
 
-Native browser tools require the session to be open in the desktop app with the
-experimental browser setting enabled. A TUI-only session has no attached browser.
-
 ## Prompt-cache status
 
 A dot in the prompt footer estimates whether the provider still holds the
@@ -465,7 +443,8 @@ This release removes these options and packages:
 | Removed | Migration |
 | --- | --- |
 | `slack.*`, Gary, Slack tools | Remove Slack configuration and retire its bot credentials when no longer used. |
-| `tools.agentBrowser.*`, `agent-browser` package/skill | Use OpenCode's desktop-backed browser when needed. |
+| `desktop.enable`, `opencode-desktop` package | Remove `programs.limitless.desktop.enable` and any direct package references, then apply Home Manager to stop installing OpenCode Desktop. Use T3 Code for browser access. |
+| `tools.agentBrowser.*`, `agent-browser` package/skill | Use T3 Code's browser tools. OpenCode's native browser catalog is disabled. |
 | `tools.acli.*`, Atlassian CLI skill | Add an `atlassian` MCP connection and authorize it. |
 | `tools.notion.*`, `notion-cli` package/skill | Add separately named `notion` MCP connections for each workspace. |
 | `tools.sentry.*`, `sentry` package/skill | Add a `sentry` MCP connection. Install specialized release tooling separately if required. |
@@ -493,22 +472,18 @@ and state backup; never run V1 and V2 against the same writable state directory.
 ## Development
 
 Use `nix develop`, then `bun install --frozen-lockfile` and `bun run ci`. The gate
-runs formatting/lint checks, TypeScript, tests, module checks, and all six package
+runs formatting/lint checks, TypeScript, tests, module checks, and all five package
 builds. The suite covers Limitless-owned behavior: tool safety and lifecycle,
 role permission outcomes, MCP namespace collisions, launcher environment handling,
 and native service supervision. It leaves configuration values and upstream
 packages to their owners.
 
-Runtime, desktop app, Limitless plugin SDK, and schema are pinned to `2.0.19`, with
+Runtime, Limitless plugin SDK, and schema are pinned to `2.0.19`, with
 `effect@4.0.0-rc.112`; update them together. The cache-status plugin's type-only
 dev dependencies (`@opencode/theme`, `@opentui/*`, `solid-js`) follow the same
 OpenCode release. Re-audit native capabilities and MCP
 read exceptions when upgrading. Vendor references for the current allowlists are
 linked in the integration table above.
-
-The desktop package patches the minified main process so the app runs its CLI in
-place instead of copying it into its data directory; the build fails if that code
-changes. Its install check verifies the CLI version and native terminal module.
 
 When upgrading OpenCode, verify that the TUI still replaces a built-in handler with
 a later external definition of the same ID, that the built-in notifications ID is

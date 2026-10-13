@@ -48,7 +48,6 @@ const sharedActions = [
 	'grep',
 	'webfetch',
 	'websearch',
-	'browser',
 	'skill',
 	'execute',
 	'external_directory',
@@ -71,6 +70,14 @@ const primaryOnlyActions = ['artifact_create', 'opencode_session_move', 'opencod
 for (const file of files) {
 	const input = JSON.parse(await readFile(file, 'utf8'))
 	Schema.decodeUnknownSync(Config.Info)(input, { onExcessProperty: 'error' })
+	const browserRemoval = input.plugins.lastIndexOf('-opencode.browser')
+	assert(browserRemoval >= 0, `${file}: the native browser plugin must be disabled`)
+	assert(
+		!input.plugins
+			.slice(browserRemoval + 1)
+			.some((entry) => ['*', 'opencode.*', 'opencode.browser'].includes(entry)),
+		`${file}: later plugin directives must not re-enable the native browser`,
+	)
 	assert.equal(
 		input.providers?.openai?.settings?.compaction?.type,
 		'native',
