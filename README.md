@@ -176,6 +176,7 @@ nix/modules/
 ├── home.nix       # composition and Git hygiene
 ├── opencode.nix   # runtime, agents, plugins, and configuration assembly
 ├── service.nix    # optional Linux supervision and native service binding
+├── t3.nix         # optional headless T3 service and OpenCode provider binding
 ├── lsp.nix        # language-server packages and plugin configuration
 └── mcp.nix        # named connections and permission generation
 nix/mcp-presets.nix # first-party endpoints and audited read-tool names
@@ -395,6 +396,59 @@ native child sessions and events. Both Oracles can invoke Research; Research can
 delegate further. Resume an investigation with its `sessionID`.
 
 ### Setup
+
+On Linux, let Home Manager run T3 independently of its desktop GUI:
+
+```nix
+programs.limitless = {
+  enable = true;
+  opencode.service.enable = true;
+  t3.enable = true;
+};
+```
+
+```text
+T3 desktop / web → t3code.service → opencode-t3 → opencode.service
+```
+
+The `t3code` user service listens on `127.0.0.1:3773` and uses the existing
+`~/.t3` home, preserving threads and accounts. Options `t3.port`, `t3.baseDir`, and
+`t3.package` override these defaults. Install the desktop separately. Linux user
+lingering and a private HTTPS proxy belong in the host configuration, as described
+above; T3's own Tailscale Serve management is disabled.
+
+Before the first switch, finish active work, back up your T3 home, and close the
+desktop's local environment. On startup, the service enables the default OpenCode
+provider, points it to the absolute `opencode-t3` profile path, and clears any remote
+Server URL. It also sets `localEnvironmentEnabled = false` for the desktop sharing
+that T3 home. Reopen the desktop and add `http://127.0.0.1:3773` as a remote
+environment, using a pairing link from `t3 pair --base-dir "$HOME/.t3"`. Pairing
+credentials remain runtime state, never Nix configuration. A desktop on another
+machine must have its local environment disabled separately if desired.
+
+Only those settings are managed, at service startup rather than activation.
+Unrelated fields and file modes are preserved; settings must be regular files
+containing plain JSON. JSONC, symlinks, malformed data, or a live server PID block
+startup instead of being overwritten. `t3.opencode.enable = false` stops managing
+the provider binding without undoing existing settings. Disabling the module does
+not revert the mutable desktop or provider settings.
+
+After an unclean shutdown, PID reuse can leave a stale runtime record blocking
+startup. The error identifies the PID and file. Stop retries with
+`systemctl --user stop t3code`, close any desktop backend, and inspect that PID.
+Only after confirming the record is stale and no T3 backend uses this home, move
+`userdata/server-runtime.json` aside and start `t3code` again. Do not kill an
+unrelated process or remove settings or databases. Timestamps are not used to
+bypass this guard because clock changes can make a live process look stale.
+
+Home Manager leaves an already-running T3 service on its old version. When idle,
+run `systemctl --user restart t3code` to apply changes. OpenCode configuration
+changes can still restart OpenCode during a switch. Do not use `t3 service install`
+or `t3 service update` alongside Home Manager: they own the same unit. T3 requests
+OpenCode startup when both units are enabled, but stopping either does not stop
+the other. With external OpenCode supervision, ensure that service is available.
+
+For an independently managed T3 desktop or server:
 
 1. Finish or stop active work before applying Home Manager or restarting OpenCode;
    a service restart can interrupt sessions. Load the updated plugin with

@@ -40,6 +40,9 @@
           anthropic-auth = import ./nix/packages/anthropic-auth.nix { inherit pkgs; };
           limitless = import ./nix/packages/limitless.nix { inherit pkgs self; };
           opencode = import ./nix/packages/opencode.nix { inherit pkgs; };
+        }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          t3 = pkgs.callPackage ./nix/packages/t3.nix { };
         };
         checks = (import ./nix/tests/home.nix { inherit pkgs self agentsPackage; }) // {
           limitless-dependencies = import ./nix/tests/limitless-dependencies.nix {
