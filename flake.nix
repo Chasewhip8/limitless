@@ -44,12 +44,20 @@
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           t3 = pkgs.callPackage ./nix/packages/t3.nix { };
         };
-        checks = (import ./nix/tests/home.nix { inherit pkgs self agentsPackage; }) // {
-          limitless-dependencies = import ./nix/tests/limitless-dependencies.nix {
-            inherit pkgs;
-            dependencies = self.packages.${system}.limitless.dependencies;
+        checks =
+          (import ./nix/tests/home.nix { inherit pkgs self agentsPackage; })
+          // {
+            limitless-dependencies = import ./nix/tests/limitless-dependencies.nix {
+              inherit pkgs;
+              dependencies = self.packages.${system}.limitless.dependencies;
+            };
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            t3-browser = import ./nix/tests/t3-browser.nix {
+              inherit pkgs;
+              package = self.packages.${system}.t3;
+            };
           };
-        };
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             actionlint

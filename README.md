@@ -417,6 +417,16 @@ The `t3code` user service listens on `127.0.0.1:3773` and uses the existing
 lingering and a private HTTPS proxy belong in the host configuration, as described
 above; T3's own Tailscale Serve management is disabled.
 
+For NixOS browser previews and HTML rendering, enable `programs.nix-ld.enable = true`
+in the **system configuration**. The T3 package supplies its downloaded Chrome's
+libraries through a `nix-ld` path inherited by T3's process tree, including
+terminals and provider CLIs. It preserves inherited library paths and the host's
+loader without introducing an architecture override. It does not add global libraries or set
+`LD_LIBRARY_PATH`. Keep Limitless's `nixpkgs` input following the host's input so
+the browser libraries and host loader stay compatible. Chrome's sandbox remains
+enabled; the host must support unprivileged user namespaces. T3's suggested
+`sudo t3 browser setup` uses apt and is not the NixOS installation path.
+
 Before the first switch, finish active work, back up your T3 home, and close the
 desktop's local environment. On startup, the service enables the default OpenCode
 provider, points it to the absolute `opencode-t3` profile path, and clears any remote
@@ -613,6 +623,18 @@ builds. The suite covers Limitless-owned behavior: tool safety and lifecycle,
 role permission outcomes, MCP namespace collisions, launcher environment handling,
 and native service supervision. It leaves configuration values and upstream
 packages to their owners.
+
+The Linux `t3-browser` check verifies the actual package wrapper's environment
+and the pinned browser's loader dependencies. Run its sandboxed browser smoke
+test outside the Nix build sandbox on each NixOS host:
+
+```sh
+nix run .#checks.x86_64-linux.t3-browser
+# On ARM Linux, use checks.aarch64-linux.t3-browser instead.
+```
+
+It exercises isolated shared and persistent browser contexts plus direct HTML
+rendering, using temporary profiles and no live T3 state or external websites.
 
 Runtime, Limitless plugin SDK, and schema are pinned to `2.0.19`, with
 `effect@4.0.0-rc.112`; update them together. The cache-status plugin's type-only
