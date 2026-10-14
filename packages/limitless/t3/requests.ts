@@ -128,7 +128,8 @@ export async function routeT3Request(
 	}
 	if (request.method === 'POST' && url.pathname === '/api/session') {
 		const body = await readObject(request)
-		const agent = body.agent
+		// The Effect client encodes absent optional fields as null on the wire.
+		const agent = body.agent ?? undefined
 		if (agent !== undefined && typeof agent !== 'string')
 			throw new BridgeRequestError(400, 'Invalid OpenCode agent')
 		let permissions: Permission.Ruleset
@@ -193,9 +194,10 @@ export async function routeT3Request(
 
 	if (request.method === 'PATCH' && suffix === '') {
 		const body = await readObject(request)
-		if (!Object.hasOwn(body, 'permissions'))
+		// Null optional update fields are no-ops in OpenCode's JSON wire codec.
+		if (body.permissions === undefined || body.permissions === null)
 			return { kind: 'forward', body: Buffer.from(JSON.stringify(body)) }
-		if (Object.keys(body).length !== 1)
+		if (Object.entries(body).some(([key, value]) => key !== 'permissions' && value !== null))
 			throw new BridgeRequestError(
 				400,
 				'T3 permission updates must be separate from other session updates',

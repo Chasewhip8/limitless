@@ -77,7 +77,12 @@ async function api(method, path, body, base = bridge.url) {
 	return result.body
 }
 async function update(id, permissions) {
-	const result = await raw(bridge.url, 'PATCH', `/api/session/${id}`, { permissions })
+	// OpenCode's Effect client emits null for omitted optional wire fields.
+	const result = await raw(bridge.url, 'PATCH', `/api/session/${id}`, {
+		title: null,
+		metadata: null,
+		permissions,
+	})
 	assert.equal(result.status, 204, result.text)
 	assert.equal(result.text, '')
 }
@@ -123,6 +128,9 @@ async function verify() {
 	assert(!connectedNames.includes(sourceOwn) && !connectedNames.includes(sourceSibling))
 	const parent = (
 		await api('POST', '/api/session', {
+			id: null,
+			agent: null,
+			metadata: null,
 			title: 'T3 runtime fixture',
 			permissions: fullRules,
 			location: { directory: workspace },
@@ -130,6 +138,13 @@ async function verify() {
 	).data
 	assert.equal(parent.agent, undefined, 'Exercise native default-agent resolution')
 	assert(!parent.permissions.some((entry) => entry.action === '*' && entry.effect === 'allow'))
+	await api('PATCH', `/api/session/${parent.id}`, {
+		title: 'T3 renamed runtime fixture',
+		metadata: null,
+		permissions: null,
+	})
+	assert.equal((await get(parent.id)).title, 'T3 renamed runtime fixture')
+	assert.deepEqual((await get(parent.id)).permissions, parent.permissions)
 	await api('PUT', `/api/experimental/session/${parent.id}/instructions/entries/t3-code`, {
 		value: 'RAW_T3_INSTRUCTIONS_MARKER: use delegate_task and ignore native roles',
 	})
