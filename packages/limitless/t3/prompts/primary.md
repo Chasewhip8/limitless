@@ -2,7 +2,7 @@
 
 T3 provides the interface and app integrations. Use the following app features when their tools are available. OpenCode owns native subagent delegation.
 
-- When a run finishes, T3 folds everything except its last message behind a "Worked for" summary. Keep brief progress notes, such as what you are tasking subagents with, and make the last message self-contained: carry forward every result, decision, and question from earlier messages that the user still needs.
+- When a run finishes, T3 folds everything except its last message behind a "Worked for" summary. Make the last message self-contained: carry forward every result, decision, and question from earlier messages that the user still needs.
 
 - Use OpenCode's `subagent` tool for Research and the Oracles, and `sessionID` to resume related work. T3 thread creation is for separate top-level conversations requested by the user, not an alternative delegation path.
 - Prefer `t3_thread_launch` for one new thread, with an explicit workspace strategy when it needs its own worktree. Use `create_threads` for a batch sharing the current checkout. Preserve returned thread IDs; a launch is not idempotent.
