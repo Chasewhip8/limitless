@@ -37,7 +37,7 @@ let
       find "$out/node_modules/.bun" -type f -name '.bun-tag-*' -empty -delete
     '';
 
-    outputHash = "sha256-D1GT/SK1eJqs9Wy41m72PFm6g2lCAC62ujC+g4SVV4w=";
+    outputHash = "sha256-v/mfe0iQx09JVK1Lt73Uqw7vRGuh37DgQBcyt7epwPA=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -57,21 +57,47 @@ pkgs.stdenvNoCC.mkDerivation {
     cp -r ${bunDeps}/node_modules/.bun node_modules/.bun
     cp -r ${bunDeps}/packages/limitless/node_modules packages/limitless/node_modules
 
+    # Hosted plugins share OpenCode's Effect and plugin runtime instances.
     bun build packages/limitless/index.ts \
       --target=node \
       --format=esm \
       --packages=bundle \
+      --external effect --external 'effect/*' \
+      --external @opencode/plugin --external '@opencode/plugin/*' \
+      --metafile=dist/limitless.meta.json \
       --outfile=dist/limitless.js
     bun build packages/limitless/tui.ts \
       --target=node \
       --format=esm \
       --packages=bundle \
+      --external effect --external 'effect/*' \
+      --external @opencode/plugin --external '@opencode/plugin/*' \
+      --metafile=dist/tui.meta.json \
       --outfile=dist/tui.js
+    # The bridge runs outside OpenCode, so it must carry its own dependencies.
     bun build packages/limitless/t3/cli.ts \
       --target=node \
       --format=esm \
       --packages=bundle \
       --outfile=dist/t3.js
+  '';
+
+  doCheck = true;
+  checkPhase = ''
+    # A second Effect or plugin runtime can silently break host-owned state.
+    bun -e '
+      const assert = require("node:assert/strict");
+      const fs = require("node:fs");
+      for (const name of ["limitless", "tui"]) {
+        const { inputs } = JSON.parse(fs.readFileSync(`dist/''${name}.meta.json`, "utf8"));
+        const bundled = Object.keys(inputs);
+        assert(bundled.length > 0, `Missing build inputs for ''${name}`);
+        for (const path of bundled) {
+          assert(!/(^|\/)node_modules\/(effect|@opencode\/plugin)\//.test(path),
+            `Hosted plugin ''${name} bundles host runtime: ''${path}`);
+        }
+      }
+    '
   '';
 
   installPhase = ''

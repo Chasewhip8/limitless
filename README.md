@@ -2,7 +2,7 @@
 
 > A Home Manager module for a ready-to-use OpenCode 2 workspace.
 
-Limitless pins OpenCode `2.0.19`, supplies coding agents and local code-intelligence
+Limitless pins OpenCode `2.0.32`, supplies coding agents and local code-intelligence
 tools, and configures optional first-party MCP connections. OpenCode owns its
 service discovery, OAuth credentials, Code Mode, and native
 notification delivery. Home Manager owns packages and non-secret configuration, with
@@ -526,8 +526,8 @@ The `t3-code` and `t3-code-*` connection names are reserved; use `t3-external` f
 independent T3 OAuth connections. Underscore-containing thread namespaces receive
 stable `t3-code-<32 hex>` aliases so prefix-related names cannot grant sibling tools.
 
-This adapter targets OpenCode `2.0.19` and T3
-`0.0.46-nightly.20261012.3021`. Missing plugin RPCs fail permission updates rather
+This adapter targets OpenCode `2.0.32` and T3
+`0.1.1-nightly.20261020.3411`. Missing plugin RPCs fail permission updates rather
 than forwarding unfiltered writes. Keep the integration checks with runtime upgrades.
 
 ## Notifications
@@ -636,12 +636,13 @@ nix run .#checks.x86_64-linux.t3-browser
 It exercises isolated shared and persistent browser contexts plus direct HTML
 rendering, using temporary profiles and no live T3 state or external websites.
 
-Runtime, Limitless plugin SDK, and schema are pinned to `2.0.19`, with
-`effect@4.0.0-rc.112`; update them together. The cache-status plugin's type-only
-dev dependencies (`@opencode/theme`, `@opentui/*`, `solid-js`) follow the same
-OpenCode release. Re-audit native capabilities and MCP
-read exceptions when upgrading. Vendor references for the current allowlists are
-linked in the integration table above.
+Runtime, Limitless plugin SDK, and schema are pinned to `2.0.32`, with
+`effect@4.0.1`; update them together. Hosted plugins use OpenCode's shared Effect
+and plugin runtime; the standalone T3 bridge bundles its own dependencies.
+The cache-status plugin's type-only dev dependencies (`@opencode/theme`,
+`@opentui/*`, `solid-js`) follow the same OpenCode release. Re-audit native
+capabilities and MCP read exceptions when upgrading. Vendor references for the
+current allowlists are linked in the integration table above.
 
 When upgrading OpenCode, verify that the TUI still replaces a built-in handler with
 a later external definition of the same ID, that the built-in notifications ID is

@@ -287,7 +287,10 @@ in
         cp ${./validate-config.mjs} validate-config.mjs
         bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json"
         cp ${./validate-plugin.mjs} validate-plugin.mjs
-        node validate-plugin.mjs ${defaults.config.programs.limitless.plugins.limitless.package}
+        # Node needs fixture dependencies beside hosted artifacts. The runtime
+        # check separately loads the original store package in real OpenCode.
+        cp -r ${defaults.config.programs.limitless.plugins.limitless.package} plugin
+        node validate-plugin.mjs "$PWD/plugin"
         ${lib.concatMapStringsSep "\n" (
           server: "test -x ${lib.escapeShellArg (builtins.head server.command)}"
         ) (builtins.attrValues (plugin defaults).options.lsp)}
@@ -328,11 +331,14 @@ in
       ''
         cp ${./validate-t3-runtime.mjs} validate-t3-runtime.mjs
         cp ${./t3-fake-mcp.mjs} t3-fake-mcp.mjs
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
         test "$(${lib.getExe t3Launcher} --version)" = "$(${launcherOf defaults} --version)"
         bun validate-t3-runtime.mjs \
           ${self.packages.${pkgs.stdenv.hostPlatform.system}.limitless} \
           ${lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.opencode} \
-          ${self}/packages/limitless/test/fixtures/t3-tool-names.json
+          ${self}/packages/limitless/test/fixtures/t3-tool-names.json \
+          ${lib.escapeShellArg self.packages.${pkgs.stdenv.hostPlatform.system}.opencode.version}
         touch "$out"
       '';
 

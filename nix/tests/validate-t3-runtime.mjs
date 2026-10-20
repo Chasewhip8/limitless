@@ -4,11 +4,11 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRuntimeFixture } from './t3-fake-mcp.mjs'
 
-// Run with Bun: <bundle-directory containing index.js/t3.js> <opencode-binary> <tool-names-json>.
-const [bundleDirectory, executable, catalogFile] = process.argv.slice(2)
+// Run with Bun: <bundle-directory containing index.js/t3.js> <opencode-binary> <tool-names-json> <expected-version>.
+const [bundleDirectory, executable, catalogFile, expectedVersion] = process.argv.slice(2)
 assert(
-	bundleDirectory && executable && catalogFile,
-	'Pass <bundle-directory> <opencode-binary> <tool-names-json>',
+	bundleDirectory && executable && catalogFile && expectedVersion,
+	'Pass <bundle-directory> <opencode-binary> <tool-names-json> <expected-version>',
 )
 const { startT3Bridge } = await import(pathToFileURL(join(resolve(bundleDirectory), 't3.js')).href)
 const fixture = createRuntimeFixture(bundleDirectory, catalogFile)
@@ -101,7 +101,7 @@ const invoke = (agent, tag, extra = {}) => ({
 
 async function verify() {
 	report.version = (await api('GET', '/api/info', undefined, backend)).version
-	assert.equal(report.version, '2.0.19')
+	assert.equal(report.version, expectedVersion)
 	bridge = await startT3Bridge({
 		backend: async () => ({ url: new URL(backend), headers: { authorization: backendAuth } }),
 		password: 'isolated-t3',

@@ -1,22 +1,22 @@
 { pkgs }:
 let
-  version = "2.0.29";
+  version = "2.0.32";
   sources = {
     x86_64-linux = {
       platform = "linux-x64";
-      hash = "sha256-FLWmY4oaCTrJ1IRZnIRLEMKbRF0EhEtoLMxmjOJlMKI=";
+      hash = "sha256-ZKH0s4HC0u/BjI12ss45kUF3i0IbVMmLlL6OgIA2Btw=";
     };
     aarch64-linux = {
       platform = "linux-arm64";
-      hash = "sha256-CvOeddvfrMIPj1Me81+03MC0TAgIQgNRhhQnLyMig64=";
+      hash = "sha256-uEkjLsYdm2JNHEieVpWfU5Vm6xT45bKvXFTvI3EYz2M=";
     };
     aarch64-darwin = {
       platform = "darwin-arm64";
-      hash = "sha256-5PeaFufm/9fx4EB+EPV2hbudvGcO0rwlxbjdoU9pLhU=";
+      hash = "sha256-YtilJWZDspeEI/jpcb3IiW0sE8rAg4DRpd2UbM66Cas=";
     };
     x86_64-darwin = {
       platform = "darwin-x64";
-      hash = "sha256-sLmQ86KPn353cUahl/QlV17q+2cZGzsV8hWS11tYMK0=";
+      hash = "sha256-7Plc1SLwtI5JL7yL/kvMORZT2g/uaQ/dHSStrck+QvA=";
     };
   };
   source =

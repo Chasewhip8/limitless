@@ -2,7 +2,7 @@ import { once } from 'node:events'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { AbsolutePath, Location, Model, OpenCode, Provider } from '@opencode/client/effect'
 import { Effect } from 'effect'
-import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http'
 import { afterEach, expect, test } from 'vitest'
 import { startT3Bridge } from '../t3/bridge'
 

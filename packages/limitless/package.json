@@ -10,16 +10,16 @@
 		"./tui": "./tui.ts"
 	},
 	"dependencies": {
-		"@opencode/client": "2.0.19",
-		"@opencode/plugin": "2.0.19",
-		"@opencode/schema": "2.0.19",
-		"effect": "4.0.0-rc.112",
+		"@opencode/client": "2.0.32",
+		"@opencode/plugin": "2.0.32",
+		"@opencode/schema": "2.0.32",
+		"effect": "4.0.1",
 		"vscode-languageserver-protocol": "3.18.2"
 	},
 	"devDependencies": {
-		"@opencode/theme": "2.0.19",
-		"@opentui/core": "0.5.12",
-		"@opentui/solid": "0.5.12",
+		"@opencode/theme": "2.0.32",
+		"@opentui/core": "0.5.17",
+		"@opentui/solid": "0.5.17",
 		"solid-js": "1.9.15"
 	}
 }
