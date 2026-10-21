@@ -241,7 +241,7 @@ provider before migration. Do not enable CIMD with a private metadata URL that
 the provider cannot fetch. Use your own browser for account sign-in, not an
 agent-controlled browser.
 
-Create two scoped connections, excluding Executor's administrative apps:
+For least privilege, create two scoped connections, excluding Executor's administrative apps:
 
 - **Primary:** the intended accounts and tools, model-handled elicitation.
 - **Read:** the same intended accounts but only explicitly selected, audited
@@ -268,7 +268,41 @@ programs.limitless.mcp.executor = {
 };
 ```
 
-Run `/mcps` and sign in to `executor` and `executor-read` on each device. Their
+Alternatively, explicitly opt the primary agent into the broad endpoint:
+
+```nix
+programs.limitless.mcp.executor = {
+  enable = true;
+  url = "https://server-athena.example.ts.net:9443/mcp";
+  fullAccess = true;
+};
+```
+
+This grants the primary agent the full consented interface, including Executor
+administration and all authorized apps. Do not also set `connection`. Support
+agents remain denied the broad connection; an optional `readConnection` still
+requires a separately audited scope. One endpoint or scoped connection can be
+shared across the fleet, but every OpenCode server authorizes its own grant.
+Do not synchronize OAuth token files between machines.
+
+For a remote OpenCode host, set `callbackPort = 19876` (and optionally
+`readCallbackPort = 19877`). The browser must reach that **OpenCode host's**
+loopback listener; OpenCode 2.0.32 does not relay callbacks through its frontend.
+Open an SSH forward from the browser computer before running `/mcps` against
+the remote backend:
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes \
+  -L 127.0.0.1:19876:127.0.0.1:19876 chase@server-athena
+```
+
+Forward 19877 too when onboarding `executor-read`. Leave the waiting sign-in
+dialog open until it reports Connected. No tunnel is needed when OpenCode runs
+on the browser computer, or for ordinary refresh after authorization. These
+ports are unrelated to Executor's upstream account callback. Do not set a
+custom redirect URI or forward the OpenCode service port as a substitute.
+
+Run `/mcps` and sign in to `executor` and, when configured, `executor-read` on each device. Their
 tokens stay in OpenCode's mutable credential store. With `readConnection = null`
 (the default), support agents have no Executor tools. When supplied, Executor
 must enforce the audited scope on every `call` and `execute`; Nix cannot verify
@@ -301,7 +335,8 @@ Keep direct MCP connections until all of these are verified:
 2. Both Notion identities, the intended Atlassian site, and Sentry scope through
    the exact callback origin.
 3. Primary reads and a separately authorized write; support-agent mutation denial
-   for both direct calls and programs; neither scope exposes administration.
+   for both direct calls and programs. Scoped connections exclude administration;
+   an explicitly chosen `fullAccess` primary connection intentionally includes it.
 4. Device revocation, reconnect, upstream refresh after expiry, and restart.
 5. Persistence/restore, inaccessible state for the agent user, and resource use.
 

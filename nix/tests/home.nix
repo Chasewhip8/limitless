@@ -152,6 +152,14 @@ let
   };
   executorHome = evaluate { mcp.executor = executorSettings; };
   executorConfig = rendered executorHome;
+  executorFull = evaluate {
+    mcp.executor = {
+      enable = true;
+      fullAccess = true;
+      inherit (executorSettings) url;
+      callbackPort = 19876;
+    };
+  };
   executorPrimaryOnly = evaluate {
     mcp.executor = executorSettings // {
       readConnection = null;
@@ -160,6 +168,15 @@ let
   executorEffect =
     agent: action:
     effectFor (executorConfig.permissions ++ executorConfig.agents.${agent}.permissions) action "*";
+  executorAcceptsPort =
+    name: value:
+    (builtins.tryEval (
+      builtins.deepSeq (rendered (evaluate {
+        mcp.executor = executorSettings // {
+          ${name} = value;
+        };
+      })) true
+    )).success;
   executorAcceptsUrl =
     url:
     (builtins.tryEval (
@@ -220,8 +237,59 @@ in
 {
   executor-client =
     assert lib.assertMsg (
-      valid executorHome && valid executorPrimaryOnly
+      valid executorHome && valid executorPrimaryOnly && valid executorFull
     ) "Scoped Executor configuration must be valid";
+    assert lib.assertMsg (
+      (rendered executorFull).mcp.servers.executor.url
+      == "https://athena.example.ts.net:9443/mcp?elicitation_mode=model"
+      && (rendered executorFull).mcp.servers.executor.oauth == { callback_port = 19876; }
+      && !(executorConfig.mcp.servers.executor ? oauth)
+      && !((rendered executorFull).mcp.servers ? executor-read)
+      && lib.all (
+        agent:
+        let
+          c = rendered executorFull;
+        in
+        effectFor (c.permissions ++ c.agents.${agent}.permissions) "executor_execute" "*" == "deny"
+      ) supportAgents
+      && !(valid (evaluate {
+        mcp.executor = executorSettings // {
+          fullAccess = true;
+        };
+      }))
+    ) "Full Executor access must be an exclusive opt-in and must not grant support agents access";
+    assert lib.assertMsg (
+      let
+        fixed = evaluate {
+          mcp.executor = executorSettings // {
+            callbackPort = 19876;
+            readCallbackPort = 19877;
+          };
+        };
+      in
+      valid fixed
+      && (rendered fixed).mcp.servers.executor-read.oauth == { callback_port = 19877; }
+      && !(valid (evaluate {
+        mcp.executor = executorSettings // {
+          callbackPort = 19876;
+          readCallbackPort = 19876;
+        };
+      }))
+    ) "Remote onboarding must expose only callback_port and reject conflicting fixed listeners";
+    assert lib.assertMsg (lib.all
+      (
+        name:
+        lib.all (value: !executorAcceptsPort name value) [
+          0
+          (-1)
+          65536
+        ]
+      )
+      [
+        "callbackPort"
+        "readCallbackPort"
+      ]
+    ) "OAuth callback ports must match OpenCode's 1–65535 range";
     assert lib.assertMsg (lib.all (url: !executorAcceptsUrl url) [
       "http://example.test/mcp"
       "https://example.test/mcp?connection=unscoped"
@@ -385,11 +453,12 @@ in
         cp ${pkgs.writeText "default-opencode.json" (opencodeJson defaults)} "$out/default.json"
         cp ${pkgs.writeText "connected-opencode.json" (opencodeJson connected)} "$out/connected.json"
         cp ${pkgs.writeText "executor-opencode.json" (opencodeJson executorHome)} "$out/executor.json"
+        cp ${pkgs.writeText "executor-full-opencode.json" (opencodeJson executorFull)} "$out/executor-full.json"
         ln -s ${
           self.packages.${pkgs.stdenv.hostPlatform.system}.limitless.dependencies
         }/packages/limitless/node_modules node_modules
         cp ${./validate-config.mjs} validate-config.mjs
-        bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/executor.json"
+        bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/executor.json" "$out/executor-full.json"
         cp ${./validate-plugin.mjs} validate-plugin.mjs
         # Node needs fixture dependencies beside hosted artifacts. The runtime
         # check separately loads the original store package in real OpenCode.

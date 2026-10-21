@@ -18,18 +18,28 @@ let
     "execute"
     "resume"
   ];
-  executorServer = connection: mode: {
-    type = "remote";
-    url = "${executor.url}?connection=${connection}&elicitation_mode=${mode}";
-    codemode = false;
-    protocol = "legacy";
-  };
+  executorServer =
+    connection: mode: callbackPort:
+    {
+      type = "remote";
+      url =
+        "${executor.url}?"
+        + lib.optionalString (connection != null) "connection=${connection}&"
+        + "elicitation_mode=${mode}";
+      codemode = false;
+      protocol = "legacy";
+    }
+    // lib.optionalAttrs (callbackPort != null) {
+      oauth.callback_port = callbackPort;
+    };
   executorServers = lib.optionalAttrs executor.enable (
     {
-      executor = executorServer executor.connection "model";
+      executor = executorServer (
+        if executor.fullAccess then null else executor.connection
+      ) "model" executor.callbackPort;
     }
     // lib.optionalAttrs (executor.readConnection != null) {
-      executor-read = executorServer executor.readConnection "browser";
+      executor-read = executorServer executor.readConnection "browser" executor.readCallbackPort;
     }
   );
   presetServers = lib.mapAttrs (
@@ -96,7 +106,8 @@ in
 {
   options.programs.limitless = {
     mcp.executor = {
-      enable = lib.mkEnableOption "scoped Executor MCP connections";
+      enable = lib.mkEnableOption "Executor MCP connections";
+      fullAccess = lib.mkEnableOption "unscoped primary-agent access, including Executor administration and all authorized apps";
       url = lib.mkOption {
         type = lib.types.strMatching "https://[A-Za-z0-9.-]+(:[0-9]+)?/mcp";
         default = "https://mcp.executor.sh/mcp";
@@ -105,12 +116,22 @@ in
       connection = lib.mkOption {
         type = lib.types.strMatching "[A-Za-z0-9_-]{0,64}";
         default = "";
-        description = "Required scoped connection ID for the primary agent. Exclude Executor administration apps.";
+        description = "Scoped connection ID for the primary agent. Required unless fullAccess is explicitly enabled; leave empty with fullAccess.";
       };
       readConnection = lib.mkOption {
         type = lib.types.nullOr (lib.types.strMatching "[A-Za-z0-9_-]{1,64}");
         default = null;
         description = "Optional distinct scoped connection with exact audited read tools selected in Executor. Null denies all Executor tools to support agents.";
+      };
+      callbackPort = lib.mkOption {
+        type = lib.types.nullOr (lib.types.ints.between 1 65535);
+        default = null;
+        description = "Optional primary OAuth callback port on the OpenCode host's loopback interface. Forward this port over SSH when the browser runs elsewhere.";
+      };
+      readCallbackPort = lib.mkOption {
+        type = lib.types.nullOr (lib.types.ints.between 1 65535);
+        default = null;
+        description = "Optional loopback OAuth callback port for executor-read. Independent of Executor's upstream account callback.";
       };
     };
     mcp.servers = lib.mkOption {
@@ -160,12 +181,21 @@ in
     assertions = lib.mkIf cfg.enable (
       [
         {
-          assertion = !executor.enable || executor.connection != "";
-          message = "Executor requires a scoped connection ID; unscoped full-consent access is not supported.";
+          assertion = !executor.enable || (executor.fullAccess != (executor.connection != ""));
+          message = "Executor requires exactly one of a scoped connection ID or explicit fullAccess = true.";
         }
         {
           assertion = !executor.enable || executor.readConnection != executor.connection;
           message = "Executor primary and read connections must be distinct, separately scoped connections.";
+        }
+        {
+          assertion =
+            !executor.enable
+            || executor.readConnection == null
+            || executor.callbackPort == null
+            || executor.readCallbackPort == null
+            || executor.callbackPort != executor.readCallbackPort;
+          message = "Executor primary and read OAuth listeners must use different fixed ports.";
         }
         {
           assertion =
