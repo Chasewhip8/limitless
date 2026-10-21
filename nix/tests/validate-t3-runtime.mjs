@@ -279,7 +279,7 @@ async function verify() {
 			)
 			assert.deepEqual(
 				result.notion.filter((attempt) => attempt.ok).map((attempt) => attempt.name),
-				support.includes(result.agent) ? ['notion_fetch'] : ['notion_fetch', 'notion_update'],
+				result.agent === 'research' ? ['notion_fetch'] : ['notion_fetch', 'notion_update'],
 			)
 			report.checks.push({ tag: result.tag, agent: result.agent, tools: result.own.length })
 		}

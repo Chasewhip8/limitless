@@ -42,7 +42,7 @@ avoid conflicts with T3 Code's browser tools. Use T3 Code for browser access.
 - **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
 - **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
 - **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
-  MCP presets with account-specific connection names and audited reads for support agents.
+  MCP presets with account-specific connection names and audited reads for Research.
 - **Anthropic subscription authentication:** a pinned Claude Pro/Max plugin.
 - **Git hygiene:** `.limitless/` is globally ignored by default.
 
@@ -85,7 +85,7 @@ programs.limitless.mcp.servers.sentry = {
 Set `settings.disabled = true` to retain a configured connection without connecting
 it. Additional servers can use `programs.limitless.opencode.settings.mcp.servers`.
 Use one configuration path per server name. Native-only servers receive the same
-role-based permissions, with no automatic read exceptions for support agents.
+role-based permissions, with no automatic read exceptions for Research.
 
 ### GitHub authentication
 
@@ -130,27 +130,30 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the support-only `executor-read` connection |
-| `research`, `oracle-solve`, `oracle-design` | Read, shell, edit, and AST tools for investigations and focused diagnostic changes; audited MCP reads and the T3 browser allowlist; deny artifact creation and session changes |
+| `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection |
+| `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell/edit/AST and the T3 browser allowlist; deny artifact creation and session changes |
+| `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell/edit/AST and the T3 browser allowlist; deny external mutations, artifact creation and session changes |
 
-For each configured MCP server, support agents receive a `deny` rule followed by
-exact exceptions for audited read tools. Unknown tools, mutations, and mixed-purpose
-executors are unavailable to support agents. Read tools such as web fetch and artifact
-listing inherit the global allow rule.
+With Executor enabled, Research can use only `executor-read`; Executor's
+connection policy owns read-only enforcement. Direct MCPs are denied to Research,
+even while retained for main and Oracles. Without Executor, direct-MCP mode uses
+deny rules plus exact audited read exceptions for Research. Read tools such as
+web fetch and artifact listing inherit the global allow rule.
 
 Sensitive-file reads and potentially destructive shell commands no longer have
 default approval prompts. Shared instructions still require explicit user direction
 for destructive work. Managed-checkout edits remain denied.
 
-`readTools` replaces a preset's exact read-tool list for support agents.
+In direct-MCP mode, `readTools` replaces a preset's exact read-tool list for Research.
 Add names only after checking their behavior and the authenticated catalog.
 Wildcards are rejected. The optional `https://mcp.linear.app/mcp/readonly` endpoint
 can further restrict a Linear connection at the server. Linear's read-tool list
 is empty until verified names from an authenticated catalog are configured.
 
 These rules control named-tool access. Shell commands can write files or call
-services, and Code Mode's raw HTTP `fetch` can send write requests. Support-agent
-instructions reserve implementation and external mutations for the primary agent;
+services, and Code Mode's raw HTTP `fetch` can send write requests. Research
+instructions forbid external mutations; Oracles require explicit delegation of
+user-authorized MCP writes. The primary agent owns implementation and integration;
 the tool permissions do not provide a sandbox. Later project configuration or agent
 definitions can override global permissions. Project-local MCP additions need their
 own permission rules. A configured server must be trusted to implement its advertised
@@ -162,12 +165,12 @@ For T3's role-specific tool access and shared-service setup, see [T3 Code](#t3-c
 | --- | --- | --- |
 | [Atlassian](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/supported-tools/) | Jira and Confluence search, reads, edits, comments, transitions | Organization policies and enabled tool groups determine access. Uses the v2 flat catalog. |
 | [Notion](https://developers.notion.com/guides/mcp/mcp-supported-tools) | Pages, databases, comments, queries, uploads | Workers deployment and generic API administration are outside this preset. Tools can depend on plan. |
-| [Sentry](https://docs.sentry.io/product/sentry-mcp/) | Issues, events, traces, debugging | Release/symbol uploads and broad administration require dedicated tooling. Mixed-purpose catalog execution is unavailable to support agents. |
+| [Sentry](https://docs.sentry.io/product/sentry-mcp/) | Issues, events, traces, debugging | Release/symbol uploads and broad administration require dedicated tooling. Mixed-purpose catalog execution is unavailable to Research. |
 | [Linear](https://linear.app/docs/mcp) | Issues, projects, comments | Exact read exceptions require authenticated discovery. |
 | [GitHub](https://github.com/github/github-mcp-server) | Repositories, issues, PRs, reviews, Actions | Local Git and release uploads require separate tooling and authentication. |
 
 Before relying on a new connection, verify account identity, a representative read,
-an explicitly requested write, mutation denial in support agents, and token
+an explicitly requested write, mutation denial in Research, and token
 refresh. The repository checks generated configuration and policy behavior;
 account entitlements and live upstream tool catalogs require this authenticated
 verification.
@@ -243,15 +246,14 @@ agent-controlled browser.
 
 For least privilege, create two scoped connections, excluding Executor's administrative apps:
 
-- **Primary:** the intended accounts and tools, model-handled elicitation.
-- **Read:** the same intended accounts but only explicitly selected, audited
-  read tools; browser elicitation is a fail-safe. Do not use the automatically
-  expanding “read-only tools” selection or trust upstream annotations alone.
+- **Read/write:** main and both Oracles use the intended accounts and tools, with model-handled elicitation.
+- **Read:** Research uses a connection configured for read-only access inside
+  Executor. Browser elicitation is a fail-safe, not the read-only boundary.
 
-The current audited upstream names are in `nix/mcp-presets.nix`; enabled clients
-also receive `~/.config/limitless/executor-read-tools.json`. Map them to the
-imported app's actual catalog and review the diff. An app's account routing can
-change names and argument shapes. Connection IDs are non-secret; a connection
+No upstream read-tool list is duplicated in Nix for Executor mode. This trusts
+Executor's classification and enforcement, including its treatment of generic
+execution tools and future catalog changes. Verify that the configured policy
+rejects writes rather than relying on the connection's label. Connection IDs are non-secret; a connection
 URL is not authorization. Sign in through OAuth, not a personal access token,
 which bypasses scoped-connection restrictions.
 
@@ -268,7 +270,7 @@ programs.limitless.mcp.executor = {
 };
 ```
 
-Alternatively, explicitly opt the primary agent into the broad endpoint:
+Alternatively, explicitly opt main and the Oracles into the broad endpoint:
 
 ```nix
 programs.limitless.mcp.executor = {
@@ -278,10 +280,10 @@ programs.limitless.mcp.executor = {
 };
 ```
 
-This grants the primary agent the full consented interface, including Executor
-administration and all authorized apps. Do not also set `connection`. Support
-agents remain denied the broad connection; an optional `readConnection` still
-requires a separately audited scope. One endpoint or scoped connection can be
+This grants main and the Oracles the full consented interface, including Executor
+administration and all authorized apps. Do not also set `connection`. Research
+remains denied the broad connection; an optional `readConnection` still
+requires a separate read-only scope. One endpoint or scoped connection can be
 shared across the fleet, but every OpenCode server authorizes its own grant.
 Do not synchronize OAuth token files between machines.
 
@@ -304,15 +306,16 @@ custom redirect URI or forward the OpenCode service port as a substitute.
 
 Run `/mcps` and sign in to `executor` and, when configured, `executor-read` on each device. Their
 tokens stay in OpenCode's mutable credential store. With `readConnection = null`
-(the default), support agents have no Executor tools. When supplied, Executor
-must enforce the audited scope on every `call` and `execute`; Nix cannot verify
-the dashboard's mutable policy. The primary agent sees only `executor`, and
-support agents see only the exact wrapper tools on `executor-read`.
+(the default), Research has no MCP tools in Executor mode. When supplied, Executor
+must enforce the read-only scope on every `call` and `execute`; Nix cannot verify
+the dashboard's mutable policy. Main and Oracles see only `executor`, and
+Research sees only tools from `executor-read`, including future wrappers whose
+authorization remains Executor's responsibility.
 
 These are tool-selection rules, not a process sandbox: agents with shell access
 run as the same user and can reach that user's stored credentials. Preserve the
 instruction-level restrictions on external mutations. Test a known mutation's
-denial through both `call` and `execute` before granting support agents access.
+denial through both `call` and `execute` before granting Research access.
 
 Executor exposes its own skills/search/describe/call/execute/resume interface,
 not the upstream catalogs. `codemode = false` avoids wrapping it in a second Code
@@ -334,9 +337,9 @@ Keep direct MCP connections until all of these are verified:
 1. ARM64 startup, private routing, owner creation, and closed signup afterward.
 2. Both Notion identities, the intended Atlassian site, and Sentry scope through
    the exact callback origin.
-3. Primary reads and a separately authorized write; support-agent mutation denial
+3. Main/Oracle reads and separately authorized writes; Research mutation denial
    for both direct calls and programs. Scoped connections exclude administration;
-   an explicitly chosen `fullAccess` primary connection intentionally includes it.
+   an explicitly chosen `fullAccess` read/write connection for main and Oracles intentionally includes it.
 4. Device revocation, reconnect, upstream refresh after expiry, and restart.
 5. Persistence/restore, inaccessible state for the agent user, and resource use.
 

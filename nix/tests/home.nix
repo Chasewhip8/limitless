@@ -133,13 +133,17 @@ let
     };
   };
   connectedConfig = rendered connected;
-  primaryEffect = action: effectFor connectedConfig.permissions action "*";
+  readWriteAgents = [
+    "limitless"
+    "oracle-solve"
+    "oracle-design"
+  ];
   supportAgents = [
     "research"
     "oracle-solve"
     "oracle-design"
   ];
-  supportEffect =
+  connectedEffect =
     name: action:
     effectFor (connectedConfig.permissions ++ connectedConfig.agents.${name}.permissions) action "*";
   withServers = servers: evaluate { mcp.servers = servers; };
@@ -152,6 +156,12 @@ let
   };
   executorHome = evaluate { mcp.executor = executorSettings; };
   executorConfig = rendered executorHome;
+  executorWithDirect = evaluate {
+    mcp = {
+      executor = executorSettings;
+      servers.notion-work.preset = "notion";
+    };
+  };
   executorFull = evaluate {
     mcp.executor = {
       enable = true;
@@ -250,14 +260,15 @@ in
         let
           c = rendered executorFull;
         in
-        effectFor (c.permissions ++ c.agents.${agent}.permissions) "executor_execute" "*" == "deny"
-      ) supportAgents
+        effectFor (c.permissions ++ c.agents.${agent}.permissions) "executor_execute" "*"
+        == (if agent == "research" then "deny" else "allow")
+      ) (readWriteAgents ++ [ "research" ])
       && !(valid (evaluate {
         mcp.executor = executorSettings // {
           fullAccess = true;
         };
       }))
-    ) "Full Executor access must be an exclusive opt-in and must not grant support agents access";
+    ) "Full Executor access must be an exclusive opt-in and must never grant Research access";
     assert lib.assertMsg (
       let
         fixed = evaluate {
@@ -310,14 +321,15 @@ in
     assert lib.assertMsg (lib.all
       (
         tool:
-        executorEffect "limitless" "executor_${tool}" == "allow"
-        && executorEffect "limitless" "executor-read_${tool}" == "deny"
-        && lib.all (
+        lib.all (
           agent:
-          executorEffect agent "executor_${tool}" == "deny"
-          && executorEffect agent "executor-read_${tool}" == "allow"
+          executorEffect agent "executor_${tool}" == "allow"
+          && executorEffect agent "executor-read_${tool}" == "deny"
           && executorEffect agent "executor-read_unknown" == "deny"
-        ) supportAgents
+        ) readWriteAgents
+        && executorEffect "research" "executor_${tool}" == "deny"
+        && executorEffect "research" "executor-read_${tool}" == "allow"
+        && executorEffect "research" "executor-read_unknown" == "allow"
       )
       [
         "skills"
@@ -327,14 +339,31 @@ in
         "execute"
         "resume"
       ]
-    ) "Executor role permissions must fail closed outside the audited wrapper set";
-    assert lib.assertMsg (lib.all (
-      agent:
+    ) "Executor role permissions must route each agent only to its selected server-side policy";
+    assert lib.assertMsg (
       let
-        c = rendered executorPrimaryOnly;
+        c = rendered executorWithDirect;
+        access = agent: action: effectFor (c.permissions ++ c.agents.${agent}.permissions) action "*";
       in
-      effectFor (c.permissions ++ c.agents.${agent}.permissions) "executor_execute" "*" == "deny"
-    ) supportAgents) "Without a read connection support agents must have no Executor access";
+      access "research" "notion-work_notion-fetch" == "deny"
+      && access "research" "notion-work_notion-create-pages" == "deny"
+      && lib.all (
+        agent:
+        access agent "notion-work_notion-fetch" == "allow"
+        && access agent "notion-work_notion-create-pages" == "allow"
+      ) readWriteAgents
+    ) "Executor mode must not let Research fall back to directly authenticated MCP servers";
+    assert lib.assertMsg (lib.all
+      (
+        agent:
+        let
+          c = rendered executorPrimaryOnly;
+        in
+        effectFor (c.permissions ++ c.agents.${agent}.permissions) "executor_execute" "*"
+        == (if agent == "research" then "deny" else "allow")
+      )
+      (readWriteAgents ++ [ "research" ])
+    ) "Without a read connection Research must have no Executor access";
     assert lib.assertMsg (
       !(valid (evaluate {
         mcp.executor = executorSettings // {
@@ -359,9 +388,8 @@ in
       }))
     ) "Executor must reject unscoped, shared-role, or conflicting connections";
     assert lib.assertMsg (
-      builtins.fromJSON executorHome.config.home.file.".config/limitless/executor-read-tools.json".text
-      == lib.mapAttrs (_: preset: preset.readTools) (import ../mcp-presets.nix)
-    ) "Executor onboarding scopes must derive from the existing audited read lists";
+      !(executorHome.config.home.file ? ".config/limitless/executor-read-tools.json")
+    ) "Executor read policy must not be duplicated into a generated per-tool list";
     pkgs.runCommand "executor-client-check" { } ''touch "$out"'';
   home-module =
     assert lib.assertMsg (valid defaults && valid connected) "valid configuration failed assertions";
@@ -372,11 +400,7 @@ in
       && disabled.config.systemd.user.services == { }
     ) "a disabled module changed the home configuration";
     assert lib.assertMsg (lib.all
-      (
-        action:
-        primaryEffect action == "allow"
-        && lib.all (name: supportEffect name action == "allow") supportAgents
-      )
+      (action: lib.all (name: connectedEffect name action == "allow") ([ "limitless" ] ++ supportAgents))
       [
         "notion-work_notion-fetch"
         "atlassian_getJiraIssue"
@@ -388,7 +412,8 @@ in
     assert lib.assertMsg (lib.all
       (
         action:
-        primaryEffect action == "allow" && lib.all (name: supportEffect name action == "deny") supportAgents
+        lib.all (name: connectedEffect name action == "allow") readWriteAgents
+        && connectedEffect "research" action == "deny"
       )
       [
         "notion-work_notion-create-pages"
@@ -399,7 +424,7 @@ in
         "linear_unknown-tool"
         "custom_write"
       ]
-    ) "MCP mutations and unaudited tools must run for primary agents and be denied to support agents";
+    ) "MCP mutations and unaudited tools must be available to main and Oracles, but denied to Research";
     assert lib.assertMsg (lib.all
       (
         name:
@@ -454,11 +479,12 @@ in
         cp ${pkgs.writeText "connected-opencode.json" (opencodeJson connected)} "$out/connected.json"
         cp ${pkgs.writeText "executor-opencode.json" (opencodeJson executorHome)} "$out/executor.json"
         cp ${pkgs.writeText "executor-full-opencode.json" (opencodeJson executorFull)} "$out/executor-full.json"
+        cp ${pkgs.writeText "executor-direct-opencode.json" (opencodeJson executorWithDirect)} "$out/executor-direct.json"
         ln -s ${
           self.packages.${pkgs.stdenv.hostPlatform.system}.limitless.dependencies
         }/packages/limitless/node_modules node_modules
         cp ${./validate-config.mjs} validate-config.mjs
-        bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/executor.json" "$out/executor-full.json"
+        bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/executor.json" "$out/executor-full.json" "$out/executor-direct.json"
         cp ${./validate-plugin.mjs} validate-plugin.mjs
         # Node needs fixture dependencies beside hosted artifacts. The runtime
         # check separately loads the original store package in real OpenCode.

@@ -85,20 +85,20 @@ let
     };
     agents =
       (mergedConfig.agents or { })
-      // lib.optionalAttrs (cfg._generated.primaryMcpPermissions != [ ]) {
-        limitless = (mergedConfig.agents.limitless or { }) // {
-          permissions =
-            (mergedConfig.agents.limitless.permissions or [ ]) ++ cfg._generated.primaryMcpPermissions;
-        };
-      }
-      // lib.genAttrs [ "research" "oracle-solve" "oracle-design" ] (
+      // lib.genAttrs [ "limitless" "oracle-solve" "oracle-design" ] (
         name:
         (mergedConfig.agents.${name} or { })
         // {
           permissions =
-            (mergedConfig.agents.${name}.permissions or [ ]) ++ cfg._generated.readOnlyMcpPermissions;
+            (mergedConfig.agents.${name}.permissions or [ ]) ++ cfg._generated.readWriteMcpPermissions;
         }
-      );
+      )
+      // {
+        research = (mergedConfig.agents.research or { }) // {
+          permissions =
+            (mergedConfig.agents.research.permissions or [ ]) ++ cfg._generated.readOnlyMcpPermissions;
+        };
+      };
   };
 in
 {
@@ -140,7 +140,7 @@ in
         default = [
           (permissionRule "*" "*" "allow")
         ];
-        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials are appended; research and Oracle agents receive read-only MCP rules.";
+        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials are appended; Research receives read-only MCP rules, while main and Oracles retain read/write MCP access.";
       };
     };
 

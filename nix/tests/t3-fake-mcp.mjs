@@ -287,8 +287,9 @@ return {tag:${JSON.stringify(tag)},agent:${JSON.stringify(agent)},own,sibling,at
 									rule('question', 'deny'),
 									rule('subagent', 'deny'),
 									...(id.startsWith('oracle-') ? [rule('subagent', 'allow', 'research')] : []),
-									rule('notion-work_*', 'deny'),
-									rule('notion-work_notion_fetch', 'allow'),
+									...(id === 'research'
+										? [rule('notion-work_*', 'deny'), rule('notion-work_notion_fetch', 'allow')]
+										: []),
 								],
 				},
 			]),

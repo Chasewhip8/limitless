@@ -10,14 +10,6 @@ let
   presets = import ../mcp-presets.nix;
   connections = cfg.mcp.servers;
   executor = cfg.mcp.executor;
-  executorTools = [
-    "skills"
-    "search"
-    "describe"
-    "call"
-    "execute"
-    "resume"
-  ];
   executorServer =
     connection: mode: callbackPort:
     {
@@ -75,14 +67,14 @@ let
   };
   readRules =
     name:
-    map (tool: rule "${normalize name}_${tool}" "allow") (
-      if executor.enable && executor.readConnection != null && name == "executor-read" then
-        executorTools
-      else if builtins.hasAttr name connections then
-        connections.${name}.readTools
-      else
-        [ ]
-    );
+    if executor.enable then
+      lib.optional (executor.readConnection != null && name == "executor-read") (
+        rule "${normalize name}_*" "allow"
+      )
+    else
+      map (tool: rule "${normalize name}_${tool}" "allow") (
+        if builtins.hasAttr name connections then connections.${name}.readTools else [ ]
+      );
   readOnlyPermissions = lib.concatMap (
     name: [ (rule "${normalize name}_*" "deny") ] ++ readRules name
   ) names;
@@ -107,7 +99,7 @@ in
   options.programs.limitless = {
     mcp.executor = {
       enable = lib.mkEnableOption "Executor MCP connections";
-      fullAccess = lib.mkEnableOption "unscoped primary-agent access, including Executor administration and all authorized apps";
+      fullAccess = lib.mkEnableOption "unscoped main/Oracle access, including Executor administration and all authorized apps";
       url = lib.mkOption {
         type = lib.types.strMatching "https://[A-Za-z0-9.-]+(:[0-9]+)?/mcp";
         default = "https://mcp.executor.sh/mcp";
@@ -116,17 +108,17 @@ in
       connection = lib.mkOption {
         type = lib.types.strMatching "[A-Za-z0-9_-]{0,64}";
         default = "";
-        description = "Scoped connection ID for the primary agent. Required unless fullAccess is explicitly enabled; leave empty with fullAccess.";
+        description = "Scoped read/write connection ID shared by main and Oracles. Required unless fullAccess is explicitly enabled; leave empty with fullAccess.";
       };
       readConnection = lib.mkOption {
         type = lib.types.nullOr (lib.types.strMatching "[A-Za-z0-9_-]{1,64}");
         default = null;
-        description = "Optional distinct scoped connection with exact audited read tools selected in Executor. Null denies all Executor tools to support agents.";
+        description = "Optional distinct connection whose read-only policy is enforced by Executor. Research is routed only to this connection when Executor is enabled; null leaves Research without MCP access.";
       };
       callbackPort = lib.mkOption {
         type = lib.types.nullOr (lib.types.ints.between 1 65535);
         default = null;
-        description = "Optional primary OAuth callback port on the OpenCode host's loopback interface. Forward this port over SSH when the browser runs elsewhere.";
+        description = "Optional read/write connection OAuth callback port on the OpenCode host's loopback interface. Forward this port over SSH when the browser runs elsewhere.";
       };
       readCallbackPort = lib.mkOption {
         type = lib.types.nullOr (lib.types.ints.between 1 65535);
@@ -153,7 +145,7 @@ in
               readTools = lib.mkOption {
                 type = lib.types.listOf (lib.types.strMatching "[A-Za-z0-9_-]+");
                 default = presets.${config.preset}.readTools;
-                description = "Exact read-only tool names available to research and Oracle agents. Replaces the preset list.";
+                description = "Exact read-only tools available to Research in direct-MCP mode (Executor disabled). Replaces the preset list; Executor mode delegates read-only policy to its read connection instead.";
               };
             };
           }
@@ -163,18 +155,15 @@ in
     _generated = {
       mcpServers = generatedOption (lib.types.attrsOf jsonFormat.type);
       readOnlyMcpPermissions = generatedOption (lib.types.listOf jsonFormat.type);
-      primaryMcpPermissions = generatedOption (lib.types.listOf jsonFormat.type);
+      readWriteMcpPermissions = generatedOption (lib.types.listOf jsonFormat.type);
     };
   };
 
   config = {
-    home.file.".config/limitless/executor-read-tools.json" = lib.mkIf (cfg.enable && executor.enable) {
-      text = builtins.toJSON (lib.mapAttrs (_: preset: preset.readTools) presets);
-    };
     programs.limitless._generated = {
       mcpServers = servers;
       readOnlyMcpPermissions = readOnlyPermissions;
-      primaryMcpPermissions = lib.optional (executor.enable && executor.readConnection != null) (
+      readWriteMcpPermissions = lib.optional (executor.enable && executor.readConnection != null) (
         rule "executor-read_*" "deny"
       );
     };
