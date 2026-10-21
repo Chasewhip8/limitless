@@ -53,6 +53,10 @@
             };
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            executor-service = import ./nix/tests/executor-service.nix {
+              inherit pkgs nixpkgs;
+              module = self.nixosModules.executor;
+            };
             t3-browser = import ./nix/tests/t3-browser.nix {
               inherit pkgs;
               package = self.packages.${system}.t3;
@@ -76,6 +80,7 @@
     )
     // {
       homeModules.default = import ./nix/modules/home.nix { inherit self; };
+      nixosModules.executor = ./nix/modules/executor-service.nix;
       overlays.default = final: _prev: {
         abilities-skills = self.packages.${final.stdenv.hostPlatform.system}.skills;
         abilities-opencode-agents = self.packages.${final.stdenv.hostPlatform.system}.opencode-agents;

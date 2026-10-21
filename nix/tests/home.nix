@@ -144,6 +144,32 @@ let
     effectFor (connectedConfig.permissions ++ connectedConfig.agents.${name}.permissions) action "*";
   withServers = servers: evaluate { mcp.servers = servers; };
 
+  executorSettings = {
+    enable = true;
+    url = "https://athena.example.ts.net:9443/mcp";
+    connection = "primary-connection";
+    readConnection = "read-connection";
+  };
+  executorHome = evaluate { mcp.executor = executorSettings; };
+  executorConfig = rendered executorHome;
+  executorPrimaryOnly = evaluate {
+    mcp.executor = executorSettings // {
+      readConnection = null;
+    };
+  };
+  executorEffect =
+    agent: action:
+    effectFor (executorConfig.permissions ++ executorConfig.agents.${agent}.permissions) action "*";
+  executorAcceptsUrl =
+    url:
+    (builtins.tryEval (
+      builtins.deepSeq (rendered (evaluate {
+        mcp.executor = executorSettings // {
+          inherit url;
+        };
+      })) true
+    )).success;
+
   supervised = evaluate {
     opencode.service = {
       enable = true;
@@ -192,6 +218,83 @@ let
   ) (throw "Missing opencode-t3 launcher") defaults.config.home.packages;
 in
 {
+  executor-client =
+    assert lib.assertMsg (
+      valid executorHome && valid executorPrimaryOnly
+    ) "Scoped Executor configuration must be valid";
+    assert lib.assertMsg (lib.all (url: !executorAcceptsUrl url) [
+      "http://example.test/mcp"
+      "https://example.test/mcp?connection=unscoped"
+      "https://user:password@example.test/mcp"
+      "https://example.test/mcp#fragment"
+    ]) "Executor endpoints must be HTTPS without embedded credentials or query overrides";
+    assert lib.assertMsg (
+      executorConfig.mcp.servers.executor.url
+      == "https://athena.example.ts.net:9443/mcp?connection=primary-connection&elicitation_mode=model"
+      &&
+        executorConfig.mcp.servers.executor-read.url
+        == "https://athena.example.ts.net:9443/mcp?connection=read-connection&elicitation_mode=browser"
+      && !executorConfig.mcp.servers.executor.codemode
+      && !executorConfig.mcp.servers.executor-read.codemode
+      && executorConfig.mcp.servers.executor.protocol == "legacy"
+      && !((rendered executorPrimaryOnly).mcp.servers ? executor-read)
+    ) "Executor must use scoped OAuth URLs and expose its wrappers without double Code Mode";
+    assert lib.assertMsg (lib.all
+      (
+        tool:
+        executorEffect "limitless" "executor_${tool}" == "allow"
+        && executorEffect "limitless" "executor-read_${tool}" == "deny"
+        && lib.all (
+          agent:
+          executorEffect agent "executor_${tool}" == "deny"
+          && executorEffect agent "executor-read_${tool}" == "allow"
+          && executorEffect agent "executor-read_unknown" == "deny"
+        ) supportAgents
+      )
+      [
+        "skills"
+        "search"
+        "describe"
+        "call"
+        "execute"
+        "resume"
+      ]
+    ) "Executor role permissions must fail closed outside the audited wrapper set";
+    assert lib.assertMsg (lib.all (
+      agent:
+      let
+        c = rendered executorPrimaryOnly;
+      in
+      effectFor (c.permissions ++ c.agents.${agent}.permissions) "executor_execute" "*" == "deny"
+    ) supportAgents) "Without a read connection support agents must have no Executor access";
+    assert lib.assertMsg (
+      !(valid (evaluate {
+        mcp.executor = executorSettings // {
+          connection = "";
+        };
+      }))
+      && !(valid (evaluate {
+        mcp.executor = executorSettings // {
+          readConnection = "primary-connection";
+        };
+      }))
+      && !(valid (evaluate {
+        mcp.executor = executorSettings;
+        opencode.settings.mcp.servers.executor = {
+          type = "remote";
+          url = "https://example.test/mcp";
+        };
+      }))
+      && !(valid (evaluate {
+        mcp.executor = executorSettings;
+        mcp.servers.executor-read.preset = "notion";
+      }))
+    ) "Executor must reject unscoped, shared-role, or conflicting connections";
+    assert lib.assertMsg (
+      builtins.fromJSON executorHome.config.home.file.".config/limitless/executor-read-tools.json".text
+      == lib.mapAttrs (_: preset: preset.readTools) (import ../mcp-presets.nix)
+    ) "Executor onboarding scopes must derive from the existing audited read lists";
+    pkgs.runCommand "executor-client-check" { } ''touch "$out"'';
   home-module =
     assert lib.assertMsg (valid defaults && valid connected) "valid configuration failed assertions";
     assert lib.assertMsg (
@@ -281,11 +384,12 @@ in
         mkdir -p "$out"
         cp ${pkgs.writeText "default-opencode.json" (opencodeJson defaults)} "$out/default.json"
         cp ${pkgs.writeText "connected-opencode.json" (opencodeJson connected)} "$out/connected.json"
+        cp ${pkgs.writeText "executor-opencode.json" (opencodeJson executorHome)} "$out/executor.json"
         ln -s ${
           self.packages.${pkgs.stdenv.hostPlatform.system}.limitless.dependencies
         }/packages/limitless/node_modules node_modules
         cp ${./validate-config.mjs} validate-config.mjs
-        bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json"
+        bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/executor.json"
         cp ${./validate-plugin.mjs} validate-plugin.mjs
         # Node needs fixture dependencies beside hosted artifacts. The runtime
         # check separately loads the original store package in real OpenCode.

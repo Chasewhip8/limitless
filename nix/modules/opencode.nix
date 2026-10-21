@@ -85,6 +85,12 @@ let
     };
     agents =
       (mergedConfig.agents or { })
+      // lib.optionalAttrs (cfg._generated.primaryMcpPermissions != [ ]) {
+        limitless = (mergedConfig.agents.limitless or { }) // {
+          permissions =
+            (mergedConfig.agents.limitless.permissions or [ ]) ++ cfg._generated.primaryMcpPermissions;
+        };
+      }
       // lib.genAttrs [ "research" "oracle-solve" "oracle-design" ] (
         name:
         (mergedConfig.agents.${name} or { })
@@ -263,7 +269,19 @@ in
           builtins.readFile "${self}/opencode/AGENTS.md"
           + lib.optionalString (cfg.opencode.extraAgentsFile != null) (
             "\n\n" + builtins.readFile cfg.opencode.extraAgentsFile
-          );
+          )
+          + lib.optionalString cfg.mcp.executor.enable ''
+
+
+            ## Executor
+
+            Read the relevant Executor skills and discover exact tool signatures before calling an app.
+            Check the selected account; work and personal connections are separate identities.
+            Executor approvals do not replace the user's authorization requirements.
+            A connection failure or lost execution does not prove that its writes failed.
+            After an interrupted or lost call, inspect current state before retrying a mutation;
+            never automatically replay an execute program whose effects are uncertain.
+          '';
         "${opencodeDir}/agents" = {
           source = cfg.agents.package;
           recursive = true;

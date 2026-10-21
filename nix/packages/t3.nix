@@ -108,6 +108,18 @@ stdenv.mkDerivation {
     runHook postInstall
   '';
 
+  # Grow RUNPATH before autoPatchelf changes the interpreter: the opposite order
+  # corrupts LOAD segments with patchelf 0.19.2 (NixOS/patchelf#674). Remove once
+  # nixpkgs includes upstream fix 59acc3d98b4961cfddf02090d9426ac735603218.
+  preFixup = ''
+    patchelf --set-rpath ${
+      lib.makeLibraryPath [
+        stdenv.cc.cc.lib
+        libgcc
+      ]
+    } "$out/lib/t3/t3"
+  '';
+
   doInstallCheck = stdenv.buildPlatform.canExecute stdenv.hostPlatform;
   nativeInstallCheckInputs = [ versionCheckHook ];
   versionCheckProgramArg = "--version";

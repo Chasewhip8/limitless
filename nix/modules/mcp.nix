@@ -9,11 +9,34 @@ let
   jsonFormat = pkgs.formats.json { };
   presets = import ../mcp-presets.nix;
   connections = cfg.mcp.servers;
+  executor = cfg.mcp.executor;
+  executorTools = [
+    "skills"
+    "search"
+    "describe"
+    "call"
+    "execute"
+    "resume"
+  ];
+  executorServer = connection: mode: {
+    type = "remote";
+    url = "${executor.url}?connection=${connection}&elicitation_mode=${mode}";
+    codemode = false;
+    protocol = "legacy";
+  };
+  executorServers = lib.optionalAttrs executor.enable (
+    {
+      executor = executorServer executor.connection "model";
+    }
+    // lib.optionalAttrs (executor.readConnection != null) {
+      executor-read = executorServer executor.readConnection "browser";
+    }
+  );
   presetServers = lib.mapAttrs (
     _: connection: lib.recursiveUpdate presets.${connection.preset}.settings connection.settings
   ) connections;
   nativeServers = cfg.opencode.settings.mcp.servers or { };
-  servers = presetServers // nativeServers;
+  servers = presetServers // nativeServers // executorServers;
   names = builtins.attrNames servers;
   normalize =
     name:
@@ -43,7 +66,12 @@ let
   readRules =
     name:
     map (tool: rule "${normalize name}_${tool}" "allow") (
-      if builtins.hasAttr name connections then connections.${name}.readTools else [ ]
+      if executor.enable && executor.readConnection != null && name == "executor-read" then
+        executorTools
+      else if builtins.hasAttr name connections then
+        connections.${name}.readTools
+      else
+        [ ]
     );
   readOnlyPermissions = lib.concatMap (
     name: [ (rule "${normalize name}_*" "deny") ] ++ readRules name
@@ -67,6 +95,24 @@ let
 in
 {
   options.programs.limitless = {
+    mcp.executor = {
+      enable = lib.mkEnableOption "scoped Executor MCP connections";
+      url = lib.mkOption {
+        type = lib.types.strMatching "https://[A-Za-z0-9.-]+(:[0-9]+)?/mcp";
+        default = "https://mcp.executor.sh/mcp";
+        description = "HTTPS MCP endpoint without query parameters. Credentials remain in OpenCode's runtime store.";
+      };
+      connection = lib.mkOption {
+        type = lib.types.strMatching "[A-Za-z0-9_-]{0,64}";
+        default = "";
+        description = "Required scoped connection ID for the primary agent. Exclude Executor administration apps.";
+      };
+      readConnection = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "[A-Za-z0-9_-]{1,64}");
+        default = null;
+        description = "Optional distinct scoped connection with exact audited read tools selected in Executor. Null denies all Executor tools to support agents.";
+      };
+    };
     mcp.servers = lib.mkOption {
       default = { };
       description = "Named first-party MCP connections. Each name has separate OpenCode OAuth state.";
@@ -96,16 +142,38 @@ in
     _generated = {
       mcpServers = generatedOption (lib.types.attrsOf jsonFormat.type);
       readOnlyMcpPermissions = generatedOption (lib.types.listOf jsonFormat.type);
+      primaryMcpPermissions = generatedOption (lib.types.listOf jsonFormat.type);
     };
   };
 
   config = {
+    home.file.".config/limitless/executor-read-tools.json" = lib.mkIf (cfg.enable && executor.enable) {
+      text = builtins.toJSON (lib.mapAttrs (_: preset: preset.readTools) presets);
+    };
     programs.limitless._generated = {
       mcpServers = servers;
       readOnlyMcpPermissions = readOnlyPermissions;
+      primaryMcpPermissions = lib.optional (executor.enable && executor.readConnection != null) (
+        rule "executor-read_*" "deny"
+      );
     };
     assertions = lib.mkIf cfg.enable (
       [
+        {
+          assertion = !executor.enable || executor.connection != "";
+          message = "Executor requires a scoped connection ID; unscoped full-consent access is not supported.";
+        }
+        {
+          assertion = !executor.enable || executor.readConnection != executor.connection;
+          message = "Executor primary and read connections must be distinct, separately scoped connections.";
+        }
+        {
+          assertion =
+            lib.intersectLists (builtins.attrNames executorServers) (
+              builtins.attrNames presetServers ++ builtins.attrNames nativeServers
+            ) == [ ];
+          message = "Managed Executor connections must not also appear in mcp.servers or opencode.settings.mcp.servers.";
+        }
         {
           assertion =
             lib.intersectLists (builtins.attrNames presetServers) (builtins.attrNames nativeServers) == [ ];

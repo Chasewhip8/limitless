@@ -113,7 +113,18 @@ for (const file of files) {
 		}
 		expectEffect('shell', 'bun run test', 'allow')
 		for (const server of Object.keys(input.mcp.servers)) {
-			expectEffect(`${server}_unknown-tool`, '*', supportAgents.includes(name) ? 'deny' : 'allow')
+			expectEffect(
+				`${server}_unknown-tool`,
+				'*',
+				supportAgents.includes(name) || server === 'executor-read' ? 'deny' : 'allow',
+			)
+			if (server === 'executor' || server === 'executor-read') {
+				const allowed =
+					server === 'executor-read' ? supportAgents.includes(name) : name === 'limitless'
+				for (const tool of ['skills', 'search', 'describe', 'call', 'execute', 'resume']) {
+					expectEffect(`${server}_${tool}`, '*', allowed ? 'allow' : 'deny')
+				}
+			}
 		}
 		if (supportAgents.includes(name)) {
 			expectEffect('question', '*', 'deny')

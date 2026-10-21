@@ -52,6 +52,9 @@ OpenCode's native Code Mode. Every Limitless tool resolves the invoking session'
 
 ## MCP connections
 
+For a shared self-hosted OAuth gateway, see [Executor](#executor). Direct
+connections remain the default and can stay in place during a gateway pilot.
+
 Each entry names one connection. Enable only the services you use:
 
 ```nix
@@ -127,7 +130,7 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation |
+| `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the support-only `executor-read` connection |
 | `research`, `oracle-solve`, `oracle-design` | Read, shell, edit, and AST tools for investigations and focused diagnostic changes; audited MCP reads and the T3 browser allowlist; deny artifact creation and session changes |
 
 For each configured MCP server, support agents receive a `deny` rule followed by
@@ -168,6 +171,137 @@ an explicitly requested write, mutation denial in support agents, and token
 refresh. The repository checks generated configuration and policy behavior;
 account entitlements and live upstream tool catalogs require this authenticated
 verification.
+
+## Executor
+
+Limitless can host Executor on NixOS and configure its scoped connections on any
+OpenCode client. Executor owns upstream account grants; each client signs in to
+Executor separately. AI-provider authentication is independent and unchanged.
+
+```text
+OpenCode clients ── private HTTPS ── Executor ── Notion / Atlassian / Sentry
+  client grants                    upstream OAuth and persistent database
+```
+
+### Server
+
+Import `limitless.nixosModules.executor` and enable the service:
+
+```nix
+services.limitless.executor = {
+  enable = true;
+  origin = "https://server-athena.example.ts.net:9443";
+};
+```
+
+The service uses a pinned official multi-platform container with rootful Podman,
+bridge networking, and a loopback-only port (4400 by default). It does not add a
+user to a privileged container group or open the host firewall. The consuming
+configuration owns private HTTPS routing and its access rules; use a dedicated
+Tailscale Serve port rather than changing existing routes.
+
+For first-owner setup, use `origin = "http://localhost:4400"` and leave the HTTPS
+route disabled. Forward the loopback port over SSH and create the owner in your
+browser. Verify `/api/auth/self-host/config` reports `setup: false`, then set the
+final HTTPS origin and enable its route. An empty instance's owner setup is
+unauthenticated; do not expose it to the whole tailnet before creating the owner.
+
+Executor creates its database, OAuth encryption keys, auth key, and apps in
+`/var/lib/limitless-executor/product`, behind a root-owned 0700 parent directory.
+Podman uses a dedicated subordinate-ID range: its internal UID 1000 is **not**
+the agent's host UID 1000. The product and collector mounts get mapped ownership;
+never share these mounts with another service or manually reuse its ID range.
+Do not protect backups of its master keys with an encryption identity already
+readable by agent processes. The container is
+the credential boundary, not a sandbox for the machine's administrator. Never
+copy its database or upstream refresh tokens to clients or the Nix store.
+
+Before upgrades, stop the service and back up the **whole** state directory to a
+root-only location, then restart it. Database and keys must be restored together.
+There is no automatic off-host backup or database downgrade guarantee. The
+collector cache is disposable; treat logs and traces as potentially sensitive.
+
+### Accounts and scopes
+
+Create the owner yourself, then connect the official remote MCP services from
+the dashboard. Use separate apps/accounts named `notion-work`, `notion-personal`,
+`atlassian`, and `sentry`; verify each account and workspace. For Atlassian, use
+`https://mcp.atlassian.com/v2/mcp?tools=all` and select the intended site. Do not
+replace these with REST integrations and assume their OAuth requirements match.
+
+Dynamic client registration can use a private HTTPS callback when the browser
+is on the tailnet **and the provider permits that redirect**. Test each actual
+provider before migration. Do not enable CIMD with a private metadata URL that
+the provider cannot fetch. Use your own browser for account sign-in, not an
+agent-controlled browser.
+
+Create two scoped connections, excluding Executor's administrative apps:
+
+- **Primary:** the intended accounts and tools, model-handled elicitation.
+- **Read:** the same intended accounts but only explicitly selected, audited
+  read tools; browser elicitation is a fail-safe. Do not use the automatically
+  expanding “read-only tools” selection or trust upstream annotations alone.
+
+The current audited upstream names are in `nix/mcp-presets.nix`; enabled clients
+also receive `~/.config/limitless/executor-read-tools.json`. Map them to the
+imported app's actual catalog and review the diff. An app's account routing can
+change names and argument shapes. Connection IDs are non-secret; a connection
+URL is not authorization. Sign in through OAuth, not a personal access token,
+which bypasses scoped-connection restrictions.
+
+### Clients
+
+After creating and verifying the scopes:
+
+```nix
+programs.limitless.mcp.executor = {
+  enable = true;
+  url = "https://server-athena.example.ts.net:9443/mcp";
+  connection = "primary-connection-id";
+  readConnection = "read-connection-id";
+};
+```
+
+Run `/mcps` and sign in to `executor` and `executor-read` on each device. Their
+tokens stay in OpenCode's mutable credential store. With `readConnection = null`
+(the default), support agents have no Executor tools. When supplied, Executor
+must enforce the audited scope on every `call` and `execute`; Nix cannot verify
+the dashboard's mutable policy. The primary agent sees only `executor`, and
+support agents see only the exact wrapper tools on `executor-read`.
+
+These are tool-selection rules, not a process sandbox: agents with shell access
+run as the same user and can reach that user's stored credentials. Preserve the
+instruction-level restrictions on external mutations. Test a known mutation's
+denial through both `call` and `execute` before granting support agents access.
+
+Executor exposes its own skills/search/describe/call/execute/resume interface,
+not the upstream catalogs. `codemode = false` avoids wrapping it in a second Code
+Mode layer. Upstream resources, prompts, session state, URL elicitation, and
+OpenCode session metadata are not transparently forwarded. Verify the workflows
+you need rather than treating this as a transparent MCP proxy.
+
+Revoke a device under **Connected agents**; revoke a scoped connection to revoke
+all its device grants. Keep an onboarding record if clients display identical
+names. This is not per-project isolation. An unavailable Athena means unavailable
+gateway tools; native provider accounts and local tools continue independently.
+An Executor restart can lose paused executions. Inspect effects before retrying
+a mutation; never automatically replay an uncertain program.
+
+### Pilot acceptance
+
+Keep direct MCP connections until all of these are verified:
+
+1. ARM64 startup, private routing, owner creation, and closed signup afterward.
+2. Both Notion identities, the intended Atlassian site, and Sentry scope through
+   the exact callback origin.
+3. Primary reads and a separately authorized write; support-agent mutation denial
+   for both direct calls and programs; neither scope exposes administration.
+4. Device revocation, reconnect, upstream refresh after expiry, and restart.
+5. Persistence/restore, inaccessible state for the agent user, and resource use.
+
+Only then cut clients over one host at a time. Account authorization, mutable
+scope validation, credential expiry, and actual provider access need live checks;
+the Nix checks establish generated configuration and permission behavior only.
 
 ## Configuration and layout
 
