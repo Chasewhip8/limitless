@@ -59,7 +59,12 @@ in
         containers.limitless-executor = {
           inherit (cfg) image;
           autoStart = true;
-          podman.user = "root";
+          podman = {
+            user = "root";
+            # Conmon starts before initial database setup finishes. Keep the
+            # systemd start job open until the image's healthcheck succeeds.
+            sdnotify = "healthy";
+          };
           user = "1000:1000";
           ports = [ "127.0.0.1:${toString cfg.port}:4400" ];
           # :U assigns the mapped container UID, not the agent's host UID.

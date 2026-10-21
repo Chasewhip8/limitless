@@ -43,6 +43,7 @@ assert lib.assertMsg (
   && container.ports == [ "127.0.0.1:4400:4400" ]
   && builtins.match ".*@sha256:[0-9a-f]{64}" container.image != null
   && container.user == "1000:1000"
+  && container.podman.sdnotify == "healthy"
   && lib.all (flag: builtins.elem flag container.extraOptions) [
     "--network=bridge"
     "--subuidname=limitless-executor"
