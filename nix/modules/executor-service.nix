@@ -74,6 +74,7 @@ in
           ];
           environment = {
             BETTER_AUTH_URL = cfg.origin;
+            EXECUTOR_CATALOG_URL = "https://catalog.executor.sh/index.json";
             DO_NOT_TRACK = "1";
             EXECUTOR_APPS_ALLOW_PRIVATE_FETCH = "false";
             EXECUTOR_APP_WORKERS = toString cfg.workerLimit;

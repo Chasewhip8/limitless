@@ -200,6 +200,12 @@ user to a privileged container group or open the host firewall. The consuming
 configuration owns private HTTPS routing and its access rules; use a dedicated
 Tailscale Serve port rather than changing existing routes.
 
+The service enables Executor's official app catalog. Catalog apps declare their
+own authentication requirements and may use REST APIs rather than hosted MCP.
+For the existing Notion, Atlassian, and Sentry MCP accounts, choose **Add app →
+Connect a service** and enter the official MCP URL; this works independently of
+the catalog feed.
+
 For first-owner setup, use `origin = "http://localhost:4400"` and leave the HTTPS
 route disabled. Forward the loopback port over SSH and create the owner in your
 browser. Verify `/api/auth/self-host/config` reports `setup: false`, then set the

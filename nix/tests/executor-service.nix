@@ -67,6 +67,7 @@ assert lib.assertMsg
     && builtins.elem "d /var/lib/limitless-executor 0700 root root -" enabled.systemd.tmpfiles.rules
     && builtins.elem "d /var/lib/limitless-executor/product 0700 - - -" enabled.systemd.tmpfiles.rules
     && container.environment.BETTER_AUTH_URL == "https://athena.example.ts.net:9443"
+    && container.environment.EXECUTOR_CATALOG_URL == "https://catalog.executor.sh/index.json"
     &&
       bootstrap.virtualisation.oci-containers.containers.limitless-executor.environment.BETTER_AUTH_URL
       == "http://localhost:4400"
