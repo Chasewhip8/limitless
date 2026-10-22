@@ -46,7 +46,7 @@ function effectFor(rules: Permission.Ruleset, action: string, resource = '*') {
 
 describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 	const namespace = canonicalT3Namespace(sourceNamespace)
-	test('retains 80 primary tools and denies all three delegation tools', () => {
+	test('retains 78 primary tools and denies delegation and HTML visual tools', () => {
 		const rules = [
 			...nativeDefaults,
 			...normalizeT3Permissions(t3Rules(sourceNamespace), 'limitless'),
@@ -54,8 +54,35 @@ describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 		expect(toolNames).toHaveLength(83)
 		expect(effectFor(rules, `${namespace}_extra_delegate_task`)).toBe('allow')
 		expect(toolNames.filter((name) => effectFor(rules, `${namespace}_${name}`) === 'deny')).toEqual(
-			['delegate_task', 'task_cancel', 'task_status'],
+			['delegate_task', 'html_preview', 'html_render', 'task_cancel', 'task_status'],
 		)
+	})
+
+	test.each([
+		'limitless',
+		...supportAgents,
+	])('denies HTML visuals despite explicit grants for %s', (agent) => {
+		const rules = [
+			...nativeDefaults,
+			...normalizeT3Permissions(
+				[
+					...t3Rules(sourceNamespace),
+					...['t3-code', sourceNamespace].flatMap((server) =>
+						['html_preview', 'html_render'].map((name) => ({
+							action: `${server}_${name}`,
+							resource: '*',
+							effect: 'allow' as const,
+						})),
+					),
+				],
+				agent,
+			),
+		]
+		for (const server of ['t3-code', namespace]) {
+			for (const name of ['html_preview', 'html_render']) {
+				expect(effectFor(rules, `${server}_${name}`)).toBe('deny')
+			}
+		}
 	})
 
 	test.each(supportAgents)('exposes only the 21 browser tools to %s', (agent) => {

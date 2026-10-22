@@ -7,6 +7,8 @@ test('loads distinct T3-only Markdown templates', async () => {
 	const guidance = await Effect.runPromise(loadT3Guidance())
 	expect(guidance.primary).toContain('## T3 Code integration')
 	expect(guidance.primary).toContain('t3_thread_launch')
+	expect(guidance.primary).not.toContain('html_preview')
+	expect(guidance.primary).not.toContain('html_render')
 	expect(guidance.support).toContain('## T3 Code investigation tools')
 	expect(guidance.support).not.toContain('t3_thread_launch')
 })

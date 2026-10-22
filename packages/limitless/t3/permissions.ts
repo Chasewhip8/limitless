@@ -36,7 +36,7 @@ export const T3_BROWSER_TOOLS = [
 const supportAgents = new Set(['research', 'oracle-solve', 'oracle-design'])
 export const isT3SupportAgent = (agent: string | undefined) =>
 	agent !== undefined && supportAgents.has(agent)
-const delegationTools = ['delegate_task', 'task_status', 'task_cancel']
+const disabledTools = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
 
 function rule(action: string, effect: Permission.Effect): Permission.Rule {
 	return { action, resource: '*', effect }
@@ -119,7 +119,7 @@ function managedRules(namespace: string | undefined, support: boolean): Permissi
 							]
 						: []),
 				]),
-		...delegationTools.flatMap((name) => [
+		...disabledTools.flatMap((name) => [
 			rule(`t3-code_${name}`, 'deny'),
 			...(namespace === undefined ? [] : [rule(`${namespace}_${name}`, 'deny')]),
 		]),

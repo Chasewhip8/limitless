@@ -32,7 +32,7 @@ export function createRuntimeFixture(bundleDirectory, catalogFile) {
 		't3_preview_list',
 	]
 	const support = ['research', 'oracle-solve', 'oracle-design']
-	const prohibited = ['delegate_task', 'task_status', 'task_cancel']
+	const prohibited = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
 	const sourceOwn = 't3-code-thread_with_underscores'
 	const sourceSibling = 't3-code-thread_with_underscores_child'
 	const own = 't3-code-a2e5ba16d672e66b1ab8ab7b78d2f175'

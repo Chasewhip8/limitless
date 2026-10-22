@@ -652,8 +652,9 @@ no password needs copying into T3 settings. Other CLI use still goes through `op
 
 ### Behavior
 
-All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`. Limitless
-retains T3's other tools, including requested top-level thread creation and management.
+All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`, plus the
+broken HTML visual tools `html_preview` and `html_render`. Limitless retains T3's
+other tools, including requested top-level thread creation and management.
 Support agents receive only these 21 browser tools:
 
 ```text

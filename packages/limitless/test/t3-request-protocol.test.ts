@@ -95,6 +95,8 @@ test('accepts omitted create fields encoded as null by the actual OpenCode Effec
 			{ action: 't3-code-*', resource: '*', effect: 'deny' },
 			{ action: `${namespace}_*`, resource: '*', effect: 'allow' },
 			{ action: `${namespace}_delegate_task`, resource: '*', effect: 'deny' },
+			{ action: `${namespace}_html_preview`, resource: '*', effect: 'deny' },
+			{ action: `${namespace}_html_render`, resource: '*', effect: 'deny' },
 		]),
 	})
 	expect(forwardedBody).not.toMatchObject({
