@@ -10,14 +10,18 @@ let
   presets = import ../mcp-presets.nix;
   connections = cfg.mcp.servers;
   executor = cfg.mcp.executor;
+  # OpenCode binds OAuth to this exact URL, and Executor accepts only its canonical
+  # resource spelling: connection first, with its default model mode left implicit.
   executorServer =
     connection: mode: callbackPort:
+    let
+      query =
+        lib.optional (connection != null) "connection=${connection}"
+        ++ lib.optional (mode != "model") "elicitation_mode=${mode}";
+    in
     {
       type = "remote";
-      url =
-        "${executor.url}?"
-        + lib.optionalString (connection != null) "connection=${connection}&"
-        + "elicitation_mode=${mode}";
+      url = executor.url + lib.optionalString (query != [ ]) "?${lib.concatStringsSep "&" query}";
       codemode = false;
       protocol = "legacy";
     }

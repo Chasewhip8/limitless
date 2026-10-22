@@ -250,8 +250,7 @@ in
       valid executorHome && valid executorPrimaryOnly && valid executorFull
     ) "Scoped Executor configuration must be valid";
     assert lib.assertMsg (
-      (rendered executorFull).mcp.servers.executor.url
-      == "https://athena.example.ts.net:9443/mcp?elicitation_mode=model"
+      (rendered executorFull).mcp.servers.executor.url == "https://athena.example.ts.net:9443/mcp"
       && (rendered executorFull).mcp.servers.executor.oauth == { callback_port = 19876; }
       && !(executorConfig.mcp.servers.executor ? oauth)
       && !((rendered executorFull).mcp.servers ? executor-read)
@@ -309,7 +308,7 @@ in
     ]) "Executor endpoints must be HTTPS without embedded credentials or query overrides";
     assert lib.assertMsg (
       executorConfig.mcp.servers.executor.url
-      == "https://athena.example.ts.net:9443/mcp?connection=primary-connection&elicitation_mode=model"
+      == "https://athena.example.ts.net:9443/mcp?connection=primary-connection"
       &&
         executorConfig.mcp.servers.executor-read.url
         == "https://athena.example.ts.net:9443/mcp?connection=read-connection&elicitation_mode=browser"
