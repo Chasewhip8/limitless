@@ -627,7 +627,7 @@ in
         grep -F ${lib.escapeShellArg (launcherOf supervised)} ${serviceUnit.Service.ExecStart}
         grep -F '127.0.0.1 4096' ${serviceUnit.Service.ExecStart}
         test -x ${executorServiceUnit.Service.ExecStartPre}
-        grep -F 'athena.example.ts.net' ${executorServiceUnit.Service.ExecStartPre}
+        grep -F 'https://athena.example.ts.net:9443/mcp' ${executorServiceUnit.Service.ExecStartPre}
       ''}
       touch "$out"
     '';

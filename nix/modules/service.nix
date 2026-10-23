@@ -22,21 +22,26 @@ let
     '';
   };
   executor = cfg.mcp.executor;
-  executorHost = lib.head (builtins.match "https://([^:/]+).*" executor.url);
   executorWaitSeconds = 60;
-  # Tailnet DNS can lag user services at boot, and OpenCode never retries a failed MCP connection.
+  # Tailnet DNS and the gateway itself can lag user services at boot, and OpenCode never
+  # retries a failed MCP connection. Any HTTP answer below 500 (normally 401) means ready.
   awaitExecutor = pkgs.writeShellApplication {
     name = "limitless-await-executor";
     runtimeInputs = [
       pkgs.coreutils
-      pkgs.getent
+      pkgs.curl
     ];
     text = ''
-      for _ in $(seq ${toString executorWaitSeconds}); do
-        getent hosts ${lib.escapeShellArg executorHost} >/dev/null && exit 0
+      url=${lib.escapeShellArg executor.url}
+      deadline=$((SECONDS + ${toString executorWaitSeconds}))
+      while [ "$SECONDS" -lt "$deadline" ]; do
+        status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 "$url" || true)
+        if [ "$status" -ge 200 ] && [ "$status" -lt 500 ]; then
+          exit 0
+        fi
         sleep 1
       done
-      echo ${lib.escapeShellArg "Executor host ${executorHost} did not resolve within ${toString executorWaitSeconds}s; starting OpenCode anyway."} >&2
+      echo "Executor at $url was not ready within ${toString executorWaitSeconds}s; starting OpenCode anyway." >&2
     '';
   };
 in

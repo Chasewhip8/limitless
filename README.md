@@ -233,8 +233,8 @@ collector cache is disposable; treat logs and traces as potentially sensitive.
 ### Accounts and scopes
 
 Create the owner yourself, then connect the official remote MCP services from
-the dashboard. Use separate apps/accounts named `notion-work`, `notion-personal`,
-`atlassian`, and `sentry`; verify each account and workspace. For Atlassian, use
+the dashboard. One app per service can hold several accounts, such as Notion's
+work and personal workspaces; label each account and verify its workspace. For Atlassian, use
 `https://mcp.atlassian.com/v2/mcp?tools=all` and select the intended site. Do not
 replace these with REST integrations and assume their OAuth requirements match.
 
@@ -305,7 +305,10 @@ ports are unrelated to Executor's upstream account callback. Do not set a
 custom redirect URI or forward the OpenCode service port as a substitute.
 
 Run `/mcps` and sign in to `executor` and, when configured, `executor-read` on each device. Their
-tokens stay in OpenCode's mutable credential store. With `readConnection = null`
+tokens stay in OpenCode's mutable credential store. Each grant is bound to the exact
+MCP URL, which Limitless writes in Executor's canonical form: the connection
+parameter, and `elicitation_mode` only when it is not the default `model`. Any change
+to that URL, including the switch to canonical URLs, needs a new sign-in. With `readConnection = null`
 (the default), Research has no MCP tools in Executor mode. When supplied, Executor
 must enforce the read-only scope on every `call` and `execute`; Nix cannot verify
 the dashboard's mutable policy. Main and Oracles see only `executor`, and
@@ -533,10 +536,10 @@ in the foreground. It preserves the private password, CORS configuration, and
 configured service environment. Private service files remain writable and outside
 the Nix store. Disabling supervision leaves the last persisted binding in place.
 
-With `mcp.executor` enabled, the unit first waits up to 60 seconds for the Executor
-host to resolve. Tailnet DNS can arrive after user services at boot, and OpenCode
-does not retry an MCP connection that failed at startup. It starts anyway after
-the timeout.
+With `mcp.executor` enabled, the unit first waits up to about 60 seconds for the
+Executor endpoint to answer HTTP (any status below 500, normally 401). Tailnet DNS
+and the gateway can come up after user services at boot, and OpenCode does not
+retry an MCP connection that failed at startup. It starts anyway after the timeout.
 
 **Enabling, starting, or restarting this unit can interrupt active work and
 persistent terminals.** The unit takes ownership of the shared native daemon.
