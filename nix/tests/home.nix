@@ -618,6 +618,10 @@ in
       !pkgs.stdenv.hostPlatform.isLinux
       || (!(serviceUnit.Service ? ExecStartPre) && executorServiceUnit.Service ? ExecStartPre)
     ) "Only Executor clients wait for the Executor host before starting OpenCode";
+    assert lib.assertMsg (
+      !pkgs.stdenv.hostPlatform.isLinux
+      || lib.any (lib.hasPrefix "PATH=/run/wrappers/bin:") serviceUnit.Service.Environment
+    ) "Agent shells must find NixOS setuid wrappers such as sudo before unwrapped binaries";
     pkgs.runCommand "limitless-service-check" { nativeBuildInputs = [ pkgs.nodejs ]; } ''
       cp ${../packages/opencode-service.mjs} opencode-service.mjs
       cp ${../packages/opencode-service.test.mjs} opencode-service.test.mjs

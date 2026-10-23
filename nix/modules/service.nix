@@ -97,7 +97,7 @@ in
           ExecStart = lib.getExe launcher;
           Environment = [
             "HOME=${config.home.homeDirectory}"
-            "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin"
+            "PATH=/run/wrappers/bin:${config.home.profileDirectory}/bin:/run/current-system/sw/bin"
             "XDG_CONFIG_HOME=${config.xdg.configHome}"
             "XDG_DATA_HOME=${config.xdg.dataHome}"
             "XDG_STATE_HOME=${config.xdg.stateHome}"
