@@ -533,6 +533,11 @@ in the foreground. It preserves the private password, CORS configuration, and
 configured service environment. Private service files remain writable and outside
 the Nix store. Disabling supervision leaves the last persisted binding in place.
 
+With `mcp.executor` enabled, the unit first waits up to 60 seconds for the Executor
+host to resolve. Tailnet DNS can arrive after user services at boot, and OpenCode
+does not retry an MCP connection that failed at startup. It starts anyway after
+the timeout.
+
 **Enabling, starting, or restarting this unit can interrupt active work and
 persistent terminals.** The unit takes ownership of the shared native daemon.
 While enabled, use systemd for lifecycle commands:

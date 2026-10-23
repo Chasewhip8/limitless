@@ -204,6 +204,11 @@ let
     };
   };
   serviceUnit = supervised.config.systemd.user.services.opencode;
+  executorServiceUnit =
+    (evaluate {
+      opencode.service.enable = true;
+      mcp.executor = executorSettings;
+    }).config.systemd.user.services.opencode;
   t3Supervised = evaluate {
     t3.enable = true;
     opencode.service.enable = true;
@@ -609,6 +614,10 @@ in
         builtins.elem supervised.config.home.file.".config/opencode/opencode.json".source
           serviceUnit.Unit.X-Restart-Triggers
     ) "configuration changes must restart the supervised service";
+    assert lib.assertMsg (
+      !pkgs.stdenv.hostPlatform.isLinux
+      || (!(serviceUnit.Service ? ExecStartPre) && executorServiceUnit.Service ? ExecStartPre)
+    ) "Only Executor clients wait for the Executor host before starting OpenCode";
     pkgs.runCommand "limitless-service-check" { nativeBuildInputs = [ pkgs.nodejs ]; } ''
       cp ${../packages/opencode-service.mjs} opencode-service.mjs
       cp ${../packages/opencode-service.test.mjs} opencode-service.test.mjs
@@ -617,6 +626,8 @@ in
         test -x ${serviceUnit.Service.ExecStart}
         grep -F ${lib.escapeShellArg (launcherOf supervised)} ${serviceUnit.Service.ExecStart}
         grep -F '127.0.0.1 4096' ${serviceUnit.Service.ExecStart}
+        test -x ${executorServiceUnit.Service.ExecStartPre}
+        grep -F 'athena.example.ts.net' ${executorServiceUnit.Service.ExecStartPre}
       ''}
       touch "$out"
     '';

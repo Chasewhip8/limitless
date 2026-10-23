@@ -21,6 +21,24 @@ let
       }
     '';
   };
+  executor = cfg.mcp.executor;
+  executorHost = lib.head (builtins.match "https://([^:/]+).*" executor.url);
+  executorWaitSeconds = 60;
+  # Tailnet DNS can lag user services at boot, and OpenCode never retries a failed MCP connection.
+  awaitExecutor = pkgs.writeShellApplication {
+    name = "limitless-await-executor";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.getent
+    ];
+    text = ''
+      for _ in $(seq ${toString executorWaitSeconds}); do
+        getent hosts ${lib.escapeShellArg executorHost} >/dev/null && exit 0
+        sleep 1
+      done
+      echo ${lib.escapeShellArg "Executor host ${executorHost} did not resolve within ${toString executorWaitSeconds}s; starting OpenCode anyway."} >&2
+    '';
+  };
 in
 {
   options.programs.limitless.opencode.service = {
@@ -82,6 +100,9 @@ in
           ];
           Restart = "always";
           RestartSec = "5s";
+        }
+        // lib.optionalAttrs executor.enable {
+          ExecStartPre = lib.getExe awaitExecutor;
         };
         Install.WantedBy = [ "default.target" ];
       };
