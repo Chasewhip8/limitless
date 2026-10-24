@@ -37,7 +37,7 @@ let
       find "$out/node_modules/.bun" -type f -name '.bun-tag-*' -empty -delete
     '';
 
-    outputHash = "sha256-v/mfe0iQx09JVK1Lt73Uqw7vRGuh37DgQBcyt7epwPA=";
+    outputHash = "sha256-2mrmG4yph0Te3XAAqvPoOpxFyORQKS9crrnCmYVtqpQ=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -75,10 +75,13 @@ pkgs.stdenvNoCC.mkDerivation {
       --metafile=dist/tui.meta.json \
       --outfile=dist/tui.js
     # The bridge runs outside OpenCode, so it must carry its own dependencies.
+    # It runs under Bun, which provides undici; the bridge uses Node's HTTP client
+    # and never calls platform-node's undici client.
     bun build packages/limitless/t3/cli.ts \
       --target=node \
       --format=esm \
       --packages=bundle \
+      --external undici \
       --outfile=dist/t3.js
   '';
 

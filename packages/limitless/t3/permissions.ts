@@ -126,10 +126,7 @@ function managedRules(namespace: string | undefined, support: boolean): Permissi
 	]
 }
 
-export function normalizeT3Permissions(
-	permissions: Permission.Ruleset,
-	agent: string | undefined,
-): Permission.Ruleset {
+function normalizeForRole(permissions: Permission.Ruleset, support: boolean): Permission.Ruleset {
 	// T3 separates server and tool names with underscores, which are also legal
 	// inside thread IDs. Its adjacent isolation/allow rules identify the boundary.
 	const namespace = ownT3Namespace(permissions)
@@ -150,6 +147,29 @@ export function normalizeT3Permissions(
 		...base.filter(
 			(entry) => !(entry.action === '*' && entry.resource === '*' && entry.effect === 'allow'),
 		),
-		...managedRules(namespace, isT3SupportAgent(agent)),
+		...managedRules(namespace, support),
 	]
+}
+
+export function normalizeT3Permissions(
+	permissions: Permission.Ruleset,
+	agent: string | undefined,
+): Permission.Ruleset {
+	return normalizeForRole(permissions, isT3SupportAgent(agent))
+}
+
+/**
+ * Whether rules are already in Limitless's repaired form for some role, as the
+ * plugin's own writes are even after the session's agent has changed.
+ */
+export function isNormalizedT3Permissions(permissions: Permission.Ruleset): boolean {
+	try {
+		return [false, true].some((support) =>
+			samePermissionRules(permissions, normalizeForRole(permissions, support)),
+		)
+	} catch (error) {
+		// Malformed T3 anchors are reported when the rules are normalized.
+		if (error instanceof T3PermissionError) return false
+		throw error
+	}
 }

@@ -4,6 +4,7 @@ import type { Session } from '@opencode/schema/session'
 import { Effect, Schema, Semaphore } from 'effect'
 import {
 	hasT3Permissions,
+	isNormalizedT3Permissions,
 	normalizeT3Permissions,
 	samePermissionRules,
 	T3PermissionError,
@@ -71,41 +72,75 @@ export const resolveSessionAgent = Effect.fn('T3.resolveSessionAgent')(function*
 	return selected.id
 })
 
+/**
+ * Rewrites a T3 thread's stored permissions into Limitless policy: T3's mode
+ * rules (including Full access's allow-all) give way to native agent
+ * configuration, and the thread's own T3 tools are scoped by role. Sessions
+ * without T3's thread rules are left alone.
+ */
 export function makeT3SessionPolicy(
 	context: Pick<Plugin.Context, 'session' | 'agent' | 'location'>,
 ) {
-	const apply = (sessionID: Session.ID, incoming?: Permission.Ruleset, required = false) =>
+	/** Normalizes `permissions` for `session`, or returns undefined when they carry no T3 rules. */
+	const normalizeFor = (session: Session.Info, permissions: Permission.Ruleset) =>
+		Effect.gen(function* () {
+			if (!hasT3Permissions(permissions)) return undefined
+			if (
+				session.location.directory !== context.location.directory ||
+				session.location.workspaceID !== context.location.workspaceID
+			) {
+				return yield* new T3PolicyLocationError({ directory: session.location.directory })
+			}
+			const agent = yield* resolveSessionAgent(context, session)
+			return yield* Effect.try({
+				try: () => normalizeT3Permissions(permissions, agent),
+				catch: (error) =>
+					Schema.is(T3PermissionError)(error)
+						? error
+						: new T3PolicyError({ message: `Unable to normalize T3 permissions: ${error}` }),
+			})
+		})
+
+	/**
+	 * Repairs one recorded permission replacement, using the rules it carried
+	 * rather than the session's current state. OpenCode delivers a session's
+	 * writes in commit order, so even when a repair overwrites a newer T3 write,
+	 * that write's own event follows and the session ends at the repaired form of
+	 * T3's last write.
+	 *
+	 * T3 always writes its own raw rules, so a replacement already in repaired
+	 * form, for whichever role the session had then, is the plugin's own write
+	 * and ends the cycle. Another client copying repaired rules is outside this
+	 * assumption; the prompt hook still corrects that session's role.
+	 */
+	const repair = (sessionID: Session.ID, recorded: Permission.Ruleset) =>
 		withSessionPolicyLock(
 			sessionID,
 			Effect.gen(function* () {
+				if (!hasT3Permissions(recorded) || isNormalizedT3Permissions(recorded)) return
 				const session = yield* context.session.get({ sessionID })
-				const permissions = incoming ?? session.permissions ?? []
-				if (!required && incoming === undefined && !hasT3Permissions(permissions)) return
-				if (
-					session.location.directory !== context.location.directory ||
-					session.location.workspaceID !== context.location.workspaceID
-				) {
-					return yield* new T3PolicyLocationError({ directory: session.location.directory })
-				}
-
-				const agent = yield* resolveSessionAgent(context, session)
-
-				const normalized = yield* Effect.try({
-					try: () => normalizeT3Permissions(permissions, agent),
-					catch: (error) => {
-						if (Schema.is(T3PermissionError)(error)) return error
-						throw error
-					},
-				})
+				const normalized = yield* normalizeFor(session, recorded)
+				if (normalized === undefined) return
 				if (samePermissionRules(session.permissions ?? [], normalized)) return
 				yield* context.session.update({ sessionID, permissions: normalized })
 			}),
 		)
 
-	return {
-		update: (sessionID: Session.ID, permissions: Permission.Ruleset) =>
-			apply(sessionID, permissions),
-		reconcile: (sessionID: Session.ID) => apply(sessionID),
-		prepare: (sessionID: Session.ID) => apply(sessionID, undefined, true),
-	}
+	/**
+	 * Repairs the session's current rules for its current role: at creation,
+	 * including a native child's inherited rules, and before every prompt.
+	 */
+	const reconcile = (sessionID: Session.ID) =>
+		withSessionPolicyLock(
+			sessionID,
+			Effect.gen(function* () {
+				const session = yield* context.session.get({ sessionID })
+				const current = session.permissions ?? []
+				const normalized = yield* normalizeFor(session, current)
+				if (normalized === undefined || samePermissionRules(current, normalized)) return
+				yield* context.session.update({ sessionID, permissions: normalized })
+			}),
+		)
+
+	return { repair, reconcile }
 }

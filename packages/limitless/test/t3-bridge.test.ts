@@ -8,7 +8,7 @@ import {
 import { afterEach, expect, test } from 'vitest'
 import { startT3Bridge } from '../t3/bridge'
 import { T3_CONTEXT } from '../t3/instructions'
-import { coordinateSession } from '../t3/requests'
+import { canonicalT3Namespace } from '../t3/permissions'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -40,10 +40,10 @@ async function fixture(handler: (request: IncomingMessage, response: ServerRespo
 	return { bridge, backend, backendURL: url }
 }
 
-async function jsonBody(request: IncomingMessage) {
+async function text(request: IncomingMessage) {
 	const chunks: Buffer[] = []
 	for await (const chunk of request) chunks.push(Buffer.from(chunk))
-	return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+	return Buffer.concat(chunks).toString('utf8')
 }
 
 function json(response: ServerResponse, value: unknown, status = 200) {
@@ -59,6 +59,9 @@ test('authenticates the caller and preserves upstream errors without leaking eit
 		json(response, { error: 'fixture conflict' }, 409)
 	})
 	expect((await fetch(`${bridge.url}/api/info`)).status).toBe(401)
+	expect(
+		(await fetch(`${bridge.url}/api/info`, { headers: { authorization: backendAuth } })).status,
+	).toBe(401)
 	expect(calls).toBe(0)
 	const response = await fetch(`${bridge.url}/api/info`, {
 		headers: { authorization: frontAuth, 'x-opencode-directory': '/project' },
@@ -68,27 +71,47 @@ test('authenticates the caller and preserves upstream errors without leaking eit
 	expect(calls).toBe(1)
 })
 
-test('does not forward a permission PATCH when the policy RPC is unavailable', async () => {
-	const paths: string[] = []
+test('forwards session creation and permission writes byte for byte', async () => {
+	const received: Array<{
+		method: string | undefined
+		url: string | undefined
+		type: string | undefined
+		body: string
+	}> = []
 	const { bridge } = await fixture((request, response) => {
-		paths.push(`${request.method} ${request.url}`)
-		if (request.url === '/api/session/ses_test') {
-			json(response, { data: { id: 'ses_test', location: { directory: '/actual' } } })
-			return
-		}
-		expect(request.headers['x-opencode-directory']).toBe(encodeURIComponent('/actual'))
-		json(response, { type: 'rpc.unavailable' }, 400)
+		void (async () => {
+			received.push({
+				method: request.method,
+				url: request.url,
+				type: request.headers['content-type'],
+				body: await text(request),
+			})
+			response.writeHead(204).end()
+		})()
 	})
-	const response = await fetch(`${bridge.url}/api/session/ses_test`, {
-		method: 'PATCH',
-		headers: { authorization: frontAuth, 'content-type': 'application/json' },
-		body: JSON.stringify({ permissions: [] }),
+	const permissions = JSON.stringify({
+		title: null,
+		permissions: [{ action: '*', resource: '*', effect: 'allow' }],
 	})
-	expect(response.status).toBe(400)
-	expect(await response.json()).toEqual({ type: 'rpc.unavailable' })
-	expect(paths).toEqual([
-		'GET /api/session/ses_test',
-		'POST /api/rpc/limitless.t3/updatePermissions',
+	for (const [method, path] of [
+		['POST', '/api/session?directory=%2Fproject'],
+		['PATCH', '/api/session/ses_test'],
+	] as const) {
+		const response = await fetch(`${bridge.url}${path}`, {
+			method,
+			headers: { authorization: frontAuth, 'content-type': 'application/json' },
+			body: permissions,
+		})
+		expect(response.status).toBe(204)
+	}
+	expect(received).toEqual([
+		{
+			method: 'POST',
+			url: '/api/session?directory=%2Fproject',
+			type: 'application/json',
+			body: permissions,
+		},
+		{ method: 'PATCH', url: '/api/session/ses_test', type: 'application/json', body: permissions },
 	])
 })
 
@@ -96,19 +119,7 @@ test('replaces only the named T3 instruction entry before persistence', async ()
 	const stored = new Map<string, unknown>()
 	const { bridge } = await fixture((request, response) => {
 		void (async () => {
-			if (request.url === '/api/session/active') {
-				json(response, { data: {} })
-				return
-			}
-			if (request.method === 'GET') {
-				json(response, { data: { id: 'ses_test', location: { directory: '/project' } } })
-				return
-			}
-			if (request.url?.startsWith('/api/rpc/')) {
-				json(response, { output: null })
-				return
-			}
-			stored.set(request.url ?? '', await jsonBody(request))
+			stored.set(request.url ?? '', JSON.parse(await text(request)))
 			response.writeHead(204).end()
 		})()
 	})
@@ -129,7 +140,44 @@ test('replaces only the named T3 instruction entry before persistence', async ()
 	expect(
 		stored.get('/api/experimental/session/ses_test/instructions/entries/user-context'),
 	).toEqual({ value: 'original instructions' })
-	await bridge.close()
+
+	const malformed = await fetch(
+		`${bridge.url}/api/experimental/session/ses_test/instructions/entries/t3-code`,
+		{ method: 'PUT', headers: { authorization: frontAuth }, body: '["not an object"]' },
+	)
+	expect(malformed.status).toBe(400)
+	expect(stored.size).toBe(2)
+})
+
+test('hashes underscore-containing T3 MCP server names in both directions of their lifecycle', async () => {
+	const paths: string[] = []
+	const { bridge } = await fixture((request, response) => {
+		paths.push(`${request.method} ${request.url}`)
+		request.resume()
+		response.writeHead(204).end()
+	})
+	const forked = 't3-code-thread_fork'
+	for (const [method, name] of [
+		['PUT', forked],
+		['DELETE', forked],
+		['PUT', 't3-code-thread'],
+		['PUT', 'notion-work'],
+	] as const) {
+		const response = await fetch(`${bridge.url}/api/experimental/mcp/${name}`, {
+			method,
+			headers: { authorization: frontAuth, 'content-type': 'application/json' },
+			body: method === 'PUT' ? '{"config":{}}' : null,
+		})
+		expect(response.status).toBe(204)
+	}
+	const hashed = canonicalT3Namespace(forked)
+	expect(hashed).not.toBe(forked)
+	expect(paths).toEqual([
+		`PUT /api/experimental/mcp/${hashed}`,
+		`DELETE /api/experimental/mcp/${hashed}`,
+		'PUT /api/experimental/mcp/t3-code-thread',
+		'PUT /api/experimental/mcp/notion-work',
+	])
 })
 
 test('streams events and propagates downstream cancellation', async () => {
@@ -151,6 +199,7 @@ test('streams events and propagates downstream cancellation', async () => {
 		headers: { authorization: frontAuth },
 		signal: controller.signal,
 	})
+	expect(response.headers.get('content-type')).toBe('text/event-stream')
 	const reader = response.body?.getReader()
 	if (!reader || !second) throw new Error('Missing event stream')
 	expect(new TextDecoder().decode((await reader.read()).value)).toBe('data: first\n\n')
@@ -167,6 +216,7 @@ test('normal-mode agent selection restores the configured default and encodes lo
 	const { bridge } = await fixture((request, response) => {
 		void (async () => {
 			if (request.url === '/api/agent') {
+				expect(request.headers.authorization).toBe(backendAuth)
 				expect(request.headers['x-opencode-directory']).toBe(encodeURIComponent(directory))
 				json(response, { data: [{ id: 'limitless', mode: 'primary', hidden: false }] })
 				return
@@ -181,14 +231,13 @@ test('normal-mode agent selection restores the configured default and encodes lo
 				})
 				return
 			}
-			const selection = await jsonBody(request)
-			if (typeof selection?.agent !== 'string') throw new Error('Invalid agent fixture')
+			const selection = JSON.parse(await text(request))
 			currentAgent = selection.agent
 			selections.push(selection)
 			response.writeHead(204).end()
 		})()
 	})
-	for (const agent of ['plan', 'build', 'build']) {
+	for (const agent of ['build', 'plan', 'build', 'build', 'unit']) {
 		const response = await fetch(`${bridge.url}/api/session/ses_test/agent`, {
 			method: 'POST',
 			headers: { authorization: frontAuth, 'content-type': 'application/json' },
@@ -196,38 +245,7 @@ test('normal-mode agent selection restores the configured default and encodes lo
 		})
 		expect(response.status).toBe(204)
 	}
-	expect(selections).toEqual([{ agent: 'plan' }, { agent: 'limitless' }])
-})
-
-test('preparation never replaces a permission snapshot read outside the backend queue', async () => {
-	const original = [
-		{ action: 't3-code-*', resource: '*', effect: 'deny' },
-		{ action: 't3-code-old_namespace_*', resource: '*', effect: 'allow' },
-	]
-	const grant = { action: 'read', resource: 'concurrent-grant', effect: 'allow' }
-	let stored = original
-	const paths: string[] = []
-	const { backendURL } = await fixture((request, response) => {
-		paths.push(request.url ?? '')
-		if (request.method === 'GET') {
-			json(response, {
-				data: { id: 'ses_test', location: { directory: '/project' }, permissions: stored },
-			})
-			stored = [...stored, grant]
-			return
-		}
-		request.resume()
-		expect(request.url).toBe('/api/rpc/limitless.t3/prepareSession')
-		json(response, { output: null })
-	})
-	await coordinateSession(
-		{ url: backendURL, headers: { authorization: backendAuth } },
-		'ses_test',
-		undefined,
-		new AbortController().signal,
-	)
-	expect(stored).toContain(grant)
-	expect(paths).toEqual(['/api/session/ses_test', '/api/rpc/limitless.t3/prepareSession'])
+	expect(selections).toEqual([{ agent: 'plan' }, { agent: 'limitless' }, { agent: 'unit' }])
 })
 
 test('caller-selected URL forms cannot redirect backend credentials to another origin', async () => {
@@ -264,108 +282,226 @@ test('caller-selected URL forms cannot redirect backend credentials to another o
 	expect(paths).toEqual([`//${foreign.backendURL.host}/api/info`, '/api/info'])
 })
 
-test('shutdown detaches without interrupting any session or stopping the service', async () => {
-	const interrupted: string[] = []
-	const { bridge, backendURL } = await fixture((request, response) => {
-		if (request.url === '/api/info') {
-			json(response, { version: '2.0.19' })
-			return
-		}
-		if (request.method === 'POST' && request.url === '/api/session') {
-			request.resume()
-			json(response, { data: { id: 'ses_owned', location: { directory: '/project' } } })
-			return
-		}
-		if (request.url === '/api/session/active') {
-			json(response, { data: { ses_owned: {}, ses_child: {}, ses_unrelated: {} } })
-			return
-		}
-		const id = request.url?.split('/')[3]
-		if (request.method === 'POST' && request.url?.endsWith('/interrupt')) {
-			request.resume()
-			if (id === undefined) throw new Error('Missing interrupted session')
-			interrupted.push(id)
-			response.writeHead(204).end()
-			return
-		}
-		json(response, { data: { ...(id === 'ses_child' ? { parentID: 'ses_owned' } : {}) } })
+test('rejects upgrades without contacting the service', async () => {
+	let calls = 0
+	const { bridge, backend } = await fixture((_request, response) => {
+		calls++
+		response.writeHead(404).end()
 	})
-	const response = await fetch(`${bridge.url}/api/session`, {
-		method: 'POST',
-		headers: { authorization: frontAuth, 'content-type': 'application/json' },
-		body: '{}',
+	backend.on('upgrade', (_request, socket) => {
+		calls++
+		socket.destroy()
 	})
-	expect(response.status).toBe(200)
-	await response.json()
-	await bridge.close()
-	expect(interrupted).toEqual([])
-	expect((await fetch(new URL('/api/info', backendURL))).status).toBe(200)
-})
-
-test('forwards upgraded connections and closes both sides', async () => {
-	const { bridge, backend } = await fixture((_request, response) => response.writeHead(404).end())
-	let markClosed: (() => void) | undefined
-	const backendClosed = new Promise<void>((resolve) => {
-		markClosed = resolve
-	})
-	backend.on('upgrade', (request, socket) => {
-		expect(request.headers.authorization).toBe(backendAuth)
-		socket.write(
-			'HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n',
-		)
-		socket.on('data', (data) => socket.write(data))
-		socket.once('end', () => socket.end())
-		socket.once('close', () => markClosed?.())
-	})
-	const request = httpRequest(`${bridge.url}/socket`, {
-		headers: { authorization: frontAuth, connection: 'Upgrade', upgrade: 'websocket' },
-	})
-	const upgraded = once(request, 'upgrade')
-	request.end()
-	const [, socket] = await upgraded
-	const data = once(socket, 'data')
-	socket.write('unchanged payload')
-	expect((await data)[0].toString()).toBe('unchanged payload')
-	socket.destroy()
-	await backendClosed
-})
-
-test('upgrade requests cannot redirect backend authentication to a foreign origin', async () => {
-	let foreignCalls = 0
-	const foreign = await fixture((_request, response) => {
-		foreignCalls++
-		json(response, {})
-	})
-	const { bridge, backend } = await fixture((_request, response) => response.writeHead(404).end())
-	let closed: (() => void) | undefined
-	const backendClosed = new Promise<void>((resolve) => {
-		closed = resolve
-	})
-	backend.on('upgrade', (request, socket) => {
-		expect(request.url).toBe(`//${foreign.backendURL.host}/socket`)
-		expect(request.headers.authorization).toBe(backendAuth)
-		socket.write(
-			'HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n',
-		)
-		socket.once('end', () => socket.end())
-		socket.once('close', () => closed?.())
-	})
-	await new Promise<void>((resolve, reject) => {
-		const request = httpRequest(bridge.url, {
-			path: `/a/..//${foreign.backendURL.host}/socket`,
+	const status = await new Promise<number | undefined>((resolve, reject) => {
+		const request = httpRequest(`${bridge.url}/socket`, {
 			headers: { authorization: frontAuth, connection: 'Upgrade', upgrade: 'websocket' },
 		})
-		request.once('upgrade', (_response, socket) => {
-			socket.destroy()
-			resolve()
-		})
+		request.once('upgrade', () => reject(new Error('Upgrade was forwarded')))
 		request.once('response', (response) => {
 			response.resume()
-			reject(new Error('Upgrade was not forwarded to the backend'))
+			resolve(response.statusCode)
 		})
 		request.once('error', reject)
 		request.end()
 	})
-	await backendClosed
-	expect(foreignCalls).toBe(0)
+	expect(status).toBe(501)
+	expect(calls).toBe(0)
+})
+
+test('shutdown detaches promptly without stopping the service or its event streams', async () => {
+	const interrupted: string[] = []
+	let streamClosed: (() => void) | undefined
+	const detached = new Promise<void>((resolve) => {
+		streamClosed = resolve
+	})
+	const { bridge, backendURL } = await fixture((request, response) => {
+		if (request.url === '/api/event') {
+			response.writeHead(200, { 'content-type': 'text/event-stream' })
+			response.write('data: open\n\n')
+			response.once('close', () => streamClosed?.())
+			return
+		}
+		if (request.url?.endsWith('/interrupt')) interrupted.push(request.url)
+		request.resume()
+		json(response, { version: '2.0.32' })
+	})
+	const events = await fetch(`${bridge.url}/api/event`, { headers: { authorization: frontAuth } })
+	await events.body?.getReader().read()
+	const started = Date.now()
+	await bridge.close()
+	await detached
+	expect(Date.now() - started).toBeLessThan(5000)
+	expect(interrupted).toEqual([])
+	expect((await fetch(new URL('/api/info', backendURL))).status).toBe(200)
+})
+
+test('a client that leaves before the service answers cancels the forwarded request', async () => {
+	let upstreamClosed: (() => void) | undefined
+	const cancelled = new Promise<void>((resolve) => {
+		upstreamClosed = resolve
+	})
+	const { bridge } = await fixture((request) => {
+		// Never answer: the service is still working when the client leaves.
+		request.once('close', () => upstreamClosed?.())
+	})
+	const controller = new AbortController()
+	const pending = fetch(`${bridge.url}/api/experimental/session/ses_test/wait`, {
+		method: 'POST',
+		headers: { authorization: frontAuth },
+		signal: controller.signal,
+	}).catch(() => undefined)
+	await new Promise((resolve) => setTimeout(resolve, 100))
+	controller.abort()
+	await pending
+	await cancelled
+	const started = Date.now()
+	await bridge.close()
+	expect(Date.now() - started).toBeLessThan(3000)
+})
+
+test('a service that rejects a body before reading it still answers T3', async () => {
+	const { bridge } = await fixture((_request, response) => {
+		json(response, { error: 'too large' }, 413)
+	})
+	const response = await fetch(`${bridge.url}/api/session/ses_test/prompt`, {
+		method: 'POST',
+		headers: { authorization: frontAuth, 'content-type': 'application/json' },
+		body: JSON.stringify({ text: 'x'.repeat(256 * 1024) }),
+	})
+	expect(response.status).toBe(413)
+	expect(await response.json()).toEqual({ error: 'too large' })
+})
+
+test('a response the service cuts off never reaches T3 as complete', async () => {
+	const { bridge } = await fixture((_request, response) => {
+		response.writeHead(200, { 'content-type': 'text/event-stream' })
+		response.write('data: partial\n\n', () => setTimeout(() => response.destroy(), 50))
+	})
+	const response = await fetch(`${bridge.url}/api/event`, { headers: { authorization: frontAuth } })
+	expect(response.status).toBe(200)
+	await expect(response.text()).rejects.toThrow()
+})
+
+test('hop-by-hop headers stop at the bridge in both directions', async () => {
+	let forwarded: IncomingMessage['headers'] | undefined
+	const { bridge } = await fixture((request, response) => {
+		forwarded = request.headers
+		request.resume()
+		response
+			.writeHead(200, {
+				'content-type': 'application/json',
+				connection: 'x-response-hop',
+				'x-response-hop': '1',
+				'proxy-authenticate': 'Basic',
+				'x-end-to-end': 'kept',
+			})
+			.end('{}')
+	})
+	const headers = await new Promise<IncomingMessage['headers']>((resolve, reject) => {
+		const request = httpRequest(
+			`${bridge.url}/api/info`,
+			{
+				headers: {
+					authorization: frontAuth,
+					connection: 'x-request-hop',
+					'x-request-hop': '1',
+					te: 'trailers',
+					'x-end-to-end': 'kept',
+				},
+			},
+			(response) => {
+				response.resume()
+				resolve(response.headers)
+			},
+		)
+		request.once('error', reject)
+		request.end()
+	})
+	expect(forwarded?.['x-request-hop']).toBeUndefined()
+	expect(forwarded?.te).toBeUndefined()
+	expect(forwarded?.['x-end-to-end']).toBe('kept')
+	expect(headers['x-response-hop']).toBeUndefined()
+	expect(headers['proxy-authenticate']).toBeUndefined()
+	expect(headers['x-end-to-end']).toBe('kept')
+})
+
+test('a body without a declared type is forwarded without one', async () => {
+	let received: { type: string | undefined; body: string } | undefined
+	const { bridge } = await fixture((request, response) => {
+		void (async () => {
+			received = { type: request.headers['content-type'], body: await text(request) }
+			response.writeHead(204).end()
+		})()
+	})
+	await new Promise<void>((resolve, reject) => {
+		const request = httpRequest(
+			`${bridge.url}/api/session/ses_test/prompt`,
+			{ method: 'POST', headers: { authorization: frontAuth } },
+			(response) => {
+				response.resume()
+				response.once('end', resolve)
+			},
+		)
+		request.once('error', reject)
+		request.end('untyped')
+	})
+	expect(received).toEqual({ type: undefined, body: 'untyped' })
+})
+
+test('malformed T3 paths are rejected and a lookup error reaches T3 as the service sent it', async () => {
+	const { bridge } = await fixture((request, response) => {
+		request.resume()
+		json(response, { name: 'Session.NotFoundError', data: { sessionID: 'ses_gone' } }, 404)
+	})
+	const malformed = await fetch(`${bridge.url}/api/experimental/mcp/t3-code-%E0%A4%A`, {
+		method: 'DELETE',
+		headers: { authorization: frontAuth },
+	})
+	expect(malformed.status).toBe(400)
+	const selection = await fetch(`${bridge.url}/api/session/ses_gone/agent`, {
+		method: 'POST',
+		headers: { authorization: frontAuth, 'content-type': 'application/json' },
+		body: JSON.stringify({ agent: 'build' }),
+	})
+	expect(selection.status).toBe(404)
+	expect(await selection.json()).toEqual({
+		name: 'Session.NotFoundError',
+		data: { sessionID: 'ses_gone' },
+	})
+})
+
+test('separate Set-Cookie fields and Connection-nominated request headers keep their meaning', async () => {
+	let forwardedType: string | undefined
+	const { bridge } = await fixture((request, response) => {
+		forwardedType = request.headers['content-type']
+		request.resume()
+		response.writeHead(204, [
+			['set-cookie', 'first=1; Path=/'],
+			['set-cookie', 'second=2; Path=/'],
+		])
+		response.end()
+	})
+	const response = await new Promise<IncomingMessage>((resolve, reject) => {
+		// fetch refuses to send a Connection header, so use a raw request.
+		const request = httpRequest(
+			`${bridge.url}/api/session/ses_test/prompt`,
+			{
+				method: 'POST',
+				headers: {
+					authorization: frontAuth,
+					connection: 'content-type',
+					'content-type': 'application/json',
+				},
+			},
+			(answer) => {
+				answer.resume()
+				answer.once('end', () => resolve(answer))
+			},
+		)
+		request.once('error', reject)
+		request.end('{}')
+	})
+	expect(response.statusCode).toBe(204)
+	expect(response.headers['set-cookie']).toEqual(['first=1; Path=/', 'second=2; Path=/'])
+	expect(forwardedType).toBeUndefined()
 })

@@ -1,67 +1,57 @@
 import type { Plugin } from '@opencode/plugin/effect'
-import type { RpcCallContext } from '@opencode/plugin/effect/rpc'
 import type { SessionRequest } from '@opencode/plugin/effect/session'
-import type { Rpc } from '@opencode/schema/rpc'
-import type { Session } from '@opencode/schema/session'
-import { Effect, Schema } from 'effect'
+import { Cause, Effect, Schema, Stream } from 'effect'
 import { hasT3Context, injectT3Guidance, loadT3Guidance } from './instructions'
-import { hasT3Permissions, isT3SupportAgent, T3PermissionError } from './permissions'
-import { T3PolicyRpc } from './rpc'
-import {
-	makeT3SessionPolicy,
-	resolveSessionAgent,
-	T3PolicyError,
-	T3PolicyLocationError,
-} from './session-policy'
+import { hasT3Permissions, isT3SupportAgent } from './permissions'
+import { makeT3SessionPolicy, resolveSessionAgent, T3PolicyLocationError } from './session-policy'
 
+type ServerEvent = Stream.Success<ReturnType<Plugin.Context['event']['subscribe']>>
+// Both events carry a session's stored permissions: creation (including the
+// inherited rules of a native child) and every later replacement, such as T3
+// writing its mode's rules before a turn.
+type PermissionEvent = Extract<ServerEvent, { type: 'session.created' | 'session.permissions' }>
+const isPermissionEvent = (event: ServerEvent): event is PermissionEvent =>
+	event.type === 'session.created' || event.type === 'session.permissions'
+
+// Another Location's plugin instance owns that Location's sessions, and a
+// session may be deleted before its event is handled.
+const isLocationError = Schema.is(T3PolicyLocationError)
 const isSessionNotFound = Schema.is(Schema.TaggedStruct('Session.NotFoundError', {}))
-
-function rpcResult(
-	sessionID: Session.ID,
-	operation: Effect.Effect<void, unknown>,
-	context: RpcCallContext<typeof T3PolicyRpc.methods.prepareSession>,
-) {
-	return operation.pipe(
-		Effect.as(null),
-		Effect.catch(
-			(
-				error,
-			): Effect.Effect<never, Rpc.HandlerError<typeof T3PolicyRpc.methods.prepareSession>> => {
-				if (isSessionNotFound(error)) {
-					return Effect.fail(
-						context.error('session_not_found', 'OpenCode session no longer exists', { sessionID }),
-					)
-				}
-				if (Schema.is(T3PolicyLocationError)(error)) {
-					return Effect.fail(
-						context.error('wrong_location', 'Policy request does not match the session location', {
-							sessionID,
-						}),
-					)
-				}
-				if (Schema.is(T3PolicyError)(error) || Schema.is(T3PermissionError)(error)) {
-					return Effect.fail(context.error('invalid_policy', error.message, { sessionID }))
-				}
-				return Effect.die(error)
-			},
-		),
-	)
-}
 
 export const registerT3Policy = Effect.fn('registerT3Policy')(function* (context: Plugin.Context) {
 	const guidance = yield* loadT3Guidance().pipe(Effect.orDie)
 	const policy = makeT3SessionPolicy(context)
-	yield* context.rpc
-		.register(T3PolicyRpc, {
-			updatePermissions: (input, rpc) =>
-				rpcResult(input.sessionID, policy.update(input.sessionID, input.permissions), rpc),
-			prepareSession: (input, rpc) =>
-				rpcResult(input.sessionID, policy.prepare(input.sessionID), rpc),
-		})
-		.pipe(Effect.orDie)
+
+	// Repair T3's permission writes as soon as OpenCode records them.
+	yield* context.event.subscribe().pipe(
+		Stream.filter(isPermissionEvent),
+		Stream.runForEach((event) => {
+			const { sessionID } = event.data
+			// Creation is a session's first event, so its current rules are the ones
+			// to repair; each later replacement is repaired from the rules it carried.
+			const repaired =
+				event.type === 'session.created'
+					? policy.reconcile(sessionID)
+					: policy.repair(sessionID, event.data.permissions)
+			return repaired.pipe(
+				Effect.catchCause((cause) => {
+					const error = Cause.squash(cause)
+					return isLocationError(error) || isSessionNotFound(error)
+						? Effect.void
+						: Effect.logWarning('[limitless] could not apply T3 session policy', {
+								sessionID,
+								cause,
+							})
+				}),
+			)
+		}),
+		Effect.forkScoped({ startImmediately: true }),
+	)
+	// Every prompt, including a native child's first, runs under repaired rules.
 	yield* context.session.hook('prompt', (event) =>
 		policy.reconcile(event.sessionID).pipe(Effect.orDie),
 	)
+
 	const inject = (request: SessionRequest, appendWhenMissing = true) =>
 		Effect.gen(function* () {
 			if (!appendWhenMissing && !hasT3Context(request)) return

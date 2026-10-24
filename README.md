@@ -680,9 +680,13 @@ Mode and `search`; there is no execution-only deny hook. Support agents return
 findings and blockers to their caller. Browser access does not authorize external
 mutations. By default, unbound TUI/CLI sessions do not receive thread-bound tools.
 
-T3 Full access no longer installs a blanket session allow that erases native role
-restrictions. Native configuration remains authoritative, with T3's operator asks,
-Plan restrictions and specific grants preserved. Normal mode selects the actual
+The plugin removes the blanket session allow that T3 Full access writes, which would
+otherwise erase native role restrictions. Native configuration remains authoritative,
+with T3's operator asks, Plan restrictions and specific grants preserved. The bridge
+forwards T3's permission writes unchanged; the plugin repairs each one from OpenCode's
+`session.created` and `session.permissions` events, in commit order, and again before
+every prompt, including a native child's first. Without the Limitless plugin, T3's
+rules stay as written, and native children inherit them. Normal mode selects the actual
 configured default agent. Limitless ships with the built-in Plan agent disabled:
 T3 Plan turns fail with agent-not-found unless a Plan agent is configured. Returning
 to normal mode restores the default agent.
@@ -705,17 +709,29 @@ The bridge never interrupts sessions or stops the service.
 
 ### Compatibility boundary
 
-The bridge and native-child prompt hook route permission writes through one
-session-scoped plugin queue, preserving concurrent grants. Direct backend writes
-outside this integration are not coordinated. This is not a shell or HTTP sandbox.
+The bridge (`packages/limitless/t3/{cli,bridge,rewrites,backend}.ts`) is an Effect
+loopback proxy. It authenticates T3, forwards HTTP and server-sent events to the
+managed service with that service's credentials, and rewrites three requests: the
+`t3-code` instruction entry, T3 MCP server names, and normal mode's `build` agent.
+It rejects WebSocket upgrades, which T3's OpenCode provider does not use. Permission
+policy lives only in the plugin (`t3/{plugin,session-policy,permissions}.ts`):
+between T3's write and the plugin's repair, a running session keeps T3's rules, and
+the repair has no latency bound. Repairs follow the order of T3's writes; a plugin
+reload or session move in the middle of one can leave an earlier write's rules,
+still in repaired form, until T3 emits another permission write; turns that change
+nothing emit none. This is not a shell or HTTP sandbox.
 
 The `t3-code` and `t3-code-*` connection names are reserved; use `t3-external` for
-independent T3 OAuth connections. Underscore-containing thread namespaces receive
-stable `t3-code-<32 hex>` aliases so prefix-related names cannot grant sibling tools.
+independent T3 OAuth connections. Underscore-containing thread namespaces, such as
+a fork's `<thread>_fork`, receive stable `t3-code-<32 hex>` aliases so
+prefix-related names cannot grant sibling tools.
 
-This adapter targets OpenCode `2.0.32` and T3
-`0.1.1-nightly.20261020.3411`. Missing plugin RPCs fail permission updates rather
-than forwarding unfiltered writes. Keep the integration checks with runtime upgrades.
+This adapter targets OpenCode `2.0.32` and T3 `0.1.1-nightly.20261020.3411`.
+On x86_64 Linux, the packaged T3 is that nightly plus a backport of
+[pingdotgg/t3code#21532](https://github.com/pingdotgg/t3code/pull/21532), built
+in [Chasewhip8/t3code](https://github.com/Chasewhip8/t3code/releases/tag/v0.1.1-nightly.20261020.3411-pr21532),
+so OpenCode threads can select an agent. ARM uses the upstream nightly until
+the change ships upstream. Keep the integration checks with runtime upgrades.
 
 ## Notifications
 

@@ -1,10 +1,16 @@
 import { once } from 'node:events'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { AbsolutePath, Location, Model, OpenCode, Provider } from '@opencode/client/effect'
+import { AbsolutePath, Agent, Location, OpenCode, Session } from '@opencode/client/effect'
+import { Mcp } from '@opencode/schema/mcp'
 import { Effect } from 'effect'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http'
 import { afterEach, expect, test } from 'vitest'
 import { startT3Bridge } from '../t3/bridge'
+import { T3_CONTEXT } from '../t3/instructions'
+import { canonicalT3Namespace } from '../t3/permissions'
+
+// T3 drives the bridge with OpenCode's own generated Effect client; these checks
+// use that client so its wire encoding (null optionals, path escaping) stays covered.
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -12,30 +18,22 @@ afterEach(async () => {
 })
 
 const authorization = `Basic ${Buffer.from('opencode:fixture').toString('base64')}`
-const location = Location.PublicRef.make({ directory: AbsolutePath.make('/fixture/Onboarding') })
-const model = Model.Ref.make({
-	providerID: Provider.ID.make('openai'),
-	id: Model.ID.make('fixture-model'),
-})
-const namespace = 't3-code-fixture'
-const permissions = [
-	{ action: '*', resource: '*', effect: 'allow' },
-	{ action: 't3-code-*', resource: '*', effect: 'deny' },
-	{ action: `${namespace}_*`, resource: '*', effect: 'allow' },
-] as const
+const directory = '/fixture/Onboarding'
+const sessionID = Session.ID.make('ses_fixture')
 
-function json(response: ServerResponse, value: unknown) {
-	response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(value))
-}
+type Received = { method: string | undefined; url: string | undefined; body: unknown }
 
-async function jsonBody(request: IncomingMessage): Promise<unknown> {
-	const chunks: Buffer[] = []
-	for await (const chunk of request) chunks.push(Buffer.from(chunk))
-	return JSON.parse(Buffer.concat(chunks).toString('utf8'))
-}
-
-async function fixture(handler: (request: IncomingMessage, response: ServerResponse) => void) {
-	const backend = createServer(handler)
+async function fixture(reply: (request: IncomingMessage, response: ServerResponse) => boolean) {
+	const received: Received[] = []
+	const backend = createServer((request, response) => {
+		void (async () => {
+			const chunks: Buffer[] = []
+			for await (const chunk of request) chunks.push(Buffer.from(chunk))
+			const text = Buffer.concat(chunks).toString('utf8')
+			received.push({ method: request.method, url: request.url, body: text && JSON.parse(text) })
+			if (!reply(request, response)) response.writeHead(204).end()
+		})()
+	})
 	backend.listen(0, '127.0.0.1')
 	await once(backend, 'listening')
 	const address = backend.address()
@@ -52,114 +50,88 @@ async function fixture(handler: (request: IncomingMessage, response: ServerRespo
 		password: 'fixture',
 	})
 	cleanup.push(bridge.close)
-	return bridge
+	const client = <A, E>(
+		use: (client: Effect.Success<ReturnType<typeof OpenCode.make>>) => Effect.Effect<A, E>,
+	) =>
+		Effect.runPromise(
+			Effect.gen(function* () {
+				const base = yield* HttpClient.HttpClient
+				const opencode = yield* OpenCode.make({ baseUrl: bridge.url }).pipe(
+					Effect.provideService(
+						HttpClient.HttpClient,
+						HttpClient.mapRequest(
+							base,
+							HttpClientRequest.setHeader('authorization', authorization),
+						),
+					),
+				)
+				return yield* use(opencode)
+			}).pipe(Effect.provide(FetchHttpClient.layer)),
+		)
+	return { received, client }
 }
 
-test('accepts omitted create fields encoded as null by the actual OpenCode Effect client', async () => {
-	let calls = 0
-	let forwardedBody: unknown
-	const bridge = await fixture((request, response) => {
-		calls++
-		void (async () => {
-			forwardedBody = await jsonBody(request)
-			json(response, {
-				data: {
-					id: 'ses_fixture',
-					projectID: 'fixture',
-					location,
-					model,
-					cost: 0,
-					tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-					time: { created: 0, updated: 0 },
-				},
-			})
-		})()
-	})
-	const created = await Effect.runPromise(
-		Effect.gen(function* () {
-			const base = yield* HttpClient.HttpClient
-			const client = yield* OpenCode.make({ baseUrl: bridge.url }).pipe(
-				Effect.provideService(
-					HttpClient.HttpClient,
-					HttpClient.mapRequest(base, HttpClientRequest.setHeader('authorization', authorization)),
-				),
-			)
-			return yield* client.session.create({ location, model, permissions, title: 'Fixture thread' })
-		}).pipe(Effect.provide(FetchHttpClient.layer)),
+test('replaces the T3 instruction entry sent by the OpenCode client', async () => {
+	const { received, client } = await fixture(() => false)
+	await client((opencode) =>
+		opencode.session.instructions.entry.put({
+			sessionID,
+			key: 't3-code',
+			value: 'RAW T3 orchestration instructions',
+		}),
 	)
-	expect(created.id).toBe('ses_fixture')
-	expect(calls).toBe(1)
-	expect(forwardedBody).toMatchObject({
-		agent: null,
-		permissions: expect.arrayContaining([
-			{ action: 't3-code-*', resource: '*', effect: 'deny' },
-			{ action: `${namespace}_*`, resource: '*', effect: 'allow' },
-			{ action: `${namespace}_delegate_task`, resource: '*', effect: 'deny' },
-			{ action: `${namespace}_html_preview`, resource: '*', effect: 'deny' },
-			{ action: `${namespace}_html_render`, resource: '*', effect: 'deny' },
-		]),
-	})
-	expect(forwardedBody).not.toMatchObject({
-		permissions: expect.arrayContaining([{ action: '*', resource: '*', effect: 'allow' }]),
-	})
-})
-
-test('ignores null no-op update fields when coordinating a permission-only PATCH', async () => {
-	const paths: string[] = []
-	const bridge = await fixture((request, response) => {
-		paths.push(`${request.method} ${request.url}`)
-		request.resume()
-		if (request.method === 'GET') {
-			json(response, { data: { id: 'ses_fixture', location } })
-			return
-		}
-		json(response, { output: null })
-	})
-	const response = await fetch(`${bridge.url}/api/session/ses_fixture`, {
-		method: 'PATCH',
-		headers: { authorization, 'content-type': 'application/json' },
-		body: JSON.stringify({ title: null, metadata: null, permissions }),
-	})
-	expect(response.status).toBe(204)
-	expect(paths).toEqual([
-		'GET /api/session/ses_fixture',
-		'POST /api/rpc/limitless.t3/updatePermissions',
+	expect(received).toEqual([
+		{
+			method: 'PUT',
+			url: `/api/experimental/session/${sessionID}/instructions/entries/t3-code`,
+			body: { value: T3_CONTEXT },
+		},
 	])
 })
 
-test('forwards title-only updates whose unused permissions field is encoded as null', async () => {
-	const paths: string[] = []
-	const bridge = await fixture((request, response) => {
-		paths.push(`${request.method} ${request.url}`)
-		request.resume()
-		response.writeHead(204).end()
+test('resolves the OpenCode client’s build selection to the configured default', async () => {
+	const { received, client } = await fixture((request, response) => {
+		if (request.url === '/api/agent') {
+			response
+				.writeHead(200, { 'content-type': 'application/json' })
+				.end(JSON.stringify({ data: [{ id: 'limitless', mode: 'primary', hidden: false }] }))
+			return true
+		}
+		if (request.method === 'GET') {
+			response
+				.writeHead(200, { 'content-type': 'application/json' })
+				.end(JSON.stringify({ data: { id: sessionID, location: { directory }, agent: 'plan' } }))
+			return true
+		}
+		return false
 	})
-	const response = await fetch(`${bridge.url}/api/session/ses_fixture`, {
-		method: 'PATCH',
-		headers: { authorization, 'content-type': 'application/json' },
-		body: JSON.stringify({ title: 'New title', metadata: null, permissions: null }),
+	await client((opencode) =>
+		opencode.session.switchAgent({ sessionID, agent: Agent.ID.make('build') }),
+	)
+	expect(received.at(-1)).toEqual({
+		method: 'POST',
+		url: `/api/session/${sessionID}/agent`,
+		body: { agent: 'limitless' },
 	})
-	expect(response.status).toBe(204)
-	expect(paths).toEqual(['PATCH /api/session/ses_fixture'])
 })
 
-test('still rejects invalid agents and permission changes mixed with effective title updates', async () => {
-	let calls = 0
-	const bridge = await fixture((request, response) => {
-		calls++
-		request.resume()
-		response.writeHead(204).end()
-	})
-	for (const [method, path, body] of [
-		['POST', '/api/session', { agent: 1, permissions }],
-		['PATCH', '/api/session/ses_fixture', { title: 'Changed', metadata: null, permissions }],
-	] as const) {
-		const response = await fetch(`${bridge.url}${path}`, {
-			method,
-			headers: { authorization, 'content-type': 'application/json' },
-			body: JSON.stringify(body),
-		})
-		expect(response.status).toBe(400)
-	}
-	expect(calls).toBe(0)
+test('hashes the T3 MCP server name the OpenCode client registers and removes', async () => {
+	const { received, client } = await fixture(() => false)
+	const server = 't3-code-thread_fork'
+	const location = Location.PublicRef.make({ directory: AbsolutePath.make(directory) })
+	await client((opencode) =>
+		Effect.gen(function* () {
+			yield* opencode.mcp.add({
+				server,
+				location,
+				config: new Mcp.RemoteConfig({ type: 'remote', url: 'http://127.0.0.1:1/mcp' }),
+			})
+			yield* opencode.mcp.remove({ server, location: { directory: AbsolutePath.make(directory) } })
+		}),
+	)
+	const hashed = canonicalT3Namespace(server)
+	expect(received.map(({ method, url }) => `${method} ${url?.split('?')[0]}`)).toEqual([
+		`PUT /api/experimental/mcp/${hashed}`,
+		`DELETE /api/experimental/mcp/${hashed}`,
+	])
 })

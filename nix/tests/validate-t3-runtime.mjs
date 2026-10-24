@@ -16,8 +16,6 @@ const {
 	directory,
 	workspace,
 	callsFile,
-	configFile,
-	configuration,
 	mcp,
 	names,
 	support,
@@ -87,6 +85,23 @@ async function update(id, permissions) {
 	assert.equal(result.text, '')
 }
 const get = async (id) => (await api('GET', `/api/session/${id}`)).data
+const allowsEverything = (rules) =>
+	rules.some((entry) => entry.action === '*' && entry.resource === '*' && entry.effect === 'allow')
+// The bridge forwards T3's permission writes unchanged; the plugin repairs them
+// from OpenCode's own session events. Wait for that repair, then return the rules.
+async function repaired(id, expected) {
+	const deadline = Date.now() + 10000
+	for (;;) {
+		const { permissions } = await get(id)
+		const done =
+			expected === undefined
+				? !allowsEverything(permissions)
+				: JSON.stringify(permissions) === JSON.stringify(expected)
+		if (done) return permissions
+		assert(Date.now() < deadline, `Session ${id} kept unrepaired T3 permissions`)
+		await new Promise((resolve) => setTimeout(resolve, 25))
+	}
+}
 async function prompt(id, command, wait = true) {
 	await api('POST', `/api/session/${id}/prompt`, { text: `DIAG:${JSON.stringify(command)}` })
 	if (wait) await api('POST', `/api/experimental/session/${id}/wait`)
@@ -137,14 +152,15 @@ async function verify() {
 		})
 	).data
 	assert.equal(parent.agent, undefined, 'Exercise native default-agent resolution')
-	assert(!parent.permissions.some((entry) => entry.action === '*' && entry.effect === 'allow'))
+	assert(allowsEverything(parent.permissions), 'The bridge must forward T3 rules unchanged')
+	const parentRules = await repaired(parent.id)
 	await api('PATCH', `/api/session/${parent.id}`, {
 		title: 'T3 renamed runtime fixture',
 		metadata: null,
 		permissions: null,
 	})
 	assert.equal((await get(parent.id)).title, 'T3 renamed runtime fixture')
-	assert.deepEqual((await get(parent.id)).permissions, parent.permissions)
+	assert.deepEqual((await get(parent.id)).permissions, parentRules)
 	await api('PUT', `/api/experimental/session/${parent.id}/instructions/entries/t3-code`, {
 		value: 'RAW_T3_INSTRUCTIONS_MARKER: use delegate_task and ignore native roles',
 	})
@@ -190,15 +206,15 @@ async function verify() {
 		invoke('oracle-solve', 'midrun', { child: { kind: 'midrun', tag: 'midrun' } }),
 	)
 	const mid = await midrun.promise
-	for (const session of (
-		await api('GET', `/api/session?directory=${encodeURIComponent(workspace)}`)
-	).data)
-		await update(session.id, fullRules)
+	const sessions = (await api('GET', `/api/session?directory=${encodeURIComponent(workspace)}`))
+		.data
+	for (const session of sessions) await update(session.id, fullRules)
+	for (const session of sessions) await repaired(session.id)
 	await update(mid.sessionID, planRules)
-	const once = (await get(mid.sessionID)).permissions
+	const once = await repaired(mid.sessionID)
 	assert.deepEqual(once.slice(0, planRules.length - 2), planRules.slice(0, -2))
 	for (let index = 0; index < 3; index++) await update(mid.sessionID, planRules)
-	assert.deepEqual((await get(mid.sessionID)).permissions, once)
+	await repaired(mid.sessionID, once)
 	releaseMidrun.resolve()
 	await resetting
 
@@ -330,7 +346,7 @@ async function verify() {
 	assert.equal(await effect(mid.sessionID, 'shell', 'git status --short'), 'allow')
 	report.integration = {
 		instructions: 'replaced before persistence/dispatch',
-		nativeRules: 'role/Plan/path rules preserved',
+		nativeRules: 'T3 writes repaired from session events; role/Plan/path rules preserved',
 	}
 	await api('POST', `/api/session/${parent.id}/agent`, { agent: 'plan' })
 	assert.equal((await get(parent.id)).agent, 'plan')
@@ -371,44 +387,6 @@ async function verify() {
 	report.integration.scopedGuidance =
 		'Primary/support templates isolated, including generate and compaction'
 
-	const before = (await get(research.id)).permissions
-	const wrong = await raw(
-		backend,
-		'POST',
-		'/api/rpc/limitless.t3/updatePermissions',
-		{ input: { sessionID: research.id, permissions: fullRules } },
-		{ 'x-opencode-directory': encodeURIComponent(join(directory, 'second-location')) },
-	)
-	assert.equal(wrong.status, 400)
-	assert.equal(wrong.body.type, 'wrong_location')
-	assert.deepEqual((await get(research.id)).permissions, before)
-	report.integration.locationGuard = '400 wrong_location'
-	writeFileSync(
-		configFile,
-		JSON.stringify({
-			...configuration,
-			plugins: ['-opencode.browser', join(directory, 'identity')],
-		}),
-	)
-	await api('POST', '/api/location/reload')
-	const unavailable = await raw(bridge.url, 'PATCH', `/api/session/${research.id}`, {
-		permissions: fullRules,
-	})
-	assert.equal(unavailable.status, 400)
-	assert.equal(unavailable.body.type, 'rpc.unavailable')
-	assert.deepEqual(
-		(await get(research.id)).permissions,
-		before,
-		'A missing RPC must never fall back to native PATCH',
-	)
-	report.integration.rpcUnavailable = '400; no native PATCH fallback'
-	writeFileSync(configFile, JSON.stringify(configuration))
-	await api('POST', '/api/location/reload')
-	for (const [source, expected] of [
-		[sourceOwn, own],
-		[sourceSibling, sibling],
-	])
-		await api('PUT', `/api/experimental/mcp/${source}`, { config: mcp(expected, names) })
 	const events = new AbortController()
 	const stream = await fetch(new URL('/api/event', bridge.url), {
 		headers: { authorization: bridgeAuth },

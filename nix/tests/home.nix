@@ -537,6 +537,16 @@ in
         export HOME="$TMPDIR/home"
         mkdir -p "$HOME"
         test "$(${lib.getExe t3Launcher} --version)" = "$(${launcherOf defaults} --version)"
+        # Without a managed service, the launcher fails before announcing a server.
+        if OPENCODE_PASSWORD=check ${lib.getExe t3Launcher} serve --port=0 >launch.out 2>launch.err; then
+          echo "opencode-t3 started without a managed service" >&2
+          exit 1
+        fi
+        grep -q 'managed OpenCode service is unavailable' launch.err
+        if grep -q 'listening' launch.out; then
+          echo "opencode-t3 announced a server without a managed service" >&2
+          exit 1
+        fi
         bun validate-t3-runtime.mjs \
           ${self.packages.${pkgs.stdenv.hostPlatform.system}.limitless} \
           ${lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.opencode} \
