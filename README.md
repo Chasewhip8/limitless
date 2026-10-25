@@ -29,12 +29,17 @@ Run `opencode`, or its `oc` shell alias, from a project. It discovers or starts
 its native background service. Connect model providers through `/connect`.
 
 Limitless disables OpenCode's built-in browser plugin (`opencode.browser`) to
-avoid conflicts with T3 Code's browser tools. Use T3 Code for browser access.
+avoid conflicts with T3 Code's and Paseo's browser tools. Use either for browser access.
 
 ## Included capabilities
 
 - **Agents:** `limitless`, a research subagent, and technical and design
-  Oracle advisers.
+  Oracle advisers, plus `lead` and `unit` for goals delivered as parallel
+  pull requests through Paseo.
+- **Clients:** optional supervised [T3 Code](#t3-code) and [Paseo](#paseo)
+  environments, both served by the one managed OpenCode service.
+- **Skills:** `repository-setup`, which makes a repository ready for parallel
+  worktrees.
 - **Code intelligence:** ast-grep search and replacement, TypeScript/Biome
   diagnostics, and seven LSP tools for definitions, hover, implementations,
   call hierarchy, references, symbols, and rename previews.
@@ -130,9 +135,9 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection |
-| `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell/edit/AST and the T3 browser allowlist; deny artifact creation and session changes |
-| `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell/edit/AST and the T3 browser allowlist; deny external mutations, artifact creation and session changes |
+| `limitless`, `lead`, `unit` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection. `unit` can delegate only to Oracle Solve and Research, and uses only an allowlist of Paseo tools |
+| `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell/edit/AST and the T3 browser allowlist; no Paseo tools; deny artifact creation and session changes |
+| `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell/edit/AST and the T3 browser allowlist; no Paseo tools; deny external mutations, artifact creation and session changes |
 
 With Executor enabled, Research can use only `executor-read`; Executor's
 connection policy owns read-only enforcement. Direct MCPs are denied to Research,
@@ -358,6 +363,7 @@ nix/modules/
 ├── opencode.nix   # runtime, agents, plugins, and configuration assembly
 ├── service.nix    # optional Linux supervision and native service binding
 ├── t3.nix         # optional headless T3 service and OpenCode provider binding
+├── paseo.nix      # optional Paseo daemon and OpenCode provider binding
 ├── lsp.nix        # language-server packages and plugin configuration
 └── mcp.nix        # named connections and permission generation
 nix/mcp-presets.nix # first-party endpoints and audited read-tool names
@@ -392,6 +398,7 @@ when present and is otherwise empty. OpenCode's built-in skills remain available
 
 `limitless` is the primary user-facing agent. Its default model is configured in
 `opencode/agents/limitless.md` and remains independently selectable in OpenCode.
+`lead` and `unit` use the same model and run in Paseo; see [Goals and units](#goals-and-units).
 
 Research uses `openai/gpt-6.1-sol-fast#max`; Oracle Solve uses
 `openai/gpt-6-astra#max`; Oracle Design uses `anthropic/claude-opus-5-5#xhigh`.
@@ -661,8 +668,9 @@ no password needs copying into T3 settings. Other CLI use still goes through `op
 ### Behavior
 
 All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`, plus the
-broken HTML visual tools `html_preview` and `html_render`. Limitless retains T3's
-other tools, including requested top-level thread creation and management.
+broken HTML visual tools `html_preview` and `html_render`. Primary agents
+(`limitless`, `lead`, `unit`) retain T3's other tools, including top-level thread
+creation and management.
 Support agents receive only these 21 browser tools:
 
 ```text
@@ -709,9 +717,10 @@ The bridge never interrupts sessions or stops the service.
 
 ### Compatibility boundary
 
-The bridge (`packages/limitless/t3/{cli,bridge,rewrites,backend}.ts`) is an Effect
-loopback proxy. It authenticates T3, forwards HTTP and server-sent events to the
-managed service with that service's credentials, and rewrites three requests: the
+The bridge (`packages/limitless/t3/{cli,bridge,rewrites}.ts` over the shared
+`packages/limitless/bridge/`) is an Effect loopback proxy. It authenticates T3,
+forwards HTTP and server-sent events to the managed service with that service's
+credentials, and rewrites three requests: the
 `t3-code` instruction entry, T3 MCP server names, and normal mode's `build` agent.
 It rejects WebSocket upgrades, which T3's OpenCode provider does not use. Permission
 policy lives only in the plugin (`t3/{plugin,session-policy,permissions}.ts`):
@@ -732,6 +741,151 @@ On x86_64 Linux, the packaged T3 is that nightly plus a backport of
 in [Chasewhip8/t3code](https://github.com/Chasewhip8/t3code/releases/tag/v0.1.1-nightly.20261020.3411-pr21532),
 so OpenCode threads can select an agent. ARM uses the upstream nightly until
 the change ships upstream. Keep the integration checks with runtime upgrades.
+
+## Paseo
+
+[Paseo](https://paseo.sh) runs agents in workspaces and worktrees from its desktop,
+web and mobile apps. Limitless connects it to the managed OpenCode service through
+the packaged `opencode-paseo` launcher, so Paseo agents, the TUI and T3 share one
+OpenCode server, one session database, and its restart recovery. Paseo would
+otherwise start OpenCode servers of its own against the same database.
+
+```text
+Paseo desktop / web ─► paseo.service ─launches─► opencode-paseo ─► opencode.service
+                                                       │                 │ paseo plugin
+                                                       └── registration ─┘ ⇄ Paseo tools
+```
+
+### Paseo setup
+
+```nix
+programs.limitless = {
+  enable = true;
+  opencode.service.enable = true;
+  paseo.enable = true;
+};
+```
+
+The `paseo` user service runs the pinned daemon (`packages.paseo`, Paseo `0.13.0`)
+on `127.0.0.1:6767` with `PASEO_HOME=~/.paseo`. Options `paseo.port`, `paseo.home`,
+`paseo.browserTools` and `paseo.package` override these defaults. Before each start
+it merges these keys into Paseo's `config.json`, preserving everything else,
+including a password hash from `paseo daemon set-password`:
+
+- `daemon.listen` on loopback, `daemon.relay.enabled = false`;
+- `daemon.mcp.enabled` and `injectIntoAgents`, so agents receive Paseo's tools;
+- `daemon.browserTools.enabled` from `paseo.browserTools`;
+- `agents.providers.opencode` enabled with `command = [ "<profile>/bin/opencode-paseo" ]`.
+
+Like T3's provisioning, the merge refuses to run while another daemon holds
+`paseo.pid` in that home, ignoring a lock left by an earlier boot as Paseo does, and
+refuses symlinked or malformed files. Remote access is
+not configured: Paseo grants owner access to every client when no password is set,
+so set one before exposing the port. Rebuilds keep the old daemon running; restart
+it with `systemctl --user restart paseo` when idle.
+
+Install the desktop app from `packages.paseo-desktop` (x86_64 Linux, the same
+release). It attaches to the running daemon in `~/.paseo`; turn off its built-in
+daemon management in the desktop's settings so it never starts its own.
+
+### Paseo behavior
+
+Paseo starts `opencode-paseo serve` wherever it would start an OpenCode server.
+The launcher answers `--version` and other subcommands with the pinned OpenCode,
+and `serve` starts only a loopback proxy to the managed service, waiting up to 20
+seconds for the service at login. Paseo's tools reach agents through Paseo's tool
+bridge, a loopback endpoint in the Paseo daemon. The launcher records its address,
+token and tool list in `$XDG_RUNTIME_DIR/limitless/paseo-tool-bridge.json` (mode
+0600) for the `paseo` plugin in the managed service, leaving an unchanged
+registration untouched. A launch fails when a different, still-running Paseo
+daemon owns the registration; two daemons launching at the same moment can both
+register, and the later one wins. If a launcher from a crashed Paseo worker wins,
+Paseo sessions lose their tools until Paseo launches another server; restart the
+`paseo` service to force it.
+
+The proxy rewrites three kinds of request:
+
+- Session creation drops Paseo's session permission rules, which would override
+  the agents' own rules and pass to their native children.
+- Paseo's default `build` agent, at creation or on a switch, becomes the configured
+  default agent.
+- Per-agent MCP registration is refused: Paseo isolates those servers by giving the
+  agent its own OpenCode server, and in the shared service they would reach every
+  session in the directory.
+
+The `paseo` plugin satisfies Paseo's readiness check and provides Paseo's tools as
+direct `paseo_*` tools. Before each step it asks Paseo which agent drives the
+session, walking up to the parent for native children: sessions Paseo does not
+drive, such as TUI and T3 sessions, see no Paseo tools, and an agent sees only the
+tools Paseo allows it. Paseo sessions also receive a short Paseo guidance block. A
+stopped daemon removes the tools at once; a stalled one after a 1.5-second lookup,
+which then delays each step of `limitless`, `lead` and `unit` sessions until it
+answers or stops. The plugin watches the registration and checks it again before
+admitting a prompt, so a new agent's first step has the current tools.
+
+Agent roles add their own limits. Research and both Oracles receive no Paseo tools.
+Paseo's tools check no ownership, so `unit` gets an allowlist: messaging and
+status, heartbeats, workspace scripts, terminals and browser tools. It cannot
+create, stop or reconfigure agents or workspaces.
+
+Paseo replaces a session's shell environment with its daemon's. Shells in Paseo
+sessions instead keep the managed service's environment plus Paseo's `PASEO_*`
+variables, such as `PASEO_AGENT_ID`. Process-level environment Paseo sets for a
+single agent does not reach the shared service.
+
+Paseo stops an agent by closing its binding and relies on that agent's OpenCode
+server exiting. When the daemon that bound an execution closes its binding, the
+plugin interrupts the execution at its next step, including after the session moves
+between directories. Once an execution ends, a later prompt to that session runs
+normally without Paseo tools.
+
+The shared service outlives the launchers. If an `opencode-paseo` process dies
+mid-turn, Paseo reports the turn as failed while OpenCode finishes it, and rejects
+a new prompt until it does. Paseo's `run --output-schema` is unsupported: it needs
+a structured-output tool the `paseo` plugin does not provide. Paseo's own generated
+names and messages do not use it.
+
+### Goals and units
+
+Select the `lead` agent in Paseo to work on a goal that spans several pieces of
+work. Lead settles the design with you, then launches each piece as a unit: a
+Paseo agent running the `unit` agent in its own worktree and branch. A unit treats
+its brief as the approved design, implements and self-reviews it, opens a pull
+request, and reports to Lead.
+
+```text
+lead ──create_workspace (worktree) + create_agent (mode unit)──► unit ──► pull request
+  ▲                                                               │
+  └──────────── send_agent_prompt: QUESTION · BLOCKED · READY ────┘
+```
+
+Messages between agents steer the recipient's current turn or start its next one.
+Paseo also notifies Lead when a unit's turn finishes. Units watch their pull
+request with a Paseo heartbeat. Lead merges only with your approval, after checking
+that the pull request's head matches the unit's READY report, and re-checks an
+approval with `git range-diff` when a unit updates its branch. It keeps a ledger
+artifact of units and merges and runs at most three units at once by default.
+Lead and its units run on the machine whose Paseo daemon you use. `limitless`
+remains available for hands-on work without units. A repository works best with
+units when it meets the `repository-setup` skill's invariants, including a
+`paseo.json` that sets up each worktree. `lead` and `unit` also appear in T3 and the
+TUI, where they lack Paseo's tools.
+
+### Paseo compatibility boundary
+
+`opencode-paseo` (`packages/limitless/paseo/{cli,bridge,rewrites,registration}.ts`
+over the shared `packages/limitless/bridge/`), the plugin
+(`packages/limitless/paseo/{plugin,tool-bridge}.ts`) and the settings merge
+reimplement Paseo's OpenCode integration against Paseo internals that carry no
+version: its launch contract, readiness check, `/_internal/opencode` tool bridge,
+configuration schema and daemon lock. The `paseo-protocol` check pins the upstream
+files they depend on; bump the Paseo input deliberately and review what the check
+names. Upstream's recorded npm dependency hash does not match what `fetchNpmDeps`
+produces for its lockfile, with its own nixpkgs or ours, so `nix/packages/paseo.nix`
+records the verified hash; refresh it from the build's reported hash when bumping.
+
+This is not a sandbox: Paseo's tool limits are agent permissions, and every agent
+can reach the host through its shell.
 
 ## Notifications
 

@@ -57,10 +57,15 @@ let
     lsp = cfg._generated.lsp;
     providers = { inherit (cfg.providers) disabled; };
   };
-  t3Launcher = pkgs.writeShellScriptBin "opencode-t3" ''
-    export LIMITLESS_OPENCODE_BIN=${lib.escapeShellArg "${opencodePackage}/bin/opencode"}
-    exec ${lib.getExe pkgs.bun} ${lib.escapeShellArg "${cfg.plugins.limitless.package}/t3.js"} "$@"
-  '';
+  # Bridges that clients launch as their OpenCode binary; each serves the managed service.
+  bridgeLauncher =
+    name: bundle:
+    pkgs.writeShellScriptBin name ''
+      export LIMITLESS_OPENCODE_BIN=${lib.escapeShellArg "${opencodePackage}/bin/opencode"}
+      exec ${lib.getExe pkgs.bun} ${lib.escapeShellArg "${cfg.plugins.limitless.package}/${bundle}"} "$@"
+    '';
+  t3Launcher = bridgeLauncher "opencode-t3" "t3.js";
+  paseoLauncher = bridgeLauncher "opencode-paseo" "paseo.js";
   managedPlugins =
     # T3's session permissions can override agent denials, so remove the native browser plugin.
     [ "-opencode.browser" ]
@@ -72,7 +77,11 @@ let
         package = "file://${cfg.plugins.limitless.package}";
         options = pluginOptions;
       }
-    ];
+    ]
+    # Paseo checks that a plugin with ID `paseo` is active before using a server.
+    ++ lib.optional cfg.paseo.enable {
+      package = "file://${cfg.plugins.limitless.package}/paseo";
+    };
 
   baseConfig = builtins.fromJSON (builtins.readFile "${self}/opencode/opencode.json");
   mergedConfig = lib.recursiveUpdate baseConfig cfg.opencode.settings;
@@ -85,7 +94,7 @@ let
     };
     agents =
       (mergedConfig.agents or { })
-      // lib.genAttrs [ "limitless" "oracle-solve" "oracle-design" ] (
+      // lib.genAttrs [ "limitless" "lead" "unit" "oracle-solve" "oracle-design" ] (
         name:
         (mergedConfig.agents.${name} or { })
         // {
@@ -140,7 +149,7 @@ in
         default = [
           (permissionRule "*" "*" "allow")
         ];
-        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials are appended; Research receives read-only MCP rules, while main and Oracles retain read/write MCP access.";
+        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials are appended; Research receives read-only MCP rules, while primary agents and Oracles retain read/write MCP access.";
       };
     };
 
@@ -261,7 +270,8 @@ in
       packages = [
         opencodePackage
         t3Launcher
-      ];
+      ]
+      ++ lib.optional cfg.paseo.enable paseoLauncher;
       shellAliases.oc = "opencode";
       file = {
         "${opencodeDir}/opencode.json".text = builtins.toJSON opencodeConfig;

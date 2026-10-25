@@ -1,26 +1,28 @@
 import { Service } from '@opencode/client/effect/service'
 import { Context, Effect, FileSystem, Layer, Schema } from 'effect'
 
-/** Where the bridge forwards T3's requests, with the credentials the managed service expects. */
+/** Where a bridge forwards its client's requests, with the credentials the managed service expects. */
 export interface Backend {
 	readonly url: URL
 	readonly headers: Readonly<Record<string, string>>
 }
 
-/** A request the bridge answers itself, with the HTTP status T3 receives. */
+/** A request the bridge answers itself, with the HTTP status its client receives. */
 export class BridgeError extends Schema.TaggedError<BridgeError>()('BridgeError', {
 	status: Schema.Number,
 	message: Schema.String,
+	/** The managed service is not running yet; a launcher may wait for it. */
+	unavailable: Schema.optional(Schema.Boolean),
 }) {}
 
-export class T3Backend extends Context.Service<
-	T3Backend,
+export class ServiceBackend extends Context.Service<
+	ServiceBackend,
 	{ readonly resolve: Effect.Effect<Backend, BridgeError> }
->()('@limitless/t3/Backend') {}
+>()('@limitless/bridge/ServiceBackend') {}
 
 /**
- * Only the path and query come from T3. The origin always comes from the
- * backend: a request target such as `//host/x` or `http://host/x` must never
+ * Only the path and query come from the client. The origin always comes from
+ * the backend: a request target such as `//host/x` or `http://host/x` must never
  * send the managed service's credentials to a caller-selected origin.
  */
 export function backendURL(backend: Backend, pathname: string, search = ''): URL {
@@ -35,7 +37,7 @@ export function backendURL(backend: Backend, pathname: string, search = ''): URL
  * restart with a new address or password needs no bridge restart. Discovery
  * never starts, replaces, or stops the service.
  */
-export const managedBackend = Layer.effect(T3Backend)(
+export const managedBackend = Layer.effect(ServiceBackend)(
 	Effect.gen(function* () {
 		const fileSystem = yield* FileSystem.FileSystem
 		const resolve = Effect.gen(function* () {
@@ -43,7 +45,8 @@ export const managedBackend = Layer.effect(T3Backend)(
 			if (endpoint === undefined)
 				return yield* new BridgeError({
 					status: 502,
-					message: 'The managed OpenCode service is unavailable; start it before using T3',
+					message: 'The managed OpenCode service is unavailable; start it before connecting',
+					unavailable: true,
 				})
 			const headers = Service.headers({
 				url: endpoint.url,

@@ -34,10 +34,32 @@
         "type": "github"
       }
     },
+    "paseo": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1792821753,
+        "narHash": "sha256-f3hXjwjenlXr8c8FmXMnz6PZ8QGyeyouJ/CtRwO8OdM=",
+        "owner": "getpaseo",
+        "repo": "paseo",
+        "rev": "d34d17a9072149320ace35ec2a2e5c7dcd992cb3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "getpaseo",
+        "ref": "v0.13.0",
+        "repo": "paseo",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "paseo": "paseo"
       }
     },
     "systems": {

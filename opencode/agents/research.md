@@ -18,6 +18,9 @@ permissions:
     - action: subagent
       resource: "*"
       effect: deny
+    - action: paseo_*
+      resource: "*"
+      effect: deny
 ---
 
 # Research

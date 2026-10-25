@@ -23,4 +23,12 @@ assert.equal(typeof tui.default.setup, 'function')
 const cacheStatus = Host.resolve({ directory: join(directory, 'cache-status') })
 assert(cacheStatus.tui?.endsWith('/cache-status/tui.tsx'), 'Missing cache-status TUI entrypoint')
 assert.equal(cacheStatus.server, undefined)
+
+// Paseo requires an active plugin with ID `paseo`; it must be server-only.
+const paseo = Host.resolve({ directory: join(directory, 'paseo') })
+assert(paseo.server?.endsWith('/paseo/index.js'), 'Missing paseo server entrypoint')
+assert.equal(paseo.tui, undefined)
+const paseoServer = await Host.load(paseo.server)
+assert.equal(paseoServer.default.id, 'paseo')
+assert.equal(typeof paseoServer.default.effect, 'function')
 console.log(`Validated server and TUI entrypoints in ${directory}`)

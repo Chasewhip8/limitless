@@ -7,6 +7,7 @@
     ./lsp.nix
     ./mcp.nix
     (import ./t3.nix { inherit self; })
+    (import ./paseo.nix { inherit self; })
   ];
 
   options.programs.limitless = {
