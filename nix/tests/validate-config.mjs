@@ -163,7 +163,7 @@ for (const file of files) {
 		if (name === 'unit') {
 			expectEffect('subagent', 'oracle-solve', 'allow')
 			expectEffect('subagent', 'research', 'allow')
-			expectEffect('subagent', 'oracle-design', 'deny')
+			expectEffect('subagent', 'oracle-design', 'allow')
 			expectEffect('subagent', 'unknown-agent', 'deny')
 		}
 		// Paseo tools: everything for limitless and lead, an allowlist for units

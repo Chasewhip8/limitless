@@ -34,8 +34,8 @@ avoid conflicts with T3 Code's and Paseo's browser tools. Use either for browser
 ## Included capabilities
 
 - **Agents:** `limitless`, a research subagent, and technical and design
-  Oracle advisers, plus `lead` and `unit` for goals delivered as parallel
-  pull requests through Paseo.
+  Oracle advisers, plus `lead` and `unit` for goals delivered through parallel
+  assignments in Paseo.
 - **Clients:** optional supervised [T3 Code](#t3-code) and [Paseo](#paseo)
   environments, both served by the one managed OpenCode service.
 - **Skills:** `repository-setup`, which makes a repository ready for parallel
@@ -135,7 +135,7 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless`, `lead`, `unit` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection. `unit` can delegate only to Oracle Solve and Research, and uses only an allowlist of Paseo tools |
+| `limitless`, `lead`, `unit` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection. `unit` can delegate only to the two Oracles and Research, and uses only an allowlist of Paseo tools |
 | `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell/edit/AST and the T3 browser allowlist; no Paseo tools; deny artifact creation and session changes |
 | `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell/edit/AST and the T3 browser allowlist; no Paseo tools; deny external mutations, artifact creation and session changes |
 
@@ -865,21 +865,37 @@ A working setup shows each of these:
 Select the `lead` agent in Paseo to work on a goal that spans several pieces of
 work. Lead settles the design with you, then launches each piece as a unit: a
 Paseo agent running the `unit` agent in its own worktree and branch. A unit treats
-its brief as the approved design, implements and self-reviews it, opens a pull
-request, and reports to Lead.
+its brief as the approved design, executes it, validates and reviews the work,
+and reports to Lead. Units follow Limitless's final-review policy: a fresh Oracle
+Design review for non-straightforward changes, joined by Oracle Solve when correctness
+warrants it, with corrections returned to the same reviewers.
 
 ```text
-lead ──create_workspace (worktree) + create_agent (mode unit)──► unit ──► pull request
-  ▲                                                               │
-  └──────────── send_agent_prompt: QUESTION · BLOCKED · READY ────┘
+lead ── worktree + <brief> ──► unit
+  ▲                             │
+  └── <result status="…"> ──────┘
 ```
 
-Messages between agents steer the recipient's current turn or start its next one.
-Paseo also notifies Lead when a unit's turn finishes. Units watch their pull
-request with a Paseo heartbeat. Lead merges only with your approval, after checking
-that the pull request's head matches the unit's READY report, and re-checks an
-approval with `git range-diff` when a unit updates its branch. It keeps a ledger
-artifact of units and merges and runs at most three units at once by default.
+The brief is the unit's initial message, not an artifact. Its XML fields are
+`lead`, `objective`, `context`, `scope`, `deliverable`, and `validation`, with prose
+inside each. The deliverable can be reviewed working-tree changes, a committed
+branch, a pull request, an investigation, or another agreed result. Follow-up
+direction uses ordinary messages. A brief conveys the user's approved work;
+agent messages do not create new user authorization.
+
+Unit reports use `<result status="question|blocked|complete|update">` with `answer`,
+`evidence`, `recommendation`, and `gaps` fields. They go to Lead through
+`paseo_send_agent_prompt` with `notifyOnFinish: false`; Paseo supplies the sender's
+identity. These XML formats are prompt conventions, not runtime-validated schemas.
+Messages steer the recipient's current turn or start its next one. Paseo also
+notifies Lead when a unit's turn finishes.
+
+Lead's conversation records decisions, unit references, results, and approvals;
+Paseo and GitHub supply live state. Lead runs at most three units at once by
+default, assesses completed results, and owns integration using the approach
+agreed with you. Pull requests and ongoing monitoring are assignment-specific,
+not mandatory parts of a unit's lifecycle.
+
 Lead and its units run on the machine whose Paseo daemon you use. `limitless`
 remains available for hands-on work without units. A repository works best with
 units when it meets the `repository-setup` skill's invariants, including a
