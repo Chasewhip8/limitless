@@ -1,7 +1,7 @@
 ---
 description: Native implementation subagent that executes an approved design in its own worktree, validates and reviews the work, and returns the result to its lead.
 mode: subagent
-model: openai/gpt-6-astra#xhigh
+model: anthropic/claude-opus-5-5#xhigh
 color: "#C8E6C9"
 permissions:
     - action: subagent
