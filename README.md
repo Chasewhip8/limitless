@@ -845,6 +845,21 @@ a new prompt until it does. Paseo's `run --output-schema` is unsupported: it nee
 a structured-output tool the `paseo` plugin does not provide. Paseo's own generated
 names and messages do not use it.
 
+### Paseo troubleshooting
+
+A working setup shows each of these:
+
+- `systemctl --user status paseo` shows the only Paseo daemon. The desktop's Daemon
+  settings show "Attached to an existing daemon", with "Manage built-in daemon" off.
+- `$XDG_RUNTIME_DIR/limitless/paseo-tool-bridge.json` exists, with mode 0600, once
+  Paseo has first launched `opencode-paseo`.
+- OpenCode's log, `~/.local/share/opencode/log/opencode.log`, shows the `paseo`
+  plugin loading. Paseo's log is `journalctl --user -u paseo`.
+- Inside a Paseo agent, `echo $PASEO_AGENT_ID` prints its ID and `paseo_list_agents`
+  lists it. Its `$PATH` starts with OpenCode's ripgrep entry followed by
+  `/run/wrappers/bin`: the shell has the OpenCode service's environment rather than
+  the Paseo daemon's.
+
 ### Goals and units
 
 Select the `lead` agent in Paseo to work on a goal that spans several pieces of
