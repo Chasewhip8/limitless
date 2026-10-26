@@ -108,6 +108,15 @@ let
     ) "ask" rules;
 
   defaults = evaluate { };
+  desktopSettings = {
+    opencode.desktop.enable = true;
+    t3.desktop.enable = true;
+    paseo.desktop.enable = true;
+  };
+  desktopsOnly = evaluate (desktopSettings // { enable = false; });
+  desktopMismatch = pkgs.runCommand "desktop-mismatch-0" { version = "0"; } ''
+    mkdir -p "$out"
+  '';
   disabled = evaluate { enable = false; };
   connected = evaluate {
     opencode.settings.plugins = [
@@ -484,9 +493,6 @@ in
       })
     ) "GitHub clones became unrestricted without explicit opt-in";
     assert lib.assertMsg (
-      !(self.packages.${pkgs.stdenv.hostPlatform.system} ? opencode-desktop)
-    ) "OpenCode Desktop must not be packaged";
-    assert lib.assertMsg (
       defaults.config.home.file.".config/opencode/plugins/limitless-cache-status".source
       == "${defaults.config.programs.limitless.plugins.limitless.package}/cache-status"
       && !(
@@ -746,6 +752,70 @@ in
         grep -F -- '--no-opencode' ${t3Custom.config.systemd.user.services.t3code.Service.ExecStartPre}
         test "$(${lib.getExe t3Supervised.config.programs.limitless.t3.package} --version)" = 't3 v${t3Supervised.config.programs.limitless.t3.package.version}'
       ''}
+      touch "$out"
+    '';
+
+  desktops =
+    assert lib.assertMsg (lib.all (name: !defaults.config.programs.limitless.${name}.desktop.enable) [
+      "opencode"
+      "t3"
+      "paseo"
+    ]) "Desktops must be opt-in";
+    assert lib.assertMsg (
+      !valid (evaluate {
+        enable = false;
+        opencode.desktop = {
+          enable = true;
+          package = null;
+        };
+      })
+    ) "An enabled desktop needs a package";
+    assert lib.assertMsg (
+      if pkgs.stdenv.hostPlatform.system == "x86_64-linux" then
+        valid desktopsOnly
+        &&
+          map lib.getName desktopsOnly.config.home.packages == [
+            "opencode-desktop"
+            "t3-desktop"
+            "paseo-desktop"
+          ]
+        && desktopsOnly.config.home.file == { }
+        && desktopsOnly.config.systemd.user.services == { }
+        && desktopsOnly.config.warnings == [ ]
+        && valid (
+          evaluate (
+            lib.recursiveUpdate desktopSettings {
+              opencode.service.enable = true;
+              t3.enable = true;
+              paseo.enable = true;
+            }
+          )
+        )
+        && !valid (evaluate {
+          opencode.desktop.enable = true;
+          opencode.package = desktopMismatch;
+        })
+        && valid (evaluate {
+          enable = false;
+          opencode.desktop.enable = true;
+          opencode.package = desktopMismatch;
+        })
+        && builtins.length (evaluate { opencode.desktop.enable = true; }).config.warnings == 1
+        &&
+          (evaluate {
+            opencode.desktop.enable = true;
+            opencode.service.enable = true;
+          }).config.warnings == [ ]
+        &&
+          lib.getVersion self.packages.${pkgs.stdenv.hostPlatform.system}.t3-desktop
+          == lib.getVersion self.packages.${pkgs.stdenv.hostPlatform.system}.t3
+        &&
+          lib.getVersion self.packages.${pkgs.stdenv.hostPlatform.system}.paseo-desktop
+          == lib.getVersion self.packages.${pkgs.stdenv.hostPlatform.system}.paseo
+      else
+        !valid desktopsOnly && desktopsOnly.config.home.packages == [ ]
+    ) "Desktop installation, standalone use, platform limits or version checks changed";
+    pkgs.runCommand "limitless-desktops-check" { } ''
       touch "$out"
     '';
 

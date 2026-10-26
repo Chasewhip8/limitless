@@ -37,7 +37,8 @@ avoid conflicts with T3 Code's and Paseo's browser tools. Use either for browser
   Oracle advisers, plus `lead` and `unit` for native asynchronous implementation
   in isolated worktrees.
 - **Clients:** optional supervised [T3 Code](#t3-code) and [Paseo](#paseo)
-  environments, both served by the one managed OpenCode service.
+  environments, both served by the one managed OpenCode service, plus opt-in
+  [desktop apps](#desktop-clients) for OpenCode, T3 Code and Paseo.
 - **Skills:** `repository-setup`, which makes a repository ready for parallel
   worktrees.
 - **Code intelligence:** ast-grep search and replacement, TypeScript/Biome
@@ -364,6 +365,8 @@ nix/modules/
 ├── service.nix    # optional Linux supervision and native service binding
 ├── t3.nix         # optional headless T3 service and OpenCode provider binding
 ├── paseo.nix      # optional Paseo daemon and OpenCode provider binding
+├── desktop.nix    # independent Linux desktop installation
+├── darwin.nix     # macOS desktop installation through Homebrew
 ├── lsp.nix        # language-server packages and plugin configuration
 └── mcp.nix        # named connections and permission generation
 nix/mcp-presets.nix # first-party endpoints and audited read-tool names
@@ -653,6 +656,60 @@ users.users."your-user".linger = true;
 On other systemd distributions, an administrator can enable lingering with
 `loginctl enable-linger <your-user>`. Tailscale's proxy must also start at boot.
 
+## Desktop clients
+
+Limitless installs OpenCode Desktop, T3 Code and Paseo through independent flags:
+
+```nix
+programs.limitless = {
+  opencode.desktop.enable = true;
+  t3.desktop.enable = true;
+  paseo.desktop.enable = true;
+};
+```
+
+On **x86_64 Linux**, import `limitless.homeModules.default` into Home Manager.
+The flags install pinned AppImages, also exported as `packages.opencode-desktop`,
+`packages.t3-desktop` and `packages.paseo-desktop`. Each has a `desktop.package`
+override. Desktop-only use does not require `programs.limitless.enable` and does
+not provision agents, configuration or background services.
+
+On **macOS**, import `limitless.darwinModules.default` into nix-darwin and set the
+same flags in the system configuration. They install the native Homebrew casks
+`opencode-desktop`, `t3-code` and `paseo`. Homebrew must already be installed.
+The module enables Homebrew by default when a desktop is requested, but leaves
+its upgrade and cleanup policy to the host. Cask versions follow Homebrew rather
+than the Linux pins, and apps may update themselves. Use cleanup `"uninstall"`,
+not `"zap"`, to preserve app data when removing or switching clients. Paseo's cask
+also installs its CLI; cask upgrades/removal can stop the Mac's local Paseo daemon.
+
+```text
+Linux Home Manager flags → pinned desktop packages
+macOS nix-darwin flags   → native Homebrew casks
+```
+
+### OpenCode Desktop and the shared service
+
+The Linux desktop is pinned to the Limitless OpenCode release (`packages.opencode`). When the
+Limitless workspace is enabled, module assertions reject a desktop/CLI version
+mismatch: Desktop can stop and replace a registered local service at startup
+when its bundled CLI version differs. Other, independently installed CLIs are
+outside this check.
+
+With the matching managed service healthy, Desktop adopts that service. If no
+healthy service exists, it starts its bundled CLI, without the Limitless launcher
+environment; systemd may then take ownership again and interrupt work. Start the
+managed service before opening Desktop and close Desktop before runtime upgrades.
+Selecting a remote server in Desktop does not disable local service startup.
+On Macs without a configured local Limitless workspace, this local service uses
+ordinary OpenCode configuration. Add remote servers through Desktop's pairing UI.
+
+T3 and Paseo desktop installation likewise does not configure their local backend
+settings. Follow the sections below when attaching them to managed Linux services.
+Their Linux packages ship with matching server versions; independently updated
+clients need compatible protocols and feature support. After upgrades, restart
+the T3 and Paseo services when idle: their `keep-old` policy preserves running work.
+
 ## T3 Code
 
 Use the packaged `opencode-t3` launcher to connect T3 to the existing managed
@@ -679,7 +736,7 @@ T3 desktop / web → t3code.service → opencode-t3 → opencode.service
 
 The `t3code` user service listens on `127.0.0.1:3773` and uses the existing
 `~/.t3` home, preserving threads and accounts. Options `t3.port`, `t3.baseDir`, and
-`t3.package` override these defaults. Install the desktop separately. Linux user
+`t3.package` override these defaults. Enable `t3.desktop.enable` for the GUI. Linux user
 lingering and a private HTTPS proxy belong in the host configuration, as described
 above; T3's own Tailscale Serve management is disabled.
 
@@ -844,7 +901,7 @@ not configured: Paseo grants owner access to every client when no password is se
 so set one before exposing the port. Rebuilds keep the old daemon running; restart
 it with `systemctl --user restart paseo` when idle.
 
-Install the desktop app from `packages.paseo-desktop` (x86_64 Linux, the same
+Enable `paseo.desktop.enable` to install the desktop app (on Linux, the same
 release). It attaches to the running daemon in `~/.paseo`; turn off its built-in
 daemon management in the desktop's settings so it never starts its own.
 
@@ -994,7 +1051,7 @@ This release removes these options and packages:
 | Removed | Migration |
 | --- | --- |
 | `slack.*`, Gary, Slack tools | Remove Slack configuration and retire its bot credentials when no longer used. |
-| `desktop.enable`, `opencode-desktop` package | Remove `programs.limitless.desktop.enable` and any direct package references, then apply Home Manager to stop installing OpenCode Desktop. Use T3 Code for browser access. |
+| `desktop.enable` | Use `programs.limitless.opencode.desktop.enable`. The `opencode-desktop` package is available again as the upstream V2 client; it does not restore the old patched launcher. |
 | `tools.agentBrowser.*`, `agent-browser` package/skill | Use T3 Code's browser tools. OpenCode's native browser catalog is disabled. |
 | `tools.acli.*`, Atlassian CLI skill | Add an `atlassian` MCP connection and authorize it. |
 | `tools.notion.*`, `notion-cli` package/skill | Add separately named `notion` MCP connections for each workspace. |
@@ -1048,6 +1105,10 @@ The cache-status plugin's type-only dev dependencies (`@opencode/theme`,
 `@opentui/*`, `solid-js`) follow the same OpenCode release. Re-audit native
 capabilities and MCP read exceptions when upgrading. Vendor references for the
 current allowlists are linked in the integration table above.
+
+When upgrading OpenCode, T3 or Paseo, update the matching `*-desktop.nix` hash and
+build `.#opencode-desktop`, `.#t3-desktop` and `.#paseo-desktop`. The x86_64 Linux
+flake checks build all three to catch stale desktop pins before deployment.
 
 When upgrading OpenCode, verify that the TUI still replaces a built-in handler with
 a later external definition of the same ID, that the built-in notifications ID is

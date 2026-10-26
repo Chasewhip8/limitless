@@ -52,6 +52,12 @@
           paseo = import ./nix/packages/paseo.nix { inherit pkgs paseo; };
         }
         // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          opencode-desktop = pkgs.callPackage ./nix/packages/opencode-desktop.nix {
+            opencode = self.packages.${system}.opencode;
+          };
+          t3-desktop = pkgs.callPackage ./nix/packages/t3-desktop.nix {
+            t3 = self.packages.${system}.t3;
+          };
           paseo-desktop = pkgs.callPackage ./nix/packages/paseo-desktop.nix {
             paseo = self.packages.${system}.paseo;
           };
@@ -59,6 +65,7 @@
         checks =
           (import ./nix/tests/home.nix { inherit pkgs self agentsPackage; })
           // {
+            darwin-desktops = import ./nix/tests/darwin-desktops.nix { inherit pkgs; };
             limitless-dependencies = import ./nix/tests/limitless-dependencies.nix {
               inherit pkgs;
               dependencies = self.packages.${system}.limitless.dependencies;
@@ -67,6 +74,11 @@
               inherit pkgs;
               source = paseo;
             };
+          }
+          // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+            opencode-desktop = self.packages.${system}.opencode-desktop;
+            t3-desktop = self.packages.${system}.t3-desktop;
+            paseo-desktop = self.packages.${system}.paseo-desktop;
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             executor-service = import ./nix/tests/executor-service.nix {
@@ -96,6 +108,7 @@
     )
     // {
       homeModules.default = import ./nix/modules/home.nix { inherit self; };
+      darwinModules.default = ./nix/modules/darwin.nix;
       nixosModules.executor = ./nix/modules/executor-service.nix;
       overlays.default = final: _prev: {
         abilities-skills = self.packages.${final.stdenv.hostPlatform.system}.skills;

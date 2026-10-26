@@ -10,6 +10,7 @@ let
   # The desktop and the daemon come from the same Paseo release.
   inherit (paseo) version;
   src = fetchurl {
+    name = "paseo-desktop-${version}-x86_64.AppImage";
     url = "https://github.com/getpaseo/paseo/releases/download/v${version}/Paseo-x86_64.AppImage";
     hash = "sha256-jFzqM/w86IsPU6I51lghiMcL1YcRNwTvaX25qDEBQ18=";
   };
