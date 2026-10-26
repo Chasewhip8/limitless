@@ -58,11 +58,11 @@ export const registerT3Policy = Effect.fn('registerT3Policy')(function* (context
 			const session = yield* context.session.get({ sessionID: request.sessionID })
 			if (!hasT3Permissions(session.permissions ?? [])) return
 			const agent = yield* resolveSessionAgent(context, session)
-			injectT3Guidance(
-				request,
-				isT3SupportAgent(agent) ? guidance.support : guidance.primary,
-				appendWhenMissing,
-			)
+			if (isT3SupportAgent(agent)) {
+				injectT3Guidance(request, '')
+				return
+			}
+			injectT3Guidance(request, guidance, appendWhenMissing)
 		}).pipe(Effect.orDie)
 	yield* context.session.hook('context', inject)
 	yield* context.session.hook('generate', inject)

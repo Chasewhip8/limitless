@@ -21,12 +21,11 @@ for (const file of await readdir(agentsDirectory)) {
 }
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
 assert.equal(agents.limitless?.model, 'openai/gpt-6-astra#xhigh')
-// Paseo offers only visible primary agents as modes and rejects any other
-// modeId, so Lead can create units only while `unit` is one.
-for (const name of ['limitless', 'lead', 'unit']) {
+for (const name of ['limitless', 'lead']) {
 	assert.equal(agents[name]?.mode, 'primary', `${name} must be a selectable primary agent`)
-	assert.notEqual(agents[name]?.hidden, true, `${name} must be a visible Paseo mode`)
+	assert.notEqual(agents[name]?.hidden, true, `${name} must be visible`)
 }
+assert.equal(agents.unit?.mode, 'subagent', 'Units must use native subagent execution')
 
 function matches(pattern, value) {
 	const expression = pattern
@@ -72,7 +71,7 @@ const sharedActions = [
 	'opencode_models',
 ]
 const primaryOnlyActions = ['artifact_create', 'opencode_session_move', 'opencode_session_rename']
-const unitPaseoTools = [
+const paseoWorkspaceTools = [
 	'send_agent_prompt',
 	'get_agent_status',
 	'get_agent_activity',
@@ -106,6 +105,7 @@ const unitDeniedPaseoTools = [
 for (const file of files) {
 	const input = JSON.parse(await readFile(file, 'utf8'))
 	Schema.decodeUnknownSync(Config.Info)(input, { onExcessProperty: 'error' })
+	assert.equal(input.experimental.subagent_depth, 3, 'Allow Lead → Unit → Oracle → Research')
 	const browserRemoval = input.plugins.lastIndexOf('-opencode.browser')
 	assert(browserRemoval >= 0, `${file}: the native browser plugin must be disabled`)
 	assert(
@@ -159,27 +159,24 @@ for (const file of files) {
 		}
 		if (name === 'lead') {
 			for (const agent of supportAgents) expectEffect('subagent', agent, 'allow')
+			expectEffect('subagent', 'unit', 'allow')
 		}
 		if (name === 'unit') {
 			expectEffect('subagent', 'oracle-solve', 'allow')
 			expectEffect('subagent', 'research', 'allow')
-			expectEffect('subagent', 'oracle-design', 'allow')
+			expectEffect('subagent', 'oracle-design', 'deny')
 			expectEffect('subagent', 'unknown-agent', 'deny')
+			expectEffect('subagent', 'unit', 'deny')
 		}
-		// Paseo tools: everything for limitless and lead, an allowlist for units
-		// (Paseo checks no ownership), and none for support agents.
-		const paseoEffect = (tool) => {
-			if (supportAgents.includes(name)) return 'deny'
-			if (name !== 'unit') return 'allow'
-			return unitPaseoTools.includes(tool) || tool.startsWith('browser_') ? 'allow' : 'deny'
-		}
+		// Paseo tools belong to the primary conversation, not native subagents.
+		const paseoEffect = ['limitless', 'lead'].includes(name) ? 'allow' : 'deny'
 		for (const tool of [
-			...unitPaseoTools,
+			...paseoWorkspaceTools,
 			...unitDeniedPaseoTools,
 			'browser_snapshot',
 			'future_tool',
 		])
-			expectEffect(`paseo_${tool}`, '*', paseoEffect(tool))
+			expectEffect(`paseo_${tool}`, '*', paseoEffect)
 		if (supportAgents.includes(name)) {
 			expectEffect('question', '*', 'deny')
 			expectEffect('subagent', 'research', name === 'research' ? 'deny' : 'allow')

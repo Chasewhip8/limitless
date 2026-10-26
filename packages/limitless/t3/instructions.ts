@@ -12,12 +12,9 @@ export class T3GuidanceError extends Schema.TaggedError<T3GuidanceError>()('T3Gu
 
 export const loadT3Guidance = () =>
 	Effect.tryPromise({
-		try: async () => ({
-			primary: (await readFile(new URL('./prompts/primary.md', import.meta.url), 'utf8')).trim(),
-			support: (await readFile(new URL('./prompts/support.md', import.meta.url), 'utf8')).trim(),
-		}),
-		catch: () =>
-			new T3GuidanceError({ message: 'Unable to read the packaged T3 guidance templates' }),
+		try: async () =>
+			(await readFile(new URL('./prompts/primary.md', import.meta.url), 'utf8')).trim(),
+		catch: () => new T3GuidanceError({ message: 'Unable to read the packaged T3 guidance' }),
 	})
 
 type InstructionRequest = Pick<SessionRequest, 'system' | 'messages'>

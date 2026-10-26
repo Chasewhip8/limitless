@@ -1,7 +1,7 @@
 ---
 description: Oracle technical adviser for independent judgment when evidence conflicts, investigations stall, correctness is uncertain, or the consequences warrant deeper scrutiny.
 mode: subagent
-model: openai/gpt-6-astra#max
+model: openai/gpt-6-astra#xhigh
 permissions:
     - action: question
       resource: "*"

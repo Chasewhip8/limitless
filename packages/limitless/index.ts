@@ -8,6 +8,7 @@ import {
 	type SessionDirectoryResolver,
 	type ToolExecutor,
 } from './plugin/tool-boundary'
+import { registerUnits } from './plugin/units'
 import { registerT3Policy } from './t3/plugin'
 import { artifactTools } from './tools/artifacts/index'
 import { astGrepTools } from './tools/ast-grep'
@@ -98,6 +99,7 @@ export default Plugin.define({
 		const tools = limitlessTools(executeTool, configs.githubConfig, configs.githubCloneRuntime)
 
 		yield* registerT3Policy(ctx)
+		yield* registerUnits(ctx)
 		yield* ctx.tool.transform((draft) => {
 			registerLimitlessTools(draft, tools)
 		})

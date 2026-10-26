@@ -242,14 +242,10 @@ const configuration = {
 			permissions: [],
 		},
 		unit: {
-			mode: 'primary',
+			mode: 'subagent',
 			description: 'Fixture',
 			model: 'fixture/fixture',
-			permissions: [
-				rule('paseo_*', 'deny'),
-				rule('paseo_send_agent_prompt', 'allow'),
-				rule('paseo_browser_*', 'allow'),
-			],
+			permissions: [rule('paseo_*', 'deny')],
 		},
 		research: {
 			mode: 'subagent',
@@ -435,11 +431,10 @@ async function verify() {
 	const unit = await create(bridge.url, { agent: 'unit', permissions: [] })
 	assert.equal(unit.agent, 'unit')
 	bindings.set(unit.id, allTools)
-	assert.deepEqual(paseoTools(await snapshot(unit.id, 'unit')), [
-		'paseo_browser_snapshot',
-		'paseo_send_agent_prompt',
-	])
-	check('unit-allowlist')
+	const unitStep = await snapshot(unit.id, 'unit')
+	assert.deepEqual(paseoTools(unitStep), [])
+	assert.equal(guidanceCount(unitStep), 0)
+	check('unit-without-paseo-tools')
 
 	const limited = await create(bridge.url, { agent: 'build', permissions: [] })
 	bindings.set(limited.id, ['list_agents'])

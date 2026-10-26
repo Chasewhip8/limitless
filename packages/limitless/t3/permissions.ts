@@ -9,31 +9,7 @@ export class T3PermissionError extends Schema.TaggedError<T3PermissionError>()(
 	},
 ) {}
 
-export const T3_BROWSER_TOOLS = [
-	'preview_click',
-	'preview_dialog',
-	'preview_drag',
-	'preview_evaluate',
-	'preview_hover',
-	'preview_navigate',
-	'preview_open',
-	'preview_press',
-	'preview_recording_start',
-	'preview_recording_stop',
-	'preview_resize',
-	'preview_scroll',
-	'preview_select',
-	'preview_set_appearance',
-	'preview_snapshot',
-	'preview_status',
-	'preview_type',
-	'preview_upload',
-	'preview_wait_for',
-	't3_preview_close',
-	't3_preview_list',
-] as const
-
-const supportAgents = new Set(['research', 'oracle-solve', 'oracle-design'])
+const supportAgents = new Set(['unit', 'research', 'oracle-solve', 'oracle-design'])
 export const isT3SupportAgent = (agent: string | undefined) =>
 	agent !== undefined && supportAgents.has(agent)
 const disabledTools = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
@@ -111,14 +87,11 @@ function managedRules(namespace: string | undefined, support: boolean): Permissi
 		...(namespace === undefined
 			? []
 			: [
+					// Preserve the binding anchor even when the role denies its tools.
 					rule(`${namespace}_*`, 'allow'),
-					...(support
-						? [
-								rule(`${namespace}_*`, 'deny'),
-								...T3_BROWSER_TOOLS.map((name) => rule(`${namespace}_${name}`, 'allow')),
-							]
-						: []),
+					...(support ? [rule(`${namespace}_*`, 'deny')] : []),
 				]),
+		...(support ? [rule('t3-code_*', 'deny')] : []),
 		...disabledTools.flatMap((name) => [
 			rule(`t3-code_${name}`, 'deny'),
 			...(namespace === undefined ? [] : [rule(`${namespace}_${name}`, 'deny')]),

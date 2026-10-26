@@ -8,30 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 export function createRuntimeFixture(bundleDirectory, catalogFile) {
 	const names = JSON.parse(readFileSync(catalogFile, 'utf8'))
 	assert.equal(names.length, 83, 'Review the runtime expectations when T3 changes its catalog')
-	const browser = [
-		'preview_click',
-		'preview_dialog',
-		'preview_drag',
-		'preview_evaluate',
-		'preview_hover',
-		'preview_navigate',
-		'preview_open',
-		'preview_press',
-		'preview_recording_start',
-		'preview_recording_stop',
-		'preview_resize',
-		'preview_scroll',
-		'preview_select',
-		'preview_set_appearance',
-		'preview_snapshot',
-		'preview_status',
-		'preview_type',
-		'preview_upload',
-		'preview_wait_for',
-		't3_preview_close',
-		't3_preview_list',
-	]
-	const support = ['research', 'oracle-solve', 'oracle-design']
+	const support = ['unit', 'research', 'oracle-solve', 'oracle-design']
 	const prohibited = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
 	const sourceOwn = 't3-code-thread_with_underscores'
 	const sourceSibling = 't3-code-thread_with_underscores_child'
@@ -51,7 +28,7 @@ export function createRuntimeFixture(bundleDirectory, catalogFile) {
 		...anchors,
 	]
 	const allowed = (agent) =>
-		support.includes(agent) ? browser : names.filter((name) => !prohibited.includes(name))
+		support.includes(agent) ? [] : names.filter((name) => !prohibited.includes(name))
 	const temporary = process.env.TMPDIR ?? '/tmp/opencode'
 	mkdirSync(temporary, { recursive: true })
 	const directory = mkdtempSync(join(temporary, 'limitless-t3-runtime-'))
@@ -142,28 +119,18 @@ return {tag:${JSON.stringify(tag)},agent:${JSON.stringify(agent)},own,sibling,at
 						: undefined
 			if (command) {
 				const sent = JSON.stringify(body.messages)
-				if (!t3Bound) {
+				if (!t3Bound || support.includes(agent)) {
 					assert(!sent.includes('## T3 Code integration'))
-					assert(!sent.includes('## T3 Code investigation tools'))
+					assert(!sent.includes('## T3 Code browser tools'))
+					assert(!sent.includes('<!-- limitless:t3-context:v1 -->'))
 				} else {
 					assert(
 						!sent.includes('<!-- limitless:t3-context:v1 -->'),
 						'T3 marker must be expanded before dispatch',
 					)
-					assert(
-						sent.includes(
-							support.includes(agent) ? '## T3 Code investigation tools' : '## T3 Code integration',
-						),
-					)
-					const heading = support.includes(agent)
-						? '## T3 Code investigation tools'
-						: '## T3 Code integration'
+					const heading = '## T3 Code integration'
+					assert(sent.includes(heading))
 					assert.equal(sent.split(heading).length - 1, 1, 'Guidance must appear exactly once')
-					if (support.includes(agent))
-						assert(
-							!sent.includes('## T3 Code integration'),
-							'Children must not inherit primary-only guidance',
-						)
 				}
 			}
 			const key = `${sessionID}/${command?.tag}`

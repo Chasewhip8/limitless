@@ -2,7 +2,7 @@
 
 > A Home Manager module for a ready-to-use OpenCode 2 workspace.
 
-Limitless pins OpenCode `2.0.32`, supplies coding agents and local code-intelligence
+Limitless pins OpenCode `2.1.4`, supplies coding agents and local code-intelligence
 tools, and configures optional first-party MCP connections. OpenCode owns its
 service discovery, OAuth credentials, Code Mode, and native
 notification delivery. Home Manager owns packages and non-secret configuration, with
@@ -34,8 +34,8 @@ avoid conflicts with T3 Code's and Paseo's browser tools. Use either for browser
 ## Included capabilities
 
 - **Agents:** `limitless`, a research subagent, and technical and design
-  Oracle advisers, plus `lead` and `unit` for goals delivered through parallel
-  assignments in Paseo.
+  Oracle advisers, plus `lead` and `unit` for native asynchronous implementation
+  in isolated worktrees.
 - **Clients:** optional supervised [T3 Code](#t3-code) and [Paseo](#paseo)
   environments, both served by the one managed OpenCode service.
 - **Skills:** `repository-setup`, which makes a repository ready for parallel
@@ -135,9 +135,9 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless`, `lead`, `unit` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection. `unit` can delegate only to the two Oracles and Research, and uses only an allowlist of Paseo tools |
-| `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell/edit/AST and the T3 browser allowlist; no Paseo tools; deny artifact creation and session changes |
-| `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell/edit/AST and the T3 browser allowlist; no Paseo tools; deny external mutations, artifact creation and session changes |
+| `limitless`, `lead`, `unit` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection. `unit` can delegate only to Oracle Solve and Research; it has no T3 or Paseo tools |
+| `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell/edit/AST; no T3 or Paseo tools; deny artifact creation and session changes |
+| `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell/edit/AST; no T3 or Paseo tools; deny external mutations, artifact creation and session changes |
 
 With Executor enabled, Research can use only `executor-read`; Executor's
 connection policy owns read-only enforcement. Direct MCPs are denied to Research,
@@ -294,7 +294,7 @@ Do not synchronize OAuth token files between machines.
 
 For a remote OpenCode host, set `callbackPort = 19876` (and optionally
 `readCallbackPort = 19877`). The browser must reach that **OpenCode host's**
-loopback listener; OpenCode 2.0.32 does not relay callbacks through its frontend.
+loopback listener; OpenCode 2.1.4 does not relay callbacks through its frontend.
 Open an SSH forward from the browser computer before running `/mcps` against
 the remote backend:
 
@@ -398,10 +398,11 @@ when present and is otherwise empty. OpenCode's built-in skills remain available
 
 `limitless` is the primary user-facing agent. Its default model is configured in
 `opencode/agents/limitless.md` and remains independently selectable in OpenCode.
-`lead` and `unit` use the same model and run in Paseo; see [Goals and units](#goals-and-units).
+`lead` is the design-and-delegation primary agent; `unit` is its native implementation
+subagent. See [Lead and Units](#lead-and-units).
 
-Research uses `openai/gpt-6.1-sol-fast#max`; Oracle Solve uses
-`openai/gpt-6-astra#max`; Oracle Design uses `anthropic/claude-opus-5-5#xhigh`.
+Research uses `openai/gpt-6.1-sol#xhigh`; Oracle Solve uses
+`openai/gpt-6-astra#xhigh`; Oracle Design uses `anthropic/claude-opus-5-5#xhigh`.
 Subagents keep the processing tier of their configured model.
 
 Limitless owns implementation, integration, and final validation.
@@ -438,6 +439,78 @@ by default. Configure `providers.openai.settings.compaction.type` through
 
 `providers.disabled` defaults to
 `[ "google-vertex" "google-vertex-anthropic" ]` to avoid ambient Vertex selection.
+
+## Lead and Units
+
+Lead is a continuing engineering and design conversation. It dispatches each
+coherent approved design to a Unit, keeps designing with you, and reviews returned
+work against the design and the Unit's technical review evidence. Unit uses
+Research and Oracle Solve; design judgment and Oracle Design belong to Lead.
+This runs on one OpenCode
+host, including from the native TUI; T3 and Paseo are optional UI adapters.
+
+```text
+Lead ── native subagent ──► Unit in a native worktree
+  ▲                          │
+  └── native final response ──┘
+```
+
+Lead uses the existing `subagent` tool:
+
+```ts
+subagent({
+  agent: "unit",
+  description: "Implement customer pagination",
+  prompt: "The approved design, context, scope, deliverable, and validation…",
+  background: true,
+})
+```
+
+Limitless decorates native Unit creation. After OpenCode's permission, depth,
+and model checks, it creates an OpenCode-managed worktree, moves the new child
+there, and initializes its model from the destination's effective Unit configuration.
+Explicitly requested model overrides are preserved. Other subagents keep their
+normal placement. Follow-ups pass the same `sessionID` to `subagent` and reuse the
+worktree. The depth limit is three for Lead → Unit → Oracle → Research.
+
+The brief and Unit's final response are ordinary prose. No Lead ID, report status,
+reporting tool, callback subscription, or ledger artifact is required. OpenCode's
+background job owns the return to the parent, including its durable completion
+record and managed-server restart recovery. The returned execution outcome is not an assertion
+that the assignment is complete; Lead reads the answer and decides what follows.
+
+Native worktrees use the project's configured strategy, inventory, and startup
+command (`project.commands.start`). The default Git strategy starts detached at
+the Lead checkout's HEAD and preserves Lead's checkout-relative directory.
+Uncommitted files are not copied; a directory still absent after checkout and
+startup fails placement with its path in the error. Units create named
+branches when their requested delivery calls for one. This is checkout isolation,
+not an OS sandbox. Worktrees remain after completion and are removed separately
+through OpenCode once the work is integrated or abandoned. Provisioning failure
+can leave a child or checkout behind; inspect the returned identity and native
+worktree inventory before retrying.
+
+OpenCode's separate provider-backed Workspace IDs are an Effect SDK embedding
+facility in 2.1.4, not a public plugin lifecycle. This implementation uses the
+native local worktree API without embedding another OpenCode host.
+
+### Native Unit compatibility and known limitation
+
+The placement adapter targets OpenCode **2.1.4**. It uses the native subagent
+executor's awaited progress callback between child creation and prompt admission;
+native schemas, execution hooks, authorization, and background jobs remain in
+place. Other versions refuse Unit dispatch until this ordering is reviewed.
+The `units-runtime` check exercises real OpenCode with a scripted model and
+isolated storage, without T3 or Paseo.
+
+**Deferred upstream bug:** a follow-up admitted while the prior execution settles
+can complete in the child without its automatic result reaching Lead. This was
+reproduced under controlled scheduling in 2.0.32 and in the latest stable V2
+release checked on 2026-10-26, **2.1.4**. The single-machine proof intentionally
+keeps the standard runtime and this known limitation rather than introducing a
+second reporting system. Native recovery does not guarantee exactly-once execution
+or external side effects; interrupted launches require inspecting the existing
+child before another dispatch.
 
 ## Anthropic subscription authentication
 
@@ -669,24 +742,12 @@ no password needs copying into T3 settings. Other CLI use still goes through `op
 
 All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`, plus the
 broken HTML visual tools `html_preview` and `html_render`. Primary agents
-(`limitless`, `lead`, `unit`) retain T3's other tools, including top-level thread
+(`limitless`, `lead`) retain T3's other tools, including top-level thread
 creation and management.
-Support agents receive only these 21 browser tools:
-
-```text
-preview_click              preview_dialog             preview_drag
-preview_evaluate           preview_hover              preview_navigate
-preview_open               preview_press              preview_recording_start
-preview_recording_stop     preview_resize             preview_scroll
-preview_select             preview_set_appearance     preview_snapshot
-preview_status             preview_type               preview_upload
-preview_wait_for           t3_preview_close           t3_preview_list
-```
-
-Other T3 tools, including future additions, are hidden from support agents in Code
-Mode and `search`; there is no execution-only deny hook. Support agents return
-findings and blockers to their caller. Browser access does not authorize external
-mutations. By default, unbound TUI/CLI sessions do not receive thread-bound tools.
+Unit, Research, and both Oracles receive no T3 tools, including browser tools and
+future additions. They are hidden from Code Mode and `search`; there is no
+execution-only deny hook. Subagents return findings and blockers through their
+native results. By default, unbound TUI/CLI sessions do not receive thread-bound tools.
 
 The plugin removes the blanket session allow that T3 Full access writes, which would
 otherwise erase native role restrictions. Native configuration remains authoritative,
@@ -700,12 +761,12 @@ T3 Plan turns fail with agent-not-found unless a Plan agent is configured. Retur
 to normal mode restores the default agent.
 
 Only T3's named `t3-code` instruction entry is replaced, with a neutral marker before
-persistence. The plugin expands that marker into the appropriate T3-only Markdown
-template for primary agents when preparing model requests. Native children inherit
-T3 permission bindings rather than the marker; bound children receive the support
-section directly at request preparation. Templates live
-in `packages/limitless/t3/prompts/`; the base agent Markdown files are unchanged.
-Ordinary sessions receive no T3 guidance. Other context, conversation content, and
+persistence. The plugin expands that marker into T3 guidance for primary agents
+when preparing model requests. Unit, Research, and both Oracles receive no T3
+guidance, and any inherited marker is removed from their outgoing requests.
+The primary template lives in `packages/limitless/t3/prompts/`; the base agent
+Markdown files are unchanged. Ordinary sessions receive no T3 guidance.
+Other context, conversation content, and
 subagent events pass through unchanged. Existing provider history is not retroactively
 erased; use a fresh thread for the cleanest instruction cutover.
 
@@ -735,7 +796,7 @@ independent T3 OAuth connections. Underscore-containing thread namespaces, such 
 a fork's `<thread>_fork`, receive stable `t3-code-<32 hex>` aliases so
 prefix-related names cannot grant sibling tools.
 
-This adapter targets OpenCode `2.0.32` and T3 `0.1.1-nightly.20261020.3411`.
+This adapter targets OpenCode `2.1.4` and T3 `0.1.1-nightly.20261020.3411`.
 On x86_64 Linux, the packaged T3 is that nightly plus a backport of
 [pingdotgg/t3code#21532](https://github.com/pingdotgg/t3code/pull/21532), built
 in [Chasewhip8/t3code](https://github.com/Chasewhip8/t3code/releases/tag/v0.1.1-nightly.20261020.3411-pr21532),
@@ -823,10 +884,9 @@ which then delays each step of `limitless`, `lead` and `unit` sessions until it
 answers or stops. The plugin watches the registration and checks it again before
 admitting a prompt, so a new agent's first step has the current tools.
 
-Agent roles add their own limits. Research and both Oracles receive no Paseo tools.
-Paseo's tools check no ownership, so `unit` gets an allowlist: messaging and
-status, heartbeats, workspace scripts, terminals and browser tools. It cannot
-create, stop or reconfigure agents or workspaces.
+Agent roles add their own limits. Unit, Research, and both Oracles receive no Paseo
+tools. Unit creation, follow-ups, and returns use OpenCode rather than Paseo agent
+or workspace management.
 
 Paseo replaces a session's shell environment with its daemon's. Shells in Paseo
 sessions instead keep the managed service's environment plus Paseo's `PASEO_*`
@@ -859,48 +919,6 @@ A working setup shows each of these:
   lists it. Its `$PATH` starts with OpenCode's ripgrep entry followed by
   `/run/wrappers/bin`: the shell has the OpenCode service's environment rather than
   the Paseo daemon's.
-
-### Goals and units
-
-Select the `lead` agent in Paseo to work on a goal that spans several pieces of
-work. Lead settles the design with you, then launches each piece as a unit: a
-Paseo agent running the `unit` agent in its own worktree and branch. A unit treats
-its brief as the approved design, executes it, validates and reviews the work,
-and reports to Lead. Units follow Limitless's final-review policy: a fresh Oracle
-Design review for non-straightforward changes, joined by Oracle Solve when correctness
-warrants it, with corrections returned to the same reviewers.
-
-```text
-lead ── worktree + <brief> ──► unit
-  ▲                             │
-  └── <result status="…"> ──────┘
-```
-
-The brief is the unit's initial message, not an artifact. Its XML fields are
-`lead`, `objective`, `context`, `scope`, `deliverable`, and `validation`, with prose
-inside each. The deliverable can be reviewed working-tree changes, a committed
-branch, a pull request, an investigation, or another agreed result. Follow-up
-direction uses ordinary messages. A brief conveys the user's approved work;
-agent messages do not create new user authorization.
-
-Unit reports use `<result status="question|blocked|complete|update">` with `answer`,
-`evidence`, `recommendation`, and `gaps` fields. They go to Lead through
-`paseo_send_agent_prompt` with `notifyOnFinish: false`; Paseo supplies the sender's
-identity. These XML formats are prompt conventions, not runtime-validated schemas.
-Messages steer the recipient's current turn or start its next one. Paseo also
-notifies Lead when a unit's turn finishes.
-
-Lead's conversation records decisions, unit references, results, and approvals;
-Paseo and GitHub supply live state. Lead runs at most three units at once by
-default, assesses completed results, and owns integration using the approach
-agreed with you. Pull requests and ongoing monitoring are assignment-specific,
-not mandatory parts of a unit's lifecycle.
-
-Lead and its units run on the machine whose Paseo daemon you use. `limitless`
-remains available for hands-on work without units. A repository works best with
-units when it meets the `repository-setup` skill's invariants, including a
-`paseo.json` that sets up each worktree. `lead` and `unit` also appear in T3 and the
-TUI, where they lack Paseo's tools.
 
 ### Paseo compatibility boundary
 
@@ -1024,7 +1042,7 @@ nix run .#checks.x86_64-linux.t3-browser
 It exercises isolated shared and persistent browser contexts plus direct HTML
 rendering, using temporary profiles and no live T3 state or external websites.
 
-Runtime, Limitless plugin SDK, and schema are pinned to `2.0.32`, with
+Runtime, Limitless plugin SDK, and schema are pinned to `2.1.4`, with
 `effect@4.0.1`; update them together. Hosted plugins use OpenCode's shared Effect
 and plugin runtime; the standalone T3 bridge bundles its own dependencies.
 The cache-status plugin's type-only dev dependencies (`@opencode/theme`,

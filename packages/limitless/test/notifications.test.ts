@@ -204,7 +204,6 @@ describe('notification sounds', () => {
 					status: 'completed',
 					reason: 'manual',
 					summary: 'Summary',
-					recent: '',
 					time: { created: 2 },
 				},
 				idle(),

@@ -579,6 +579,24 @@ in
         touch "$out"
       '';
 
+  units-runtime =
+    pkgs.runCommand "limitless-native-units-runtime-check"
+      {
+        nativeBuildInputs = [
+          pkgs.bun
+          pkgs.git
+        ];
+      }
+      ''
+        mkdir -p "$TMPDIR/native-units"
+        export LIMITLESS_TEST_TMPDIR="$TMPDIR/native-units"
+        cp ${./validate-units-runtime.mjs} validate-units-runtime.mjs
+        bun validate-units-runtime.mjs \
+          ${self.packages.${pkgs.stdenv.hostPlatform.system}.limitless} \
+          ${lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.opencode}
+        touch "$out"
+      '';
+
   paseo-runtime =
     pkgs.runCommand "limitless-paseo-runtime-check"
       {

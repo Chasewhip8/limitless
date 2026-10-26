@@ -6,11 +6,10 @@ import {
 	normalizeT3Permissions,
 	ownT3Namespace,
 	samePermissionRules,
-	T3_BROWSER_TOOLS,
 } from '../t3/permissions'
 import toolNames from './fixtures/t3-tool-names.json'
 
-const supportAgents = ['research', 'oracle-solve', 'oracle-design']
+const supportAgents = ['unit', 'research', 'oracle-solve', 'oracle-design']
 const namespaces = [
 	't3-code-35ce915b-46a3-4496-9544-eaf1261c948d',
 	't3-code-thread_x',
@@ -85,18 +84,42 @@ describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 		}
 	})
 
-	test.each(supportAgents)('exposes only the 21 browser tools to %s', (agent) => {
+	test.each(supportAgents)('exposes no T3 tools to %s', (agent) => {
 		const rules = [...nativeDefaults, ...normalizeT3Permissions(t3Rules(sourceNamespace), agent)]
-		expect(T3_BROWSER_TOOLS).toHaveLength(21)
 		expect(
 			toolNames.filter((name) => effectFor(rules, `${namespace}_${name}`) === 'allow'),
-		).toEqual([...T3_BROWSER_TOOLS])
+		).toEqual([])
 		for (const name of [...toolNames, 'future_tool', 'preview_future_tool']) {
 			expect(effectFor(rules, `t3-code-sibling_${name}`)).toBe('deny')
+			expect(effectFor(rules, `t3-code_${name}`)).toBe('deny')
 		}
 		for (const name of ['future_tool', 'preview_future_tool', 'extra_preview_click']) {
 			expect(effectFor(rules, `${namespace}_${name}`)).toBe('deny')
 		}
+	})
+
+	test.each(
+		supportAgents,
+	)('overrides persisted browser grants for %s and stays idempotent', (agent) => {
+		const legacy: Permission.Ruleset = [
+			...t3Rules(sourceNamespace),
+			{ action: `${sourceNamespace}_*`, resource: '*', effect: 'deny' },
+			...['preview_open', 'preview_click', 'preview_snapshot', 't3_preview_list'].map((name) => ({
+				action: `${sourceNamespace}_${name}`,
+				resource: '*',
+				effect: 'allow' as const,
+			})),
+			{ action: 't3-code_preview_open', resource: '*', effect: 'allow' },
+		]
+		const repaired = normalizeT3Permissions(legacy, agent)
+		for (const name of [...toolNames, 'preview_future_tool']) {
+			expect(effectFor(repaired, `${namespace}_${name}`)).toBe('deny')
+			expect(effectFor(repaired, `t3-code_${name}`)).toBe('deny')
+		}
+		expect(normalizeT3Permissions(repaired, agent)).toEqual(repaired)
+		const primary = normalizeT3Permissions(repaired, 'limitless')
+		expect(effectFor(primary, `${namespace}_preview_open`)).toBe('allow')
+		expect(normalizeT3Permissions(primary, agent)).toEqual(repaired)
 	})
 
 	test('replaces an inherited primary or support policy without accumulating rules', () => {

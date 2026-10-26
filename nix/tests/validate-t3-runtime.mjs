@@ -183,6 +183,18 @@ async function verify() {
 		['oracle-design', 'oracleDesign'],
 	])
 		await prompt(parent.id, invoke(agent, tag))
+	// Test Unit's client-tool policy independently of its worktree provisioning.
+	const unit = (
+		await api('POST', '/api/session', {
+			parentID: parent.id,
+			agent: 'unit',
+			title: 'Unit UI policy',
+		})
+	).data
+	await api('PUT', `/api/experimental/session/${unit.id}/instructions/entries/t3-code`, {
+		value: 'RAW_T3_INSTRUCTIONS_MARKER: browser guidance must not reach Unit',
+	})
+	await prompt(unit.id, { kind: 'sweep', tag: 'unit' })
 	const research = await get((await snapshot('research')).sessionID)
 	const oracle = await get((await snapshot('oracleSolve')).sessionID)
 	for (const id of [parent.id, research.id]) {
@@ -210,6 +222,7 @@ async function verify() {
 		.data
 	for (const session of sessions) await update(session.id, fullRules)
 	for (const session of sessions) await repaired(session.id)
+	await prompt(unit.id, { kind: 'sweep', tag: 'unit-after-reset' })
 	await update(mid.sessionID, planRules)
 	const once = await repaired(mid.sessionID)
 	assert.deepEqual(once.slice(0, planRules.length - 2), planRules.slice(0, -2))
@@ -302,6 +315,8 @@ async function verify() {
 	}
 	for (const tag of [
 		'primary',
+		'unit',
+		'unit-after-reset',
 		'research',
 		'oracleSolve',
 		'oracleDesign',
@@ -376,16 +391,13 @@ async function verify() {
 		assert(auxiliary.length > 0, `Missing support-agent ${kind} request`)
 		for (const request of auxiliary) {
 			const text = JSON.stringify(request.body)
-			assert(
-				text.includes('## T3 Code investigation tools'),
-				`${kind} must retain support guidance`,
-			)
+			assert(!text.includes('## T3 Code browser tools'), `${kind} must not inject browser guidance`)
 			assert(!text.includes('## T3 Code integration'), `${kind} must not use primary guidance`)
 			assert(!text.includes('<!-- limitless:t3-context:v1 -->'))
 		}
 	}
 	report.integration.scopedGuidance =
-		'Primary/support templates isolated, including generate and compaction'
+		'Only primary agents receive T3 guidance, including generate and compaction'
 
 	const events = new AbortController()
 	const stream = await fetch(new URL('/api/event', bridge.url), {

@@ -323,7 +323,7 @@ test('shutdown detaches promptly without stopping the service or its event strea
 		}
 		if (request.url?.endsWith('/interrupt')) interrupted.push(request.url)
 		request.resume()
-		json(response, { version: '2.0.32' })
+		json(response, { version: '2.1.4' })
 	})
 	const events = await fetch(`${bridge.url}/api/event`, { headers: { authorization: frontAuth } })
 	await events.body?.getReader().read()
