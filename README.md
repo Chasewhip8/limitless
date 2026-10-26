@@ -796,12 +796,11 @@ independent T3 OAuth connections. Underscore-containing thread namespaces, such 
 a fork's `<thread>_fork`, receive stable `t3-code-<32 hex>` aliases so
 prefix-related names cannot grant sibling tools.
 
-This adapter targets OpenCode `2.1.4` and T3 `0.1.1-nightly.20261020.3411`.
-On x86_64 Linux, the packaged T3 is that nightly plus a backport of
-[pingdotgg/t3code#21532](https://github.com/pingdotgg/t3code/pull/21532), built
-in [Chasewhip8/t3code](https://github.com/Chasewhip8/t3code/releases/tag/v0.1.1-nightly.20261020.3411-pr21532),
-so OpenCode threads can select an agent. ARM uses the upstream nightly until
-the change ships upstream. Keep the integration checks with runtime upgrades.
+This adapter targets OpenCode `2.1.4` and upstream stable T3 `0.1.2` on both
+x86_64 and ARM Linux. T3 uses the configured default OpenCode agent; this release
+does not include the per-thread agent picker proposed in
+[pingdotgg/t3code#21532](https://github.com/pingdotgg/t3code/pull/21532).
+Keep the integration checks with runtime upgrades.
 
 ## Paseo
 

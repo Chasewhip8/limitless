@@ -25,27 +25,18 @@
   versionCheckHook,
 }:
 let
-  upstream = "https://github.com/pingdotgg/t3code/releases/download";
-  # Nightly 3411 plus a backport of pingdotgg/t3code#21532, which lets OpenCode 2
-  # threads select an agent. Return to upstream once #21532 ships in a nightly.
-  fork = "https://github.com/Chasewhip8/t3code/releases/download";
+  version = "0.1.2";
   sources = {
-    # No fork build for ARM: upstream nightly 3411, without agent selection.
-    aarch64-linux = rec {
+    aarch64-linux = {
       arch = "arm64";
-      version = "0.1.1-nightly.20261020.3411";
-      url = "${upstream}/v${version}/t3-${version}-linux-${arch}.tar.gz";
-      hash = "sha256-T39CSrauRthmwxVjC9liipfzTAZb9Qp3gmqY3xoDaKc=";
+      hash = "sha256-3xEuHxl3K0BVooyXsDLrbQONXXGCAV8cr9MlStb6vQ8=";
     };
-    x86_64-linux = rec {
+    x86_64-linux = {
       arch = "x64";
-      version = "0.1.1-nightly.20261020.3411-pr21532";
-      url = "${fork}/v${version}/t3-${version}-linux-${arch}.tar.gz";
-      hash = "sha256-PSKadqNp6RVgS4SNl0bqqoQAJXSfH5kRMrEXKIpElEQ=";
+      hash = "sha256-eu1iXLlhk43xdMGgZ8DwUjU2CUC1PogqFkMSa3VNoWw=";
     };
   };
   source = sources.${stdenv.hostPlatform.system};
-  inherit (source) version;
   # T3 downloads chrome-headless-shell 154.0.8037.92 at runtime. Recheck its
   # ELF dependencies and the browser smoke fixture whenever the T3 pin changes.
   browserLibraries = [
@@ -92,7 +83,10 @@ stdenv.mkDerivation {
   pname = "t3-cli";
   inherit version;
 
-  src = fetchurl { inherit (source) url hash; };
+  src = fetchurl {
+    url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/t3-${version}-linux-${source.arch}.tar.gz";
+    inherit (source) hash;
+  };
 
   nativeBuildInputs = [
     autoPatchelfHook
