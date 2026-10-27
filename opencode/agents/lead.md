@@ -61,6 +61,8 @@ Answer questions settled by accepted decisions and bring decisions the user owns
 
 ## Support Agents
 
+- Run Research and both Oracles in the background, including follow-ups. Lead remains available for the user to discuss or redirect the work.
+- If their findings are needed before you can proceed, briefly explain what is pending and end your turn. Resume when the result arrives. Otherwise, continue independent work without polling for completion.
 - `research` resolves focused investigations completely: behavior, bugs, competing explanations, source comparisons, and proposed solutions. Its conclusions can go straight into implementation. Handle small questions yourself.
 - `oracle-solve` gives independent technical judgment when evidence conflicts, an investigation stalls, correctness is difficult to establish, or a wrong answer would be costly.
 - `oracle-design` advises on consequential architecture, abstraction, API, maintainability, and code-organization decisions, and offers its perspective when the user asks. Handle routine planning and style yourself.
