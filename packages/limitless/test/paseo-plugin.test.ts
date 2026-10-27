@@ -169,6 +169,35 @@ test('a prompt picks up a new registration before its first step; bindings scope
 	expect(Object.keys((await host.step('ses_child')).tools)).toEqual(['paseo_list_agents'])
 })
 
+test('Paseo’s terminal tools are never provided, even by a later registration', async () => {
+	const terminalTools = [
+		'list_terminals',
+		'create_terminal',
+		'kill_terminal',
+		'capture_terminal',
+		'send_terminal_keys',
+	]
+	const host = await location()
+	const first = ['list_agents', 'browser_navigate', ...terminalTools]
+	await register('token-1', first)
+	await host.prompt('ses_agent')
+	bindings.set('ses_agent', first)
+	expect(Object.keys(host.tools)).toEqual(['paseo_list_agents', 'paseo_browser_navigate'])
+	expect(Object.keys((await host.step('ses_agent')).tools)).toEqual([
+		'paseo_list_agents',
+		'paseo_browser_navigate',
+	])
+	const second = [...terminalTools, 'create_agent', 'browser_snapshot']
+	await register('token-2', second)
+	await host.prompt('ses_agent')
+	bindings.set('ses_agent', second)
+	expect(Object.keys(host.tools)).toEqual(['paseo_create_agent', 'paseo_browser_snapshot'])
+	expect(Object.keys((await host.step('ses_agent')).tools)).toEqual([
+		'paseo_create_agent',
+		'paseo_browser_snapshot',
+	])
+})
+
 test('a Location loaded earlier picks up the registration without a prompt', async () => {
 	const host = await location()
 	await register('token-1')

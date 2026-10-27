@@ -977,7 +977,10 @@ The `paseo` plugin satisfies Paseo's readiness check and provides Paseo's tools 
 direct `paseo_*` tools. Before each step it asks Paseo which agent drives the
 session, walking up to the parent for native children: sessions Paseo does not
 drive, such as TUI and T3 sessions, see no Paseo tools, and an agent sees only the
-tools Paseo allows it. Paseo sessions also receive a short Paseo guidance block. A
+tools Paseo allows it. Paseo's terminal tools (`list_terminals`, `create_terminal`,
+`kill_terminal`, `capture_terminal`, `send_terminal_keys`) are never provided;
+agents use OpenCode's shell for commands and background processes such as dev
+servers. Paseo sessions also receive a short Paseo guidance block. A
 stopped daemon removes the tools at once; a stalled one after a 1.5-second lookup,
 which then delays each step of `limitless`, `lead` and `unit` sessions until it
 answers or stops. The plugin watches the registration and checks it again before

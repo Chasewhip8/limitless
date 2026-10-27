@@ -24,6 +24,19 @@ import {
 
 const toolPrefix = 'paseo_'
 
+/**
+ * Paseo tools this plugin never provides, whatever Paseo offers. Agents run
+ * commands and background processes with OpenCode's own shell instead of
+ * Paseo's terminals.
+ */
+const excludedTools: ReadonlySet<string> = new Set([
+	'list_terminals',
+	'create_terminal',
+	'kill_terminal',
+	'capture_terminal',
+	'send_terminal_keys',
+])
+
 class PaseoGuidanceError extends Schema.TaggedError<PaseoGuidanceError>()('PaseoGuidanceError', {
 	message: Schema.String,
 }) {}
@@ -185,7 +198,8 @@ export default Plugin.define({
 				}),
 		})
 		yield* ctx.tool.transform((editor) => {
-			for (const tool of current.registration?.tools ?? []) editor.add(paseoTool(tool))
+			for (const tool of current.registration?.tools ?? [])
+				if (!excludedTools.has(tool.name)) editor.add(paseoTool(tool))
 		})
 
 		// A launcher replaces the registration when Paseo starts or restarts.
