@@ -237,6 +237,10 @@ let
       port = 7777;
       home = "/home/test/Paseo data";
       browserTools = false;
+      hostnames = [
+        "pc.example.ts.net"
+        ".lan.example"
+      ];
     };
     opencode.service.enable = true;
   };
@@ -667,6 +671,8 @@ in
         && lib.any (lib.hasPrefix "PATH=/run/wrappers/bin:") paseoUnit.Service.Environment
         && builtins.elem "PASEO_HOME=/home/test/Paseo data" paseoCustom.config.systemd.user.services.paseo.Service.Environment
         && paseoUnit.Install.WantedBy == [ "default.target" ]
+        && !(lib.any (lib.hasPrefix "PASEO_HOSTNAMES=") paseoUnit.Service.Environment)
+        && builtins.elem "PASEO_HOSTNAMES=pc.example.ts.net,.lan.example" paseoCustom.config.systemd.user.services.paseo.Service.Environment
         && !valid (
           evaluateWith {
             paseo.enable = true;
@@ -680,6 +686,26 @@ in
       !(builtins.tryEval (evaluate { paseo.home = "relative"; }).config.programs.limitless.paseo.home)
       .success
     ) "Paseo homes must be absolute";
+    assert lib.assertMsg (lib.all
+      (
+        name:
+        !(builtins.tryEval (
+          builtins.deepSeq
+            (evaluate { paseo.hostnames = [ name ]; }).config.programs.limitless.paseo.hostnames
+            true
+        )).success
+      )
+      [
+        "https://pc.example"
+        "pc.example:10443"
+        "pc.example."
+        "true"
+        "TRUE"
+        "a,b"
+        ""
+        "pc example"
+      ]
+    ) "Paseo hostnames must not accept URLs, ports, trailing dots or the allow-all sentinel";
     pkgs.runCommand "limitless-paseo-service-check" { nativeBuildInputs = [ pkgs.nodejs ]; } ''
       cp ${../packages/paseo-settings.mjs} paseo-settings.mjs
       cp ${../packages/paseo-settings.test.mjs} paseo-settings.test.mjs

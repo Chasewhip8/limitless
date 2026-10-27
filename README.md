@@ -896,14 +896,57 @@ including a password hash from `paseo daemon set-password`:
 
 Like T3's provisioning, the merge refuses to run while another daemon holds
 `paseo.pid` in that home, ignoring a lock left by an earlier boot as Paseo does, and
-refuses symlinked or malformed files. Remote access is
-not configured: Paseo grants owner access to every client when no password is set,
-so set one before exposing the port. Rebuilds keep the old daemon running; restart
+refuses symlinked or malformed files. Limitless does not publish the port itself;
+configure a private HTTPS proxy as described below. Set a password before exposing
+the daemon API. Rebuilds keep the old daemon running; restart
 it with `systemctl --user restart paseo` when idle.
 
 Enable `paseo.desktop.enable` to install the desktop app (on Linux, the same
 release). It attaches to the running daemon in `~/.paseo`; turn off its built-in
 daemon management in the desktop's settings so it never starts its own.
+
+### Paseo over a private HTTPS proxy
+
+Keep the daemon on loopback and terminate HTTPS at the host's proxy, for example
+Tailscale Serve. Configure the exact external hostname without its scheme or port:
+
+```nix
+programs.limitless.paseo.hostnames = [ "pc.example.ts.net" ];
+```
+
+Limitless supplies `PASEO_HOSTNAMES` at service startup. Paseo combines these names
+with its persisted allowlist in memory, without saving them. Localhost and IP
+addresses remain allowed. Removing a
+name from Nix removes this launch allowance on restart, not any independently
+persisted allowance. Host validation does not authenticate clients.
+
+Set a password interactively on the daemon host with `paseo daemon set-password`,
+then restart **the managed unit** with `systemctl --user restart paseo` when all
+agents are idle. Use an ordinary terminal: restarting Paseo interrupts its agents.
+For a non-default `paseo.home`, set `PASEO_HOME` to that directory when running the
+password command. Nix never stores the password; Paseo stores its hash privately.
+Rebuilds keep the previous daemon running, and neither setting the password nor
+reloading Paseo applies password authentication to that running process.
+
+Before starting the HTTPS proxy, an unauthenticated request to
+`http://127.0.0.1:6767/api/status` with the external `Host` header must return
+**401**. A **200** means no password is active; **403** means the hostname is not
+allowed. `/api/health` cannot establish that authentication is enabled. Preserve
+the external Host header and WebSocket upgrades through the proxy.
+
+**Workspace services have a separate trust boundary.** Paseo routes registered
+workspace-service hostnames before daemon authentication. A peer able to reach
+the proxy can supply such a Host header and reach that service without the Paseo
+password; the service's own authentication still applies. A direct Tailscale
+Serve route therefore trusts permitted tailnet peers with those services. The
+password protects Paseo's daemon APIs, not every route on the listener.
+
+On your phone, connect Tailscale, then use Paseo's **Settings → Add host → Direct
+connection** with the hostname, the proxy's HTTPS port, **Use SSL** enabled, and
+the password. A desktop app on the daemon host also needs that password saved for its connection to
+the systemd-managed daemon; it does not receive Desktop's automatic local-daemon
+credential. Local direct connections use `localhost:6767` with SSL off. Paseo's
+relay stays disabled, and agent tool bridges keep their own capability tokens.
 
 ### Paseo behavior
 

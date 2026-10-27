@@ -6,6 +6,26 @@
 let
   agent = "packages/server/src/server/agent";
   reviewed = {
+    "packages/server/src/server/config-environment.ts" = {
+      sha256 = "af42dd2a9a312b29123ced4aed5ed2a14192d8d5fff5f0c74875d579536d81fe";
+      review = "paseo.hostnames: PASEO_HOSTNAMES must remain a recognized daemon setting environment variable";
+    };
+    "packages/server/src/server/config.ts" = {
+      sha256 = "1fbc8ba79b671acc9f30bcdc289bfc20694657a3be7d44fc03270ff4d9232699";
+      review = "paseo.hostnames: the foreground daemon must combine PASEO_HOSTNAMES with persisted settings at startup";
+    };
+    "packages/server/src/server/hostnames.ts" = {
+      sha256 = "2c11d24f5d047b7b86f21c2f1e15482be97ad4c96f1cd3de3a37fe7c85479e2b";
+      review = "paseo.hostnames: PASEO_HOSTNAMES is comma-separated and additive; true allows all; incoming Host ports are stripped";
+    };
+    "packages/server/src/server/auth.ts" = {
+      sha256 = "3a8c23196953d994179f347caf981d3dc0fe6ed0def99924203f214c928a1ef1";
+      review = "remote proxy readiness: unauthenticated /api/status must return 401 only when a daemon password is active";
+    };
+    "packages/server/src/server/bootstrap.ts" = {
+      sha256 = "d3e4c16b46509fa9e4171acc1b5c4be8a9d54960f230bb0ce04340d22c5f4118";
+      review = "remote proxy readiness: raw Host validation precedes password middleware and the read-only /api/status route";
+    };
     "${agent}/providers/opencode/v2/bridge-plugin.mjs" = {
       sha256 = "68611ef23db20bbb194882170cad15aadcf0e7749769251e46004837af5d7e9c";
       review = "paseo/plugin.ts mirrors this plugin: tool names, binding walk, content mapping";

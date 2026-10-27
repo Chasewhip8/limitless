@@ -38,6 +38,23 @@ in
       default = 6767;
       description = "Loopback port for the Paseo daemon. Paseo's relay stays disabled.";
     };
+    hostnames = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.addCheck (lib.types.strMatching "\\.?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?") (
+          name: lib.toLower name != "true"
+        )
+      );
+      default = [ ];
+      example = [ "pc.example.ts.net" ];
+      description = ''
+        Additional HTTP/WebSocket hostnames accepted through PASEO_HOSTNAMES.
+        Use bare names without a scheme, port or trailing dot; a leading dot
+        also permits subdomains. Paseo merges these with its persisted allowlist
+        and always allows localhost and IP addresses. This is not authentication:
+        set a private daemon password before publishing a proxy. Changes take
+        effect when the managed Paseo service is restarted.
+      '';
+    };
     home = lib.mkOption {
       type = lib.types.addCheck lib.types.str (
         path:
@@ -109,7 +126,10 @@ in
             "XDG_STATE_HOME=${config.xdg.stateHome}"
             "XDG_CACHE_HOME=${config.xdg.cacheHome}"
             "PASEO_HOME=${paseo.home}"
-          ];
+          ]
+          ++ lib.optional (
+            paseo.hostnames != [ ]
+          ) "PASEO_HOSTNAMES=${lib.concatStringsSep "," paseo.hostnames}";
           Restart = "always";
           RestartSec = "5s";
           TimeoutStopSec = "15s";
