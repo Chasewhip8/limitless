@@ -3,7 +3,7 @@ import { Schema } from 'effect'
 const ARTIFACT_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
 export const ARTIFACT_TITLE_MAX_LENGTH = 160
 
-export function pathSegmentFilter(label: string) {
+function pathSegmentFilter(label: string) {
 	return Schema.makeFilter<string>((value) => {
 		if (value.length === 0) return `${label} is required`
 		if (value === '.' || value === '..') return `${label} must be a single path segment`

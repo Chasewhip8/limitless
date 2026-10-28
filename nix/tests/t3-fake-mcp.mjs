@@ -7,7 +7,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 // All simulated services and model responses live here; production policy is never copied.
 export function createRuntimeFixture(bundleDirectory, catalogFile) {
 	const names = JSON.parse(readFileSync(catalogFile, 'utf8'))
-	assert.equal(names.length, 83, 'Review the runtime expectations when T3 changes its catalog')
+	// https://github.com/pingdotgg/t3code/tree/v0.1.3/apps/server/src/mcp/toolkits
+	assert.equal(names.length, 66, 'Review the runtime expectations when T3 changes its catalog')
 	const support = ['research', 'oracle-solve', 'oracle-design']
 	const prohibited = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
 	const sourceOwn = 't3-code-thread_with_underscores'
@@ -275,8 +276,6 @@ return {tag:${JSON.stringify(tag)},agent:${JSON.stringify(agent)},own,sibling,at
 		directory,
 		workspace,
 		callsFile,
-		configFile,
-		configuration,
 		mcp,
 		support,
 		prohibited,
@@ -293,7 +292,6 @@ return {tag:${JSON.stringify(tag)},agent:${JSON.stringify(agent)},own,sibling,at
 		backgroundReturned,
 		held,
 		snapshots,
-		snapshotWaiters,
 		async start(executable) {
 			processHandle = Bun.spawn(
 				[

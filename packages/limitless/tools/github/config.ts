@@ -65,7 +65,6 @@ export const normalizeGitHubPluginConfig = Effect.fn('normalizeGitHubPluginConfi
 })
 
 export type GitHubPluginConfig = typeof GitHubPluginConfigSchema.Type
-export const GitHubPluginConfig = GitHubPluginConfigSchema
 
 export const assertConfiguredRepo = Effect.fn('assertConfiguredRepo')(function* (
 	repo: string,

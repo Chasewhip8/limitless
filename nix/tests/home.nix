@@ -5,7 +5,18 @@
 }:
 let
   inherit (pkgs) lib;
-  homeStubs = {
+  fileOption = lib.mkOption {
+    type = lib.types.attrsOf lib.types.attrs;
+    default = { };
+    apply = lib.mapAttrs (
+      name: file:
+      file
+      // lib.optionalAttrs (file ? text && !(file ? source)) {
+        source = pkgs.writeText (builtins.baseNameOf name) file.text;
+      }
+    );
+  };
+  homeStubs = { config, ... }: {
     options = {
       assertions = lib.mkOption {
         type = lib.types.listOf lib.types.attrs;
@@ -16,17 +27,7 @@ let
         default = [ ];
       };
       home = {
-        file = lib.mkOption {
-          type = lib.types.attrsOf lib.types.attrs;
-          default = { };
-          apply = lib.mapAttrs (
-            name: file:
-            file
-            // lib.optionalAttrs (file ? text && !(file ? source)) {
-              source = pkgs.writeText (builtins.baseNameOf name) file.text;
-            }
-          );
-        };
+        file = fileOption;
         packages = lib.mkOption {
           type = lib.types.listOf lib.types.package;
           default = [ ];
@@ -44,13 +45,17 @@ let
           default = "/home/test/.nix-profile";
         };
       };
-      xdg = lib.genAttrs [ "configHome" "dataHome" "stateHome" "cacheHome" ] (
-        name:
-        lib.mkOption {
-          type = lib.types.str;
-          default = "/home/test/${name}";
-        }
-      );
+      xdg =
+        lib.genAttrs [ "configHome" "dataHome" "stateHome" "cacheHome" ] (
+          name:
+          lib.mkOption {
+            type = lib.types.str;
+            default = "/home/test/${name}";
+          }
+        )
+        // {
+          configFile = fileOption;
+        };
       systemd.user = {
         enable = lib.mkOption {
           type = lib.types.bool;
@@ -76,6 +81,9 @@ let
         };
       };
     };
+    config.home.file = lib.mapAttrs' (
+      name: file: lib.nameValuePair "${config.xdg.configHome}/${name}" file
+    ) config.xdg.configFile;
   };
   evaluateWith =
     settings: extraModules:
@@ -89,7 +97,7 @@ let
       ++ extraModules;
     };
   evaluate = settings: evaluateWith settings [ ];
-  opencodeJson = home: home.config.home.file.".config/opencode/opencode.json".text;
+  opencodeJson = home: home.config.xdg.configFile."opencode/opencode.json".text;
   rendered = home: builtins.fromJSON (builtins.unsafeDiscardStringContext (opencodeJson home));
   valid = home: lib.all (entry: entry.assertion) home.config.assertions;
 
@@ -212,6 +220,13 @@ let
     };
   };
   serviceUnit = supervised.config.systemd.user.services.opencode;
+  supervisedWithoutSkills = evaluate {
+    opencode.service.enable = true;
+    skills.enable = false;
+  };
+  customXdg = evaluateWith { opencode.service.enable = pkgs.stdenv.hostPlatform.isLinux; } [
+    { xdg.configHome = "/home/test/preferences"; }
+  ];
   executorServiceUnit =
     (evaluate {
       opencode.service.enable = true;
@@ -426,7 +441,7 @@ in
       }))
     ) "Executor must reject unscoped, shared-role, or conflicting connections";
     assert lib.assertMsg (
-      !(executorHome.config.home.file ? ".config/limitless/executor-read-tools.json")
+      !(executorHome.config.xdg.configFile ? "limitless/executor-read-tools.json")
     ) "Executor read policy must not be duplicated into a generated per-tool list";
     pkgs.runCommand "executor-client-check" { } ''touch "$out"'';
   home-module =
@@ -492,11 +507,11 @@ in
       })
     ) "GitHub clones became unrestricted without explicit opt-in";
     assert lib.assertMsg (
-      defaults.config.home.file.".config/opencode/plugins/limitless-cache-status".source
+      defaults.config.xdg.configFile."opencode/plugins/limitless-cache-status".source
       == "${defaults.config.programs.limitless.plugins.limitless.package}/cache-status"
       && !(
-        (evaluate { plugins.limitless.cacheStatus.enable = false; }).config.home.file
-        ? ".config/opencode/plugins/limitless-cache-status"
+        (evaluate { plugins.limitless.cacheStatus.enable = false; }).config.xdg.configFile
+        ? "opencode/plugins/limitless-cache-status"
       )
     ) "the cache-status TUI plugin must follow its enable option";
     pkgs.runCommand "limitless-home-module-check"
@@ -565,7 +580,6 @@ in
         export HOME="$TMPDIR/home"
         mkdir -p "$HOME"
         test "$(${lib.getExe t3Launcher} --version)" = "$(${launcherOf defaults} --version)"
-        # Without a managed service, the launcher fails before announcing a server.
         if OPENCODE_PASSWORD=check ${lib.getExe t3Launcher} serve --port=0 >launch.out 2>launch.err; then
           echo "opencode-t3 started without a managed service" >&2
           exit 1
@@ -593,7 +607,6 @@ in
         export HOME="$TMPDIR/home"
         mkdir -p "$HOME"
         test "$(${lib.getExe paseoLauncher} --version)" = "$(${launcherOf paseoSupervised} --version)"
-        # Without a managed service, the launcher fails before announcing a server.
         if OPENCODE_PASSWORD=check ${lib.getExe paseoLauncher} serve --hostname 127.0.0.1 --port 0 >launch.out 2>launch.err; then
           echo "opencode-paseo started without a managed service" >&2
           exit 1
@@ -829,11 +842,102 @@ in
 
   service =
     assert lib.assertMsg (
-      !pkgs.stdenv.hostPlatform.isLinux
-      ||
-        builtins.elem supervised.config.home.file.".config/opencode/opencode.json".source
+      let
+        rules =
+          (rendered (evaluate {
+            opencode.permissions = [
+              {
+                action = "shell";
+                resource = "*";
+                effect = "ask";
+              }
+              {
+                action = "edit";
+                resource = "docs/**";
+                effect = "ask";
+              }
+              {
+                action = "edit";
+                resource = "secrets/**";
+                effect = "deny";
+              }
+              {
+                action = "edit";
+                resource = ".limitless/repos/**";
+                effect = "allow";
+              }
+              {
+                action = "t3-code-*";
+                resource = "*";
+                effect = "allow";
+              }
+            ];
+          })).permissions;
+        denied =
+          (rendered (evaluate {
+            opencode.permissions = [
+              {
+                action = "edit";
+                resource = "*";
+                effect = "deny";
+              }
+            ];
+          })).permissions;
+      in
+      effectFor rules "edit" "src/a.ts" == "allow"
+      && effectFor rules "shell" "bun test" == "ask"
+      && effectFor rules "edit" "docs/a.md" == "ask"
+      && effectFor rules "edit" "secrets/key" == "deny"
+      && effectFor rules "edit" ".limitless/repos/owner/file.ts" == "deny"
+      && effectFor rules "t3-code-thread_tool" "*" == "deny"
+      && effectFor denied "edit" "src/a.ts" == "deny"
+    ) "Caller permissions must override default edit access without overriding managed denials";
+    assert lib.assertMsg
+      (
+        lib.all
+          (
+            name:
+            customXdg.config.home.file."/home/test/preferences/opencode/${name}"
+            == customXdg.config.xdg.configFile."opencode/${name}"
+          )
+          [
+            "opencode.json"
+            "AGENTS.md"
+            "agents"
+            "skills"
+            "plugins/limitless-cache-status"
+          ]
+        && !(customXdg.config.home.file ? ".config/opencode/opencode.json")
+      )
+      "OpenCode configuration, instructions, agents, skills, and TUI plugins must follow XDG_CONFIG_HOME";
+    assert lib.assertMsg (
+      if pkgs.stdenv.hostPlatform.isLinux then
+        valid supervised
+        &&
           serviceUnit.Unit.X-Restart-Triggers
-    ) "configuration changes must restart the supervised service";
+          == map (name: supervised.config.xdg.configFile."opencode/${name}".source) [
+            "opencode.json"
+            "AGENTS.md"
+            "agents"
+            "skills"
+          ]
+        &&
+          supervisedWithoutSkills.config.systemd.user.services.opencode.Unit.X-Restart-Triggers
+          == map (name: supervisedWithoutSkills.config.xdg.configFile."opencode/${name}".source) [
+            "opencode.json"
+            "AGENTS.md"
+            "agents"
+          ]
+        && builtins.elem "XDG_CONFIG_HOME=/home/test/preferences" customXdg.config.systemd.user.services.opencode.Service.Environment
+        &&
+          builtins.elem customXdg.config.xdg.configFile."opencode/opencode.json".source
+            customXdg.config.systemd.user.services.opencode.Unit.X-Restart-Triggers
+        && serviceUnit.Service.Type == "exec"
+        && serviceUnit.Service.Restart == "always"
+        && !valid (evaluateWith { opencode.service.enable = true; } [ { systemd.user.enable = false; } ])
+      else
+        !valid supervised
+    ) "Supervision must enforce its platform, follow XDG paths, and restart for every managed input";
     assert lib.assertMsg (
       !pkgs.stdenv.hostPlatform.isLinux
       || (!(serviceUnit.Service ? ExecStartPre) && executorServiceUnit.Service ? ExecStartPre)

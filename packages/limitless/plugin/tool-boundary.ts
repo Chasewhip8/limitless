@@ -3,9 +3,7 @@ import { Effect, Match, Schema } from 'effect'
 import {
 	type ToolFailure,
 	type ToolFailurePayload,
-	ToolInputError,
 	ToolInputFailurePayload,
-	ToolOperationError,
 	ToolOperationFailurePayload,
 } from '../core/errors'
 import {
@@ -15,14 +13,11 @@ import {
 import { portableSchema } from '../lib/standard-schema'
 import { optionalField } from '../lib/type-utils'
 
-export { ToolInputError, ToolOperationError }
-export type { ToolFailure }
-
 export type SessionDirectoryResolver = (
 	sessionID: Tool.Context['sessionID'],
 ) => Effect.Effect<string, Tool.Error>
 
-export type ToolErrorEncoder<Error> = (error: Error) => Tool.Error
+type ToolErrorEncoder<Error> = (error: Error) => Tool.Error
 
 export type ToolExecutor = <Input, Output, Error>(
 	name: string,
@@ -56,7 +51,7 @@ export function defineLimitlessTool(definition: Omit<Tool.Info, 'options'>): Too
 	}
 }
 
-export function failurePayload(error: ToolFailure): ToolFailurePayload {
+function failurePayload(error: ToolFailure): ToolFailurePayload {
 	return Match.valueTags(error, {
 		ToolInputError: (error) =>
 			ToolInputFailurePayload.make({
@@ -81,7 +76,7 @@ export const encodeToolFailure: ToolErrorEncoder<ToolFailure> = (error) =>
 
 export const encodeNoError: ToolErrorEncoder<never> = (error) => error
 
-export function toolModelOutput(input: { readonly output: unknown }): ReadonlyArray<Tool.Content> {
+function toolModelOutput(input: { readonly output: unknown }): ReadonlyArray<Tool.Content> {
 	return [{ type: 'text', text: JSON.stringify(input.output, null, 2) ?? 'null' }]
 }
 

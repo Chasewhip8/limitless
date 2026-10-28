@@ -3,11 +3,10 @@ import { readFileSync } from 'node:fs'
 import { chmod, lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { uptime } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { pathToFileURL } from 'node:url'
 
-// Merges Limitless's managed keys into Paseo's mutable config.json before the
-// supervised daemon starts. Paseo rewrites this file from its UI, so every
-// other key, including the password hash, is preserved.
+// Paseo's UI owns this mutable file too; preserve unmanaged keys and its password hash.
 
 function isObject(value) {
 	return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -23,23 +22,28 @@ function objectField(object, key, path) {
 async function document(path) {
 	try {
 		const status = await lstat(path)
-		if (!status.isFile() || status.isSymbolicLink()) {
+		if (!status.isFile()) {
 			throw new Error(`Refusing to replace a non-regular Paseo config file: ${path}`)
 		}
 		const text = await readFile(path, 'utf8')
-		let value
-		try {
-			// Paseo accepts a leading byte-order mark.
-			value = JSON.parse(text.replace(/^\uFEFF/, ''))
-		} catch {
-			throw new Error(`Paseo config must be valid plain JSON before provisioning: ${path}`)
-		}
-		if (!isObject(value)) throw new Error(`Paseo config must contain a JSON object: ${path}`)
+		const value = parseConfig(text, path)
 		return { path, value, mode: status.mode & 0o777, text }
 	} catch (error) {
 		if (error.code === 'ENOENT') return { path, value: {}, mode: 0o600, text: undefined }
 		throw error
 	}
+}
+
+function parseConfig(text, path) {
+	let value
+	try {
+		// Paseo accepts a leading byte-order mark.
+		value = JSON.parse(text.replace(/^\uFEFF/, ''))
+	} catch {
+		throw new Error(`Paseo config must be valid plain JSON before provisioning: ${path}`)
+	}
+	if (!isObject(value)) throw new Error(`Paseo config must contain a JSON object: ${path}`)
+	return value
 }
 
 function currentBootId() {
@@ -60,24 +64,30 @@ export function writtenDuringThisBoot(lock, bootId = currentBootId(), now = Date
 	return started >= now - uptime() * 1000 - 5000
 }
 
-// Atomic replacement cannot lock out the daemon's own writer, so provisioning
-// refuses a live daemon even when its settings already match.
+async function readDaemonLock(path) {
+	// Paseo creates before writing and truncates on updates; pid-lock.ts retries ten reads.
+	for (let attempt = 0; attempt < 10; attempt++) {
+		const text = await readFile(path, 'utf8').catch((error) => {
+			if (error.code === 'ENOENT') return undefined
+			throw error
+		})
+		if (text === undefined) return undefined
+		if (text !== '') {
+			try {
+				return JSON.parse(text)
+			} catch {
+				if (attempt === 9) throw new Error(`Cannot verify whether Paseo is stopped: ${path}`)
+			}
+		}
+		if (attempt < 9) await delay(50)
+	}
+	return undefined
+}
+
+// Atomic replacement cannot lock out the daemon's own writer, even when settings already match.
 async function requireStopped(path) {
-	let text
-	try {
-		text = await readFile(path, 'utf8')
-	} catch (error) {
-		if (error.code === 'ENOENT') return
-		throw error
-	}
-	// Paseo leaves an empty lock when a supervisor dies between creating and writing it.
-	if (text === '') return
-	let lock
-	try {
-		lock = JSON.parse(text)
-	} catch {
-		throw new Error(`Cannot verify whether Paseo is stopped: ${path}`)
-	}
+	const lock = await readDaemonLock(path)
+	if (lock === undefined) return
 	if (!isObject(lock) || !Number.isSafeInteger(lock.pid) || lock.pid <= 0) {
 		throw new Error(`Invalid Paseo daemon lock: ${path}`)
 	}
@@ -116,10 +126,6 @@ async function replaceDocument(original, value) {
 	}
 }
 
-/**
- * The managed keys: a loopback listener without Paseo's relay, Paseo's tools
- * injected into its agents, and OpenCode reached through `opencode-paseo`.
- */
 export function managedConfig(config, { listen, launcher, browserTools }) {
 	const daemon = objectField(config, 'daemon', 'config')
 	const agents = objectField(config, 'agents', 'config')

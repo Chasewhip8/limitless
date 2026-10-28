@@ -7,7 +7,6 @@ import { optionalField } from '../../lib/type-utils'
 import {
 	assertClean,
 	ensureManagedRoot,
-	expectedRemote,
 	makeDirectory,
 	movePath,
 	pathState,
@@ -24,7 +23,7 @@ import {
 import { assertConfiguredRepo, type GitHubConfig } from './config'
 import { cloneFailure } from './errors'
 import { checkoutSnapshot, fetchSnapshot, git } from './git'
-import { cloneDirectoryNameFromValidated, validateGitHubRef } from './repository'
+import { cleanRemoteUrl, cloneDirectoryNameFromValidated, validateGitHubRef } from './repository'
 import { type GitHubCloneRuntime, type GitRuntime, makeGitRuntime } from './runtime'
 import type { GitHubIncompleteSubmodules, GitHubSubmodule } from './schema'
 import { initializeSubmodules, withSubmoduleProgress } from './submodules'
@@ -53,7 +52,7 @@ const createCheckout = Effect.fn('createCheckout')(function* (
 					'remote',
 					'add',
 					'origin',
-					expectedRemote(repo),
+					cleanRemoteUrl(repo),
 				])
 				const commit = yield* fetchSnapshot(runtime, staging, requestedRef)
 				yield* checkoutSnapshot(runtime, staging, commit)
@@ -89,7 +88,7 @@ const updateCheckout = Effect.fn('updateCheckout')(function* (
 	requestedRef: string | undefined,
 	entries: Array<GitHubSubmodule>,
 ) {
-	yield* validateCheckout(runtime, target, expectedRemote(repo))
+	yield* validateCheckout(runtime, target, cleanRemoteUrl(repo))
 	yield* assertClean(runtime, target)
 	const commit = yield* fetchSnapshot(runtime, target, requestedRef)
 	yield* assertClean(runtime, target)

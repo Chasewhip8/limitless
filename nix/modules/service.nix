@@ -8,7 +8,7 @@ let
   cfg = config.programs.limitless;
   service = cfg.opencode.service;
   enabled = cfg.enable && service.enable;
-  opencodeDir = ".config/opencode";
+  opencodeDir = "opencode";
   launcher = pkgs.writeShellApplication {
     name = "limitless-opencode-service";
     text = ''
@@ -23,8 +23,7 @@ let
   };
   executor = cfg.mcp.executor;
   executorWaitSeconds = 60;
-  # Tailnet DNS and the gateway itself can lag user services at boot, and OpenCode never
-  # retries a failed MCP connection. Any HTTP answer below 500 (normally 401) means ready.
+  # Tailnet DNS and Executor can lag user-service startup; OpenCode does not retry failed MCP connections.
   awaitExecutor = pkgs.writeShellApplication {
     name = "limitless-await-executor";
     runtimeInputs = [
@@ -86,11 +85,11 @@ in
           Description = "OpenCode native service";
           StartLimitIntervalSec = 0;
           X-Restart-Triggers = [
-            config.home.file."${opencodeDir}/opencode.json".source
-            config.home.file."${opencodeDir}/AGENTS.md".source
-            config.home.file."${opencodeDir}/agents".source
+            config.xdg.configFile."${opencodeDir}/opencode.json".source
+            config.xdg.configFile."${opencodeDir}/AGENTS.md".source
+            config.xdg.configFile."${opencodeDir}/agents".source
           ]
-          ++ lib.optional cfg.skills.enable config.home.file."${opencodeDir}/skills".source;
+          ++ lib.optional cfg.skills.enable config.xdg.configFile."${opencodeDir}/skills".source;
         };
         Service = {
           Type = "exec";

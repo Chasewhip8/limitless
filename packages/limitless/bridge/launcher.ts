@@ -10,7 +10,6 @@ export class LauncherError extends Schema.TaggedError<LauncherError>()('Launcher
 	message: Schema.String,
 }) {}
 
-/** The pinned OpenCode executable that the Nix launcher wrapper names. */
 export const openCodeExecutable = (launcher: string) =>
 	Config.String('LIMITLESS_OPENCODE_BIN').pipe(
 		Effect.mapError(() => new LauncherError({ message: `Use the packaged ${launcher} launcher` })),
@@ -44,8 +43,7 @@ export interface ServeOptions<E, R> {
 }
 
 /**
- * Serves the client's OpenCode API from the managed service and announces it
- * on stdout, where the client looks for the server it launched.
+ * Stdout is the client's server-discovery protocol; reserve it for the listening announcement.
  */
 export const serveBridge = <E = never, R = never>(options: ServeOptions<E, R>) =>
 	Effect.gen(function* () {
@@ -88,7 +86,6 @@ export const serveBridge = <E = never, R = never>(options: ServeOptions<E, R>) =
 		}).pipe(Effect.provide(bridge))
 	})
 
-/** The one-line explanation of an expected launch failure, or undefined for a defect. */
 function launchFailure(error: unknown): string | undefined {
 	if (Schema.is(LauncherError)(error) || Schema.is(BridgeConfigError)(error)) return error.message
 	if (error instanceof HttpServerError.ServeError)
@@ -97,9 +94,8 @@ function launchFailure(error: unknown): string | undefined {
 }
 
 /**
- * Runs a launcher's main effect. Expected launch failures are one line on
- * stderr for the client's provider status. Stopping only detaches the client;
- * the managed service and its sessions keep running.
+ * Expected failures belong on stderr for the client's provider status. Stopping
+ * only detaches the client; the managed service and its sessions must keep running.
  */
 export function runLauncher<E>(
 	launcher: string,

@@ -36,7 +36,10 @@ export const normalizeProviderPolicyConfig = Effect.fn('normalizeProviderPolicyC
 	})
 })
 
-export function applyProviderPolicy(providers: ProviderEditor, config: ProviderPolicyConfig): void {
+export function applyProviderPolicy(
+	providers: Pick<ProviderEditor, 'remove'>,
+	config: ProviderPolicyConfig,
+): void {
 	for (const providerID of config.disabled) {
 		providers.remove(providerID)
 	}

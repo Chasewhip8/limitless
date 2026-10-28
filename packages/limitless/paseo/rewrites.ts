@@ -15,8 +15,6 @@ const mcpRegistrationPath = /^\/api\/experimental\/mcp\/[^/]+$/
 const CreateLocation = Schema.Struct({ directory: Schema.String })
 
 /**
- * Decides how a Paseo request reaches the managed service:
- *
  * - Session creation drops Paseo's session permission rules. They come from
  *   Paseo provider options and would be evaluated after, and so override, the
  *   native agent rules that scope each role; native children inherit them.

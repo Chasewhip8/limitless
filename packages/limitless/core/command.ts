@@ -6,9 +6,9 @@ import { describeUnknown, objectProperty } from '../lib/guards'
 const execFileAsync = promisify(execFile)
 
 const DEFAULT_TIMEOUT_MS = 30_000
-export const DEFAULT_MAX_BUFFER = 1024 * 1024 * 8
+const DEFAULT_MAX_BUFFER = 1024 * 1024 * 8
 
-export type RunOptions = {
+type RunOptions = {
 	readonly cwd?: string
 	readonly timeout?: number
 	readonly maxBuffer?: number
@@ -35,7 +35,7 @@ export const CommandResult = Schema.Struct({
 })
 export type CommandResult = typeof CommandResult.Type
 
-export function commandFailure(error: unknown): CommandResult {
+function commandFailure(error: unknown): CommandResult {
 	const code = objectProperty(error, 'code')
 	const signal = objectProperty(error, 'signal')
 	const stdout = objectProperty(error, 'stdout')

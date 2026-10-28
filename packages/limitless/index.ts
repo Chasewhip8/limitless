@@ -36,7 +36,7 @@ export function limitlessTools(
 ) {
 	return {
 		...artifactTools(executeTool),
-		...githubTools(executeTool, githubConfig, githubCloneRuntime),
+		...(githubConfig.enabled ? githubTools(executeTool, githubConfig, githubCloneRuntime) : {}),
 	}
 }
 
@@ -46,7 +46,7 @@ export function registerLimitlessTools(
 ): void {
 	draft.add(tools.artifact_create)
 	draft.add(tools.artifact_list)
-	draft.add(tools.github_clone)
+	if (tools.github_clone !== undefined) draft.add(tools.github_clone)
 }
 
 export function makeSessionDirectoryResolver(

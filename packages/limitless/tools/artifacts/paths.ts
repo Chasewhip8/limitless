@@ -14,22 +14,15 @@ export function artifactsRoot(worktree: string): string {
 	return artifactsStorageRoot(worktree)
 }
 
-export function artifactRelativePath(
-	slug: ArtifactSlugType,
-	...segments: ReadonlyArray<string>
-): string {
+function artifactRelativePath(slug: ArtifactSlugType, ...segments: ReadonlyArray<string>): string {
 	return path.posix.join(ARTIFACTS_STORAGE_RELATIVE_PATH, slug, ...segments)
 }
 
-export function artifactDirectoryPath(worktree: string, slug: ArtifactSlugType): string {
-	return path.resolve(worktree, artifactRelativePath(slug))
-}
-
-export function artifactManifestRelativePath(slug: ArtifactSlugType): string {
+function artifactManifestRelativePath(slug: ArtifactSlugType): string {
 	return artifactRelativePath(slug, 'manifest.json')
 }
 
-export function artifactManifestPath(worktree: string, slug: ArtifactSlugType): string {
+function artifactManifestPath(worktree: string, slug: ArtifactSlugType): string {
 	return path.resolve(worktree, artifactManifestRelativePath(slug))
 }
 

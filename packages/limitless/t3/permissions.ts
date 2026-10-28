@@ -65,7 +65,7 @@ function namespaceAliases(permissions: Permission.Ruleset): Map<string, string> 
 	return aliases
 }
 
-export function canonicalizeT3Permissions(permissions: Permission.Ruleset): Permission.Ruleset {
+function canonicalizeT3Permissions(permissions: Permission.Ruleset): Permission.Ruleset {
 	const aliases = namespaceAliases(permissions)
 	return permissions.map((entry) => {
 		for (const [source, target] of aliases) {
@@ -132,8 +132,7 @@ export function normalizeT3Permissions(
 }
 
 /**
- * Whether rules are already in Limitless's repaired form for some role, as the
- * plugin's own writes are even after the session's agent has changed.
+ * Recognize either repaired role: the agent may have changed since the plugin wrote these rules.
  */
 export function isNormalizedT3Permissions(permissions: Permission.Ruleset): boolean {
 	try {

@@ -292,7 +292,12 @@ describe('GitHub clone lifecycle', () => {
 		const fakeGit = path.join(root, 'fake-git.mjs')
 		await writeFile(
 			fakeGit,
-			`#!/usr/bin/env node\nprocess.stderr.write(JSON.stringify({ argv: process.argv.slice(2), env: process.env })); process.exit(2)\n`,
+			`#!/usr/bin/env node
+const env = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+  name === ${JSON.stringify(tokenEnv)} || /^GIT_CONFIG_(KEY|VALUE)_\\d+$/.test(name)))
+process.stderr.write(JSON.stringify({ argv: process.argv.slice(2), env }))
+process.exit(2)
+`,
 		)
 		await chmod(fakeGit, 0o755)
 		process.env[tokenEnv] = 'secret-token'
@@ -320,7 +325,12 @@ describe('GitHub clone lifecycle', () => {
 		await writeFile(tokenFile, 'file-token\n', { mode: 0o600 })
 		await writeFile(
 			fakeGit,
-			`#!/usr/bin/env node\nprocess.stderr.write(JSON.stringify(process.env)); process.exit(2)\n`,
+			`#!/usr/bin/env node
+const env = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+  name === ${JSON.stringify(tokenEnv)} || /^GIT_CONFIG_(KEY|VALUE)_\\d+$/.test(name)))
+process.stderr.write(JSON.stringify(env))
+process.exit(2)
+`,
 		)
 		await chmod(fakeGit, 0o755)
 

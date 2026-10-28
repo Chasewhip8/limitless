@@ -16,7 +16,6 @@ import { type Backend, BridgeError, backendURL, ServiceBackend } from './backend
 import type { BridgeRouter } from './requests'
 
 export interface BridgeOptions {
-	/** The client's name in errors, such as `T3`. */
 	readonly client: string
 	/** The password the client generated for the server it believes it spawned. */
 	readonly password: string
@@ -126,7 +125,6 @@ const forward = Effect.fn('Bridge.forward')(function* (
 	let forwarded = HttpClientRequest.make(request.method)(target, {
 		headers: Headers.merge(forwardedHeaders, Headers.fromInput(backend.headers)),
 	}).pipe(HttpClientRequest.setBody(body))
-	// A body without a declared type is forwarded without one.
 	if (contentType === undefined)
 		forwarded = HttpClientRequest.removeHeader(forwarded, 'content-type')
 	const response = yield* HttpClient.execute(forwarded).pipe(
@@ -137,7 +135,6 @@ const forward = Effect.fn('Bridge.forward')(function* (
 	return relay(response)
 })
 
-/** Answers one client request: authenticate, choose its route, then reply or forward. */
 const handle = (options: BridgeOptions) => {
 	const authorized = authorizes(options.password)
 	return Effect.gen(function* () {
@@ -174,9 +171,8 @@ const handle = (options: BridgeOptions) => {
 }
 
 /**
- * Serves a client's OpenCode API on loopback by forwarding to the managed
- * service. Closing the layer only detaches the client: sessions and the
- * service keep running.
+ * Closing the layer must only detach the client; sessions and the managed service
+ * outlive the proxy.
  */
 export const layer = (options: BridgeOptions) =>
 	Layer.unwrap(
@@ -204,7 +200,6 @@ export const layer = (options: BridgeOptions) =>
 		}),
 	)
 
-/** Promise-facing handle for JavaScript callers such as integration tests. */
 export async function startBridge(
 	options: BridgeOptions & { readonly backend: () => Promise<Backend> },
 ) {

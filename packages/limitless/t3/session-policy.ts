@@ -72,16 +72,9 @@ export const resolveSessionAgent = Effect.fn('T3.resolveSessionAgent')(function*
 	return selected.id
 })
 
-/**
- * Rewrites a T3 thread's stored permissions into Limitless policy: T3's mode
- * rules (including Full access's allow-all) give way to native agent
- * configuration, and the thread's own T3 tools are scoped by role. Sessions
- * without T3's thread rules are left alone.
- */
 export function makeT3SessionPolicy(
 	context: Pick<Plugin.Context, 'session' | 'agent' | 'location'>,
 ) {
-	/** Normalizes `permissions` for `session`, or returns undefined when they carry no T3 rules. */
 	const normalizeFor = (session: Session.Info, permissions: Permission.Ruleset) =>
 		Effect.gen(function* () {
 			if (!hasT3Permissions(permissions)) return undefined
@@ -127,8 +120,7 @@ export function makeT3SessionPolicy(
 		)
 
 	/**
-	 * Repairs the session's current rules for its current role: at creation,
-	 * including a native child's inherited rules, and before every prompt.
+	 * Native children need role reconciliation before their first prompt, not just on permission writes.
 	 */
 	const reconcile = (sessionID: Session.ID) =>
 		withSessionPolicyLock(

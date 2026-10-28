@@ -53,32 +53,21 @@ pkgs.stdenvNoCC.mkDerivation {
     cp -r ${bunDeps}/node_modules/.bun node_modules/.bun
     cp -r ${bunDeps}/packages/limitless/node_modules packages/limitless/node_modules
 
-    # Hosted plugins share OpenCode's Effect and plugin runtime instances.
-    bun build packages/limitless/index.ts \
-      --target=node \
-      --format=esm \
-      --packages=bundle \
-      --external effect --external 'effect/*' \
-      --external @opencode/plugin --external '@opencode/plugin/*' \
-      --metafile=dist/limitless.meta.json \
-      --outfile=dist/limitless.js
-    bun build packages/limitless/tui.ts \
-      --target=node \
-      --format=esm \
-      --packages=bundle \
-      --external effect --external 'effect/*' \
-      --external @opencode/plugin --external '@opencode/plugin/*' \
-      --metafile=dist/tui.meta.json \
-      --outfile=dist/tui.js
+    # Hosted plugins must reuse OpenCode's Effect/plugin instances to preserve host-owned state.
+    buildHostedPlugin() {
+      bun build "$1" \
+        --target=node \
+        --format=esm \
+        --packages=bundle \
+        --external effect --external 'effect/*' \
+        --external @opencode/plugin --external '@opencode/plugin/*' \
+        --metafile="dist/$2.meta.json" \
+        --outfile="dist/$2.js"
+    }
+    buildHostedPlugin packages/limitless/index.ts limitless
+    buildHostedPlugin packages/limitless/tui.ts tui
     # Paseo checks for an active plugin with ID `paseo`, so its bridge client is a separate plugin.
-    bun build packages/limitless/paseo/plugin.ts \
-      --target=node \
-      --format=esm \
-      --packages=bundle \
-      --external effect --external 'effect/*' \
-      --external @opencode/plugin --external '@opencode/plugin/*' \
-      --metafile=dist/paseo-plugin.meta.json \
-      --outfile=dist/paseo-plugin.js
+    buildHostedPlugin packages/limitless/paseo/plugin.ts paseo-plugin
     # Bridges run outside OpenCode, so they must carry their own dependencies.
     # They run under Bun, which provides undici; the bridges use Node's HTTP client
     # and never call platform-node's undici client.
@@ -94,7 +83,6 @@ pkgs.stdenvNoCC.mkDerivation {
 
   doCheck = true;
   checkPhase = ''
-    # A second Effect or plugin runtime can silently break host-owned state.
     bun -e '
       const assert = require("node:assert/strict");
       const fs = require("node:fs");

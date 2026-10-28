@@ -20,7 +20,6 @@ export type CacheStatus =
 	| { readonly state: 'cold' }
 	| { readonly state: 'unknown' }
 
-/** Returns undefined until the session has made a model request worth tracking. */
 export function cacheStatus(input: {
 	readonly messages: readonly Message[]
 	readonly running: boolean

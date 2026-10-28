@@ -19,19 +19,12 @@ function operationPromise<Value>(
 	})
 }
 
-function inspectPath(filePath: string, toolName: string, message: string) {
-	return Effect.tryPromise({
-		try: () => lstat(filePath),
-		catch: (error) => toolOperationError(toolName, message, error),
-	})
-}
-
 const existingPathInfo = Effect.fn(function* existingPathInfo(
 	filePath: string,
 	toolName: string,
 	message: string,
 ) {
-	return yield* inspectPath(filePath, toolName, message).pipe(
+	return yield* operationPromise(toolName, message, () => lstat(filePath)).pipe(
 		Effect.matchEffect({
 			onFailure: (error) => (isMissingPath(error) ? Effect.void : Effect.fail(error)),
 			onSuccess: Effect.succeed,
@@ -79,7 +72,7 @@ export const ensureDirectory = Effect.fn(function* ensureDirectory(
 	return true
 })
 
-export const writeNewFile = Effect.fn(function* writeNewFile(
+const writeNewFile = Effect.fn(function* writeNewFile(
 	filePath: string,
 	content: string,
 	toolName: string,

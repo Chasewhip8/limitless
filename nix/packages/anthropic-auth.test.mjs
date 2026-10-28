@@ -1,8 +1,6 @@
 import { expect, test } from 'bun:test'
 import plugin from './dist/anthropic-auth.js'
 
-// Verifies patches/opencode-anthropic-auth-provider-hooks.patch: OpenCode disables
-// WebSockets for every provider matched by an HTTP hook.
 test('scopes both HTTP hooks to Anthropic so OpenAI can use WebSockets', async () => {
 	const hooks = []
 	const registration = { async dispose() {} }

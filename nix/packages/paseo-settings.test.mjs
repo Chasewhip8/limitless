@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 import { configurePaseo, writtenDuringThisBoot } from './paseo-settings.mjs'
 
 async function fixture(t) {
@@ -95,7 +96,7 @@ test('a lock from an earlier boot is abandoned even when its PID is reused', asy
 	const startedAt = new Date().toISOString()
 	await writeFile(
 		files.lock,
-		JSON.stringify({ pid: process.pid, startedAt, bootId: 'earlier-boot' }),
+		JSON.stringify({ pid: process.pid, startedAt: '2000-01-01T00:00:00Z', bootId: 'earlier-boot' }),
 	)
 	assert.equal(
 		writtenDuringThisBoot({ pid: process.pid, startedAt, bootId: 'earlier-boot' }, 'this-boot'),
@@ -110,8 +111,28 @@ test('a lock from an earlier boot is abandoned even when its PID is reused', asy
 		false,
 	)
 	assert.equal(writtenDuringThisBoot({ pid: process.pid, startedAt }, undefined), true)
-	// The host's real boot ID never equals the fixture's.
+	assert.equal(
+		writtenDuringThisBoot(
+			{ pid: process.pid, startedAt: '2000-01-01T00:00:00Z', bootId: 'this-boot' },
+			'this-boot',
+		),
+		true,
+	)
 	assert.equal(await configurePaseo(files.home, settings), true)
+})
+
+test('waits for an empty lock being written by a live daemon before provisioning', async (t) => {
+	const files = await fixture(t)
+	await writeFile(files.config, '{}\n')
+	await writeFile(files.lock, '')
+	const provisioning = configurePaseo(files.home, settings)
+	await delay(25)
+	await writeFile(
+		files.lock,
+		JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
+	)
+	await assert.rejects(provisioning, /live PID/)
+	assert.equal(await readFile(files.config, 'utf8'), '{}\n')
 })
 
 test('accepts a configuration with a byte-order mark, as Paseo does', async (t) => {

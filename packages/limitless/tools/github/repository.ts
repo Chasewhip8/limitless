@@ -63,14 +63,3 @@ export function cloneDirectoryNameFromValidated(
 	const hash = createHash('sha256').update(validatedRef).digest('hex').slice(0, 12)
 	return `${base}-${readable}-${hash}`
 }
-
-export const cloneDirectoryName = Effect.fn('cloneDirectoryName')(function* (
-	repo: string,
-	ref?: string,
-) {
-	const normalized = yield* normalizeRepo(repo)
-	const validRef = yield* validateGitHubRef(ref)
-	if (ref !== undefined && validRef === undefined)
-		return yield* cloneFailure('INVALID_REF', 'GitHub ref cannot be empty.')
-	return cloneDirectoryNameFromValidated(normalized, validRef)
-})

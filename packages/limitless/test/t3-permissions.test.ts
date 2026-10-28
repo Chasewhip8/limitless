@@ -45,12 +45,12 @@ function effectFor(rules: Permission.Ruleset, action: string, resource = '*') {
 
 describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 	const namespace = canonicalT3Namespace(sourceNamespace)
-	test('retains 78 primary tools and denies delegation and HTML visual tools', () => {
+	test('retains 61 primary tools and denies delegation and HTML visual tools', () => {
 		const rules = [
 			...nativeDefaults,
 			...normalizeT3Permissions(t3Rules(sourceNamespace), 'limitless'),
 		]
-		expect(toolNames).toHaveLength(83)
+		expect(toolNames).toHaveLength(66)
 		expect(effectFor(rules, `${namespace}_extra_delegate_task`)).toBe('allow')
 		expect(toolNames.filter((name) => effectFor(rules, `${namespace}_${name}`) === 'deny')).toEqual(
 			['delegate_task', 'html_preview', 'html_render', 'task_cancel', 'task_status'],

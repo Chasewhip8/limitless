@@ -15,16 +15,6 @@ const t3InstructionsPath =
 	/^\/api\/(?:experimental\/)?session\/[^/]+\/instructions\/entries\/t3-code$/
 const t3Namespace = /^t3-code-[A-Za-z0-9_-]{1,56}$/
 
-/**
- * Decides how a T3 request reaches the managed service:
- *
- * - T3's orchestration instructions become a marker that the Limitless plugin
- *   expands into its own guidance, so T3's text is never stored.
- * - T3 MCP server names are hashed when a thread ID contains underscores, so one
- *   thread's `<name>_*` grant cannot match a sibling such as `<name>_fork`.
- * - T3's normal-mode agent `build` (disabled in Limitless) selects the
- *   Location's configured default agent instead.
- */
 export const routeT3Request = Effect.fn('T3.routeRequest')(function* (
 	request: HttpServerRequest.HttpServerRequest,
 	pathname: string,

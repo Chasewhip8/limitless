@@ -38,12 +38,16 @@ export const resolveGitHubSubmoduleUrl = Effect.fn('resolveGitHubSubmoduleUrl')(
 		const parent = yield* normalizeRepo(parentRepo).pipe(
 			Effect.mapError((error) => cloneFailure('SUBMODULE_URL_REJECTED', error.message)),
 		)
-		return cleanRemoteUrl(
-			yield* repoFromGitHubPath(path.posix.normalize(path.posix.join(`/${parent}.git`, value))),
+		const repository = yield* repoFromGitHubPath(
+			path.posix.normalize(path.posix.join(`/${parent}.git`, value)),
 		)
+		return cleanRemoteUrl(repository)
 	}
 	const scp = /^(?:git@)?github\.com:([^?#]+)$/iu.exec(value)
-	if (scp?.[1] !== undefined) return cleanRemoteUrl(yield* repoFromGitHubPath(scp[1]))
+	if (scp?.[1] !== undefined) {
+		const repository = yield* repoFromGitHubPath(scp[1])
+		return cleanRemoteUrl(repository)
+	}
 	const parsed = yield* Effect.try({
 		try: () => new URL(value),
 		catch: () =>
@@ -60,7 +64,8 @@ export const resolveGitHubSubmoduleUrl = Effect.fn('resolveGitHubSubmoduleUrl')(
 			'SUBMODULE_URL_REJECTED',
 			'Submodules must use HTTPS, SSH, scp-style, or relative URLs hosted on github.com.',
 		)
-	return cleanRemoteUrl(yield* repoFromGitHubPath(parsed.pathname))
+	const repository = yield* repoFromGitHubPath(parsed.pathname)
+	return cleanRemoteUrl(repository)
 })
 
 const submoduleRepo = Effect.fn('submoduleRepo')(function* (cleanUrl: string) {

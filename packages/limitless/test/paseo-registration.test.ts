@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -40,7 +40,7 @@ test.each([
 	['malformed JSON', '{plugins'],
 	['no Paseo plugin', launchConfig()],
 	[
-		'a lookalike package outside Paseo’s runtime',
+		'an unrelated plugin',
 		launchConfig({
 			package: 'file:///tmp/other',
 			options: { baseUrl: 'http://127.0.0.1:1', token: 'x' },
@@ -82,7 +82,6 @@ test('the registration lives in the user runtime directory, which must be absolu
 	).toBe(true)
 })
 
-/** A Paseo tool bridge serving a manifest; `stop` makes it unreachable. */
 async function toolBridge(token: string, tools = ['list_agents']) {
 	const server: Server = createServer((request, response) => {
 		if (request.headers.authorization !== `Bearer ${token}`)
@@ -109,6 +108,7 @@ async function toolBridge(token: string, tools = ['list_agents']) {
 
 async function runtime() {
 	const directory = await mkdtemp(join(tmpdir(), 'limitless-paseo-'))
+	cleanup.push(() => rm(directory, { recursive: true, force: true }))
 	const path = join(directory, 'limitless', 'paseo-tool-bridge.json')
 	const environment = (bridge: { baseUrl: string; token: string }) => ({
 		XDG_RUNTIME_DIR: directory,
@@ -153,6 +153,7 @@ test('another live daemon keeps its registration; a dead one is replaced', async
 
 test('an invalid or foreign registration is reported rather than trusted', async () => {
 	const directory = await mkdtemp(join(tmpdir(), 'limitless-paseo-'))
+	cleanup.push(() => rm(directory, { recursive: true, force: true }))
 	const path = join(directory, 'paseo-tool-bridge.json')
 	await writeFile(path, '{"v":1}')
 	expect(Exit.isFailure(await Effect.runPromiseExit(readRegistration(path)))).toBe(true)

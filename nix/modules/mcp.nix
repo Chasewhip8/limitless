@@ -44,12 +44,6 @@ let
   nativeServers = cfg.opencode.settings.mcp.servers or { };
   servers = presetServers // nativeServers // executorServers;
   names = builtins.attrNames servers;
-  normalize =
-    name:
-    lib.concatMapStrings (
-      character: if builtins.match "[A-Za-z0-9_-]" character != null then character else "_"
-    ) (lib.stringToCharacters name);
-  normalizedNames = map normalize names;
   reservedActions = [
     "artifact_create"
     "artifact_list"
@@ -62,16 +56,12 @@ let
   readRules =
     name:
     if executor.enable then
-      lib.optional (executor.readConnection != null && name == "executor-read") (
-        rule "${normalize name}_*" "allow"
-      )
+      lib.optional (executor.readConnection != null && name == "executor-read") (rule "${name}_*" "allow")
     else
-      map (tool: rule "${normalize name}_${tool}" "allow") (
+      map (tool: rule "${name}_${tool}" "allow") (
         if builtins.hasAttr name connections then connections.${name}.readTools else [ ]
       );
-  readOnlyPermissions = lib.concatMap (
-    name: [ (rule "${normalize name}_*" "deny") ] ++ readRules name
-  ) names;
+  readOnlyPermissions = lib.concatMap (name: [ (rule "${name}_*" "deny") ] ++ readRules name) names;
   generatedOption =
     type:
     lib.mkOption {
@@ -197,11 +187,9 @@ in
           message = "Limitless MCP names must use letters, numbers, underscores, and hyphens so permission actions stay unambiguous.";
         }
         {
-          assertion =
-            builtins.length (lib.unique normalizedNames) == builtins.length names
-            && lib.all (
-              name: lib.all (other: name == other || !lib.hasPrefix "${name}_" other) normalizedNames
-            ) normalizedNames;
+          assertion = lib.all (
+            name: lib.all (other: name == other || !lib.hasPrefix "${name}_" other) names
+          ) names;
           message = "MCP names must have distinct permission prefixes; use hyphens to distinguish accounts (for example notion-work).";
         }
         {
@@ -212,7 +200,7 @@ in
               "opencode"
             ]
             && !lib.any (action: lib.hasPrefix "${name}_" action) reservedActions
-          ) normalizedNames;
+          ) names;
           message = "An MCP name overlaps an OpenCode or Limitless tool namespace. Use gh or github-mcp for GitHub.";
         }
         {
