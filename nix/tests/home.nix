@@ -91,7 +91,6 @@ let
   evaluate = settings: evaluateWith settings [ ];
   opencodeJson = home: home.config.home.file.".config/opencode/opencode.json".text;
   rendered = home: builtins.fromJSON (builtins.unsafeDiscardStringContext (opencodeJson home));
-  plugin = home: lib.last (rendered home).plugins;
   valid = home: lib.all (entry: entry.assertion) home.config.assertions;
 
   # Mirrors OpenCode's ordered permission evaluation: the last matching rule wins.
@@ -473,8 +472,6 @@ in
       )
       [
         "github"
-        "lsp"
-        "ast"
         "artifact"
         "browser"
         "opencode"
@@ -528,9 +525,6 @@ in
         # check separately loads the original store package in real OpenCode.
         cp -r ${defaults.config.programs.limitless.plugins.limitless.package} plugin
         node validate-plugin.mjs "$PWD/plugin"
-        ${lib.concatMapStringsSep "\n" (
-          server: "test -x ${lib.escapeShellArg (builtins.head server.command)}"
-        ) (builtins.attrValues (plugin defaults).options.lsp)}
       '';
 
   cli-settings =

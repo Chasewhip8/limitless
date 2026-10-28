@@ -56,17 +56,7 @@ const sharedActions = [
 	'execute',
 	'external_directory',
 	'artifact_list',
-	'ast_grep_search',
-	'ast_grep_replace',
 	'github_clone',
-	'lsp_diagnostics',
-	'lsp_definition',
-	'lsp_hover',
-	'lsp_implementation',
-	'lsp_call_hierarchy',
-	'lsp_references',
-	'lsp_symbols',
-	'lsp_rename',
 	'opencode_models',
 ]
 const primaryOnlyActions = ['artifact_create', 'opencode_session_move', 'opencode_session_rename']

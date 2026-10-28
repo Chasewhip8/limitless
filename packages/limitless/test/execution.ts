@@ -5,7 +5,6 @@ import { Tool } from '@opencode/schema/tool'
 import { Effect, Schema } from 'effect'
 import type { ToolExecutionContext } from '../core/execution'
 import { makeToolExecutor } from '../plugin/tool-boundary'
-import { LspConfig, type LspServerConfig } from '../tools/lsp/config'
 
 export function testToolExecution(
 	projectRoot: string,
@@ -28,11 +27,8 @@ export function testToolContext(execution: ToolExecutionContext): Tool.Context {
 	}
 }
 
-export function testToolExecutor(
-	execution: ToolExecutionContext,
-	servers: ReadonlyArray<LspServerConfig> = [],
-) {
-	return makeToolExecutor(() => Effect.succeed(execution.projectRoot), LspConfig.of({ servers }))
+export function testToolExecutor(execution: ToolExecutionContext) {
+	return makeToolExecutor(() => Effect.succeed(execution.projectRoot))
 }
 
 export function settleTestTool(tool: Tool.Info, input: unknown, execution: ToolExecutionContext) {

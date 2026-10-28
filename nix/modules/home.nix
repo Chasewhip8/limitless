@@ -4,7 +4,6 @@
   imports = [
     (import ./opencode.nix { inherit self; })
     ./service.nix
-    ./lsp.nix
     ./mcp.nix
     (import ./t3.nix { inherit self; })
     (import ./paseo.nix { inherit self; })

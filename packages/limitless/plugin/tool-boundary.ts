@@ -1,8 +1,6 @@
 import { Tool } from '@opencode/schema/tool'
 import { Effect, Match, Schema } from 'effect'
 import {
-	FileAccessError,
-	FileAccessFailurePayload,
 	type ToolFailure,
 	type ToolFailurePayload,
 	ToolInputError,
@@ -16,9 +14,8 @@ import {
 } from '../core/execution'
 import { portableSchema } from '../lib/standard-schema'
 import { optionalField } from '../lib/type-utils'
-import { LspConfig } from '../tools/lsp/config'
 
-export { FileAccessError, ToolInputError, ToolOperationError }
+export { ToolInputError, ToolOperationError }
 export type { ToolFailure }
 
 export type SessionDirectoryResolver = (
@@ -31,7 +28,7 @@ export type ToolExecutor = <Input, Output, Error>(
 	name: string,
 	input: Input,
 	context: Tool.Context,
-	operation: (input: Input) => Effect.Effect<Output, Error, ToolExecutionContextType | LspConfig>,
+	operation: (input: Input) => Effect.Effect<Output, Error, ToolExecutionContextType>,
 	encodeError: ToolErrorEncoder<Error>,
 ) => Effect.Effect<
 	{ readonly output: Output; readonly content: ReadonlyArray<Tool.Content> },
@@ -68,13 +65,6 @@ export function failurePayload(error: ToolFailure): ToolFailurePayload {
 				tool: error.tool,
 				message: error.message,
 			}),
-		FileAccessError: (error) =>
-			FileAccessFailurePayload.make({
-				ok: false,
-				error: error._tag,
-				filePath: error.filePath,
-				message: error.message,
-			}),
 		ToolOperationError: (error) =>
 			ToolOperationFailurePayload.make({
 				ok: false,
@@ -100,10 +90,7 @@ function defectKind(defect: unknown): string {
 	return typeof defect
 }
 
-export function makeToolExecutor(
-	resolveSessionDirectory: SessionDirectoryResolver,
-	lspConfig: LspConfig,
-): ToolExecutor {
+export function makeToolExecutor(resolveSessionDirectory: SessionDirectoryResolver): ToolExecutor {
 	return (name, input, context, operation, encodeError) =>
 		resolveSessionDirectory(context.sessionID).pipe(
 			Effect.flatMap((projectRoot) => {
@@ -116,7 +103,6 @@ export function makeToolExecutor(
 					Effect.map((output) => ({ output, content: toolModelOutput({ output }) })),
 					Effect.mapError(encodeError),
 					Effect.provideService(ToolExecutionContext, execution),
-					Effect.provideService(LspConfig, lspConfig),
 				)
 			}),
 			Effect.catchDefect((defect) =>

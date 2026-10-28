@@ -20,7 +20,6 @@ let
 
     buildPhase = ''
       export HOME=$TMPDIR
-      cp -r patches packages/limitless/patches
       bun install --cwd packages/limitless --no-progress --frozen-lockfile --ignore-scripts --production --omit optional
       bun ${./limitless-bun-links.mjs}
     '';
@@ -32,12 +31,9 @@ let
 
       # Bun races when linking dependency executables; bundling uses no package bins.
       find "$out" -type d -path '*/node_modules/.bin' -prune -exec rm -rf {} +
-
-      # Patch-cache markers vary across Bun versions and are unused by bun build.
-      find "$out/node_modules/.bun" -type f -name '.bun-tag-*' -empty -delete
     '';
 
-    outputHash = "sha256-fyIz++RRhA0CdIzd7bJdId6361vhdGAjx1ADRpxsNlk=";
+    outputHash = "sha256-rf+TS0oph0QlBofSa+IUkQsu3qaz4IantxI+QrTsJ9E=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -117,7 +113,6 @@ pkgs.stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out"
     substitute "dist/limitless.js" "$out/limitless.js" \
-      --replace-fail "@AST_GREP_BIN@" "${pkgs.ast-grep}/bin/ast-grep" \
       --replace-fail "@GIT_BIN@" "${pkgs.git}/bin/git"
     cp "$out/limitless.js" "$out/index.js"
     cp "dist/tui.js" "$out/tui.js"
@@ -146,7 +141,7 @@ pkgs.stdenvNoCC.mkDerivation {
   passthru.dependencies = bunDeps;
 
   meta = with pkgs.lib; {
-    description = "Effect-native OpenCode 2 plugin for code intelligence, artifacts, and source research";
+    description = "Effect-native OpenCode 2 plugin for artifacts, source research, and client policies";
     platforms = platforms.all;
   };
 }

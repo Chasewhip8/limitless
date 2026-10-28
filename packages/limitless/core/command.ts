@@ -5,7 +5,7 @@ import { describeUnknown, objectProperty } from '../lib/guards'
 
 const execFileAsync = promisify(execFile)
 
-export const DEFAULT_TIMEOUT_MS = 30_000
+const DEFAULT_TIMEOUT_MS = 30_000
 export const DEFAULT_MAX_BUFFER = 1024 * 1024 * 8
 
 export type RunOptions = {
@@ -25,9 +25,6 @@ export type TrimmedString = typeof TrimmedString.Type
 
 export const TrimmedNonEmptyString = TrimmedString.check(Schema.isMinLength(1))
 export type TrimmedNonEmptyString = typeof TrimmedNonEmptyString.Type
-
-export const PositiveFiniteTimeout = Schema.Finite.check(Schema.isGreaterThan(0))
-export type PositiveFiniteTimeout = typeof PositiveFiniteTimeout.Type
 
 export const CommandResult = Schema.Struct({
 	ok: Schema.Boolean,

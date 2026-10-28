@@ -53,16 +53,6 @@ let
   reservedActions = [
     "artifact_create"
     "artifact_list"
-    "ast_grep_search"
-    "ast_grep_replace"
-    "lsp_diagnostics"
-    "lsp_definition"
-    "lsp_hover"
-    "lsp_implementation"
-    "lsp_call_hierarchy"
-    "lsp_references"
-    "lsp_symbols"
-    "lsp_rename"
     "github_clone"
   ];
   rule = action: effect: {

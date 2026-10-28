@@ -6,7 +6,6 @@ import { toolInputError } from '../core/errors'
 import { ToolExecutionContext } from '../core/execution'
 import { makeSessionDirectoryResolver } from '../index'
 import { defineLimitlessTool, encodeToolFailure, makeToolExecutor } from '../plugin/tool-boundary'
-import { LspConfig } from '../tools/lsp/config'
 import { settleTestTool, testToolContext, testToolExecution } from './execution'
 
 const BoundaryInput = Schema.Struct({ value: Schema.String })
@@ -37,7 +36,7 @@ describe('OpenCode 2 tool execution boundary', () => {
 					return session
 				}),
 		})
-		const execute = makeToolExecutor(resolveDirectory, LspConfig.of({ servers: [] }))
+		const execute = makeToolExecutor(resolveDirectory)
 		const definition = defineLimitlessTool({
 			name: 'boundary_test',
 			description: 'Boundary test',
@@ -76,10 +75,7 @@ describe('OpenCode 2 tool execution boundary', () => {
 
 	test('maps expected domain errors to typed Tool.Error metadata', async () => {
 		const execution = testToolExecution('/project')
-		const execute = makeToolExecutor(
-			() => Effect.succeed('/project'),
-			LspConfig.of({ servers: [] }),
-		)
+		const execute = makeToolExecutor(() => Effect.succeed('/project'))
 		const definition = defineLimitlessTool({
 			name: 'failure_test',
 			description: 'Failure test',

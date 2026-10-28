@@ -5,11 +5,6 @@ export class ToolInputError extends Schema.TaggedError<ToolInputError>()('ToolIn
 	message: Schema.String,
 }) {}
 
-export class FileAccessError extends Schema.TaggedError<FileAccessError>()('FileAccessError', {
-	filePath: Schema.String,
-	message: Schema.String,
-}) {}
-
 export class ToolOperationError extends Schema.TaggedError<ToolOperationError>()(
 	'ToolOperationError',
 	{
@@ -19,20 +14,13 @@ export class ToolOperationError extends Schema.TaggedError<ToolOperationError>()
 	},
 ) {}
 
-export const ToolFailure = Schema.Union([ToolInputError, FileAccessError, ToolOperationError])
+export const ToolFailure = Schema.Union([ToolInputError, ToolOperationError])
 export type ToolFailure = typeof ToolFailure.Type
 
 export const ToolInputFailurePayload = Schema.Struct({
 	ok: Schema.Literal(false),
 	error: Schema.Literal('ToolInputError'),
 	tool: Schema.String,
-	message: Schema.String,
-})
-
-export const FileAccessFailurePayload = Schema.Struct({
-	ok: Schema.Literal(false),
-	error: Schema.Literal('FileAccessError'),
-	filePath: Schema.String,
 	message: Schema.String,
 })
 
@@ -46,7 +34,6 @@ export const ToolOperationFailurePayload = Schema.Struct({
 
 export const ToolFailurePayload = Schema.Union([
 	ToolInputFailurePayload,
-	FileAccessFailurePayload,
 	ToolOperationFailurePayload,
 ])
 export type ToolFailurePayload = typeof ToolFailurePayload.Type

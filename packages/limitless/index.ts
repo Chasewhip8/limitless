@@ -10,26 +10,21 @@ import {
 } from './plugin/tool-boundary'
 import { registerT3Policy } from './t3/plugin'
 import { artifactTools } from './tools/artifacts/index'
-import { astGrepTools } from './tools/ast-grep'
-import { diagnosticsTools } from './tools/diagnostics'
 import {
 	githubTools,
 	makeGitHubCloneRuntime,
 	normalizeGitHubPluginConfig,
 } from './tools/github/index'
-import { decodeLspConfig, lspTools } from './tools/lsp/index'
 
 export const resolveGitHubConfig = normalizeGitHubPluginConfig
 
 export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* (options: unknown) {
 	const githubConfig = yield* normalizeGitHubPluginConfig(options)
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
-	const lspConfig = yield* decodeLspConfig(options)
 	const providerPolicy = yield* normalizeProviderPolicyConfig(options)
 	return {
 		githubConfig,
 		githubCloneRuntime,
-		lspConfig,
 		providerPolicy,
 	}
 })
@@ -41,9 +36,6 @@ export function limitlessTools(
 ) {
 	return {
 		...artifactTools(executeTool),
-		...astGrepTools(executeTool),
-		...diagnosticsTools(executeTool),
-		...lspTools(executeTool),
 		...githubTools(executeTool, githubConfig, githubCloneRuntime),
 	}
 }
@@ -54,16 +46,6 @@ export function registerLimitlessTools(
 ): void {
 	draft.add(tools.artifact_create)
 	draft.add(tools.artifact_list)
-	draft.add(tools.ast_grep_search)
-	draft.add(tools.ast_grep_replace)
-	draft.add(tools.lsp_diagnostics)
-	draft.add(tools.lsp_definition)
-	draft.add(tools.lsp_hover)
-	draft.add(tools.lsp_implementation)
-	draft.add(tools.lsp_call_hierarchy)
-	draft.add(tools.lsp_references)
-	draft.add(tools.lsp_symbols)
-	draft.add(tools.lsp_rename)
 	draft.add(tools.github_clone)
 }
 
@@ -91,10 +73,7 @@ export default Plugin.define({
 			),
 			Effect.orDie,
 		)
-		const executeTool = makeToolExecutor(
-			makeSessionDirectoryResolver(ctx.session),
-			configs.lspConfig,
-		)
+		const executeTool = makeToolExecutor(makeSessionDirectoryResolver(ctx.session))
 		const tools = limitlessTools(executeTool, configs.githubConfig, configs.githubCloneRuntime)
 
 		yield* registerT3Policy(ctx)

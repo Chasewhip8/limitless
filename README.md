@@ -2,7 +2,7 @@
 
 > A Home Manager module for a ready-to-use OpenCode 2 workspace.
 
-Limitless pins OpenCode `2.1.4`, supplies coding agents and local code-intelligence
+Limitless pins OpenCode `2.1.4`, supplies coding agents, artifact and source-research
 tools, and configures optional first-party MCP connections. OpenCode owns its
 service discovery, OAuth credentials, Code Mode, and native
 notification delivery. Home Manager owns packages and non-secret configuration, with
@@ -40,10 +40,6 @@ avoid conflicts with T3 Code's and Paseo's browser tools. Use either for browser
   [desktop apps](#desktop-clients) for OpenCode, T3 Code and Paseo.
 - **Skills:** `repository-setup` for parallel worktrees and `pull-request` for
   end-to-end PR delivery.
-- **Code intelligence:** ast-grep search and replacement, TypeScript/Biome
-  diagnostics, and seven LSP tools for definitions, hover, implementations,
-  call hierarchy, references, symbols, and rename previews.
-- **Language servers:** TypeScript, Biome, JSON, YAML, Markdown, TOML, and Nix.
 - **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
 - **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
 - **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
@@ -51,7 +47,8 @@ avoid conflicts with T3 Code's and Paseo's browser tools. Use either for browser
 - **Anthropic subscription authentication:** a pinned Claude Pro/Max plugin.
 - **Git hygiene:** `.limitless/` is globally ignored by default.
 
-The plugin exposes 13 core tools directly with `codemode = false`. MCP tools use
+The plugin exposes three core tools directly with `codemode = false`: `artifact_create`,
+`artifact_list`, and `github_clone`. MCP tools use
 OpenCode's native Code Mode. Every Limitless tool resolves the invoking session's
 `location.directory` as its project root.
 
@@ -366,11 +363,10 @@ nix/modules/
 ├── paseo.nix      # optional Paseo daemon and OpenCode provider binding
 ├── desktop.nix    # independent Linux desktop installation
 ├── darwin.nix     # macOS desktop installation through Homebrew
-├── lsp.nix        # language-server packages and plugin configuration
 └── mcp.nix        # named connections and permission generation
 nix/mcp-presets.nix # first-party endpoints and audited read-tool names
 opencode/          # native defaults, agents, and shared instructions
-packages/limitless/ # code-intelligence tools, artifacts, source research, policies
+packages/limitless/ # artifacts, source research, and client policies
 ```
 
 Native server settings go in `programs.limitless.opencode.settings`. Limitless
@@ -386,11 +382,6 @@ launcher supplies them through `OPENCODE_CLI_CONFIG_CONTENT`; declared values
 override matching preferences in `~/.config/opencode/cli.json`. An explicitly
 supplied `OPENCODE_CLI_CONFIG_CONTENT` replaces the generated override. Apply
 Home Manager and relaunch the TUI after changing these Nix settings.
-
-Configure language servers through `programs.limitless.lsp`: `enable`,
-`servers.<name>.{enable,package,command,args,extensions,env}`, `extraServers`, and
-`extraPackages`. Limitless owns these definitions in plugin `options.lsp`.
-Project-local OpenCode `lsp` settings do not change Limitless's tools.
 
 `skills.package` can supply your own skill directories; `skills.enable = false`
 disables installation. The default package copies a top-level `skills/` directory
@@ -1039,6 +1030,7 @@ This release removes these options and packages:
 
 | Removed | Migration |
 | --- | --- |
+| `lsp.*`, bundled language servers, `ast_grep_*` and `lsp_*` tools | Remove `programs.limitless.lsp` settings. Install any language servers or TypeScript needed on PATH through `home.packages`. Use project tooling or an independently installed `ast-grep` CLI through the shell. |
 | `lead` and `unit` agents, automatic Unit worktree placement | Finish active Lead/Unit runs before upgrading, then select `limitless` to continue existing sessions. Use separate Limitless sessions for independent changes and native subagents for Research and the Oracles. Existing sessions and worktrees remain available. |
 | `slack.*`, Gary, Slack tools | Remove Slack configuration and retire its bot credentials when no longer used. |
 | `desktop.enable` | Use `programs.limitless.opencode.desktop.enable`. The `opencode-desktop` package is available again as the upstream V2 client; it does not restore the old patched launcher. |

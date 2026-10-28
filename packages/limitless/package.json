@@ -14,8 +14,7 @@
 		"@opencode/client": "2.1.4",
 		"@opencode/plugin": "2.1.4",
 		"@opencode/schema": "2.1.4",
-		"effect": "4.0.1",
-		"vscode-languageserver-protocol": "3.18.2"
+		"effect": "4.0.1"
 	},
 	"devDependencies": {
 		"@opencode/theme": "2.1.4",

@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
-import { limitlessTools, resolvePluginConfigs } from '../index'
+import { limitlessTools, registerLimitlessTools, resolvePluginConfigs } from '../index'
 import { testToolExecution, testToolExecutor } from './execution'
 
 describe('OpenCode 2 tool registrations', () => {
@@ -9,14 +9,20 @@ describe('OpenCode 2 tool registrations', () => {
 		'draft-2020-12',
 	] as const)('exports provider-compatible %s schemas for every tool', async (target) => {
 		const configs = await Effect.runPromise(
-			resolvePluginConfigs({ github: { enable: true, allowUnrestrictedRepos: true }, lsp: {} }),
+			resolvePluginConfigs({ github: { enable: true, allowUnrestrictedRepos: true } }),
 		)
 		const execution = testToolExecution('/project')
 		const tools = limitlessTools(
-			testToolExecutor(execution, configs.lspConfig.servers),
+			testToolExecutor(execution),
 			configs.githubConfig,
 			configs.githubCloneRuntime,
 		)
+
+		const expectedTools = ['artifact_create', 'artifact_list', 'github_clone']
+		expect(Object.keys(tools).sort()).toEqual(expectedTools)
+		const registered: Array<string> = []
+		registerLimitlessTools({ add: (tool) => registered.push(tool.name) }, tools)
+		expect(registered.sort()).toEqual(expectedTools)
 
 		for (const [name, tool] of Object.entries(tools)) {
 			// Providers reject function parameters without a top-level object schema.

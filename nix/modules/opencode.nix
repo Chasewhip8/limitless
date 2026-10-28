@@ -54,7 +54,6 @@ let
         ;
     }
     // lib.optionalAttrs (cfg.github.tokenFile != null) { inherit (cfg.github) tokenFile; };
-    lsp = cfg._generated.lsp;
     providers = { inherit (cfg.providers) disabled; };
   };
   # Bridges that clients launch as their OpenCode binary; each serves the managed service.
