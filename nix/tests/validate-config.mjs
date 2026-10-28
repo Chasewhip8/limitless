@@ -21,11 +21,10 @@ for (const file of await readdir(agentsDirectory)) {
 }
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
 assert.equal(agents.limitless?.model, 'openai/gpt-6-astra#xhigh')
-for (const name of ['limitless', 'lead']) {
-	assert.equal(agents[name]?.mode, 'primary', `${name} must be a selectable primary agent`)
-	assert.notEqual(agents[name]?.hidden, true, `${name} must be visible`)
-}
-assert.equal(agents.unit?.mode, 'subagent', 'Units must use native subagent execution')
+assert.equal(agents.limitless?.mode, 'primary', 'Limitless must be a selectable primary agent')
+assert.notEqual(agents.limitless?.hidden, true, 'Limitless must be visible')
+const enabledAgents = Object.keys(agents).filter((name) => !agents[name].disabled)
+assert.deepEqual(enabledAgents.sort(), ['limitless', 'oracle-design', 'oracle-solve', 'research'])
 
 function matches(pattern, value) {
 	const expression = pattern
@@ -43,7 +42,7 @@ function effectFor(rules, action, resource) {
 	return effect
 }
 
-const primaryAgents = ['limitless', 'lead', 'unit']
+const primaryAgents = ['limitless']
 const supportAgents = ['research', 'oracle-solve', 'oracle-design']
 const sharedActions = [
 	'shell',
@@ -88,7 +87,7 @@ const paseoWorkspaceTools = [
 	'capture_terminal',
 	'send_terminal_keys',
 ]
-const unitDeniedPaseoTools = [
+const paseoManagementTools = [
 	'create_agent',
 	'create_workspace',
 	'archive_workspace',
@@ -105,7 +104,8 @@ const unitDeniedPaseoTools = [
 for (const file of files) {
 	const input = JSON.parse(await readFile(file, 'utf8'))
 	Schema.decodeUnknownSync(Config.Info)(input, { onExcessProperty: 'error' })
-	assert.equal(input.experimental.subagent_depth, 3, 'Allow Lead → Unit → Oracle → Research')
+	assert.deepEqual(Object.keys(input.agents).sort(), enabledAgents)
+	assert.equal(input.experimental.subagent_depth, 2, 'Allow Limitless → Oracle → Research')
 	const browserRemoval = input.plugins.lastIndexOf('-opencode.browser')
 	assert(browserRemoval >= 0, `${file}: the native browser plugin must be disabled`)
 	assert(
@@ -157,22 +157,14 @@ for (const file of files) {
 				}
 			}
 		}
-		if (name === 'lead') {
+		if (name === 'limitless') {
 			for (const agent of supportAgents) expectEffect('subagent', agent, 'allow')
-			expectEffect('subagent', 'unit', 'allow')
-		}
-		if (name === 'unit') {
-			expectEffect('subagent', 'oracle-solve', 'allow')
-			expectEffect('subagent', 'research', 'allow')
-			expectEffect('subagent', 'oracle-design', 'deny')
-			expectEffect('subagent', 'unknown-agent', 'deny')
-			expectEffect('subagent', 'unit', 'deny')
 		}
 		// Paseo tools belong to the primary conversation, not native subagents.
-		const paseoEffect = ['limitless', 'lead'].includes(name) ? 'allow' : 'deny'
+		const paseoEffect = name === 'limitless' ? 'allow' : 'deny'
 		for (const tool of [
 			...paseoWorkspaceTools,
-			...unitDeniedPaseoTools,
+			...paseoManagementTools,
 			'browser_snapshot',
 			'future_tool',
 		])

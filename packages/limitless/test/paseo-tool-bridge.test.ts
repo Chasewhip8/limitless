@@ -103,7 +103,7 @@ test('executes a tool with raw arguments and reports Paseo’s validation issues
 		json(response, { error: 'Not found' }, 404)
 	})
 	expect(
-		await Effect.runPromise(executeTool(bridge, 'ses_bound', 'create_agent', { title: 'Unit' })),
+		await Effect.runPromise(executeTool(bridge, 'ses_bound', 'create_agent', { title: 'Example' })),
 	).toEqual({
 		content: [
 			{ type: 'text', text: 'created' },

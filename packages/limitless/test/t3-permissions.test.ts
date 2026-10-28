@@ -9,7 +9,7 @@ import {
 } from '../t3/permissions'
 import toolNames from './fixtures/t3-tool-names.json'
 
-const supportAgents = ['unit', 'research', 'oracle-solve', 'oracle-design']
+const supportAgents = ['research', 'oracle-solve', 'oracle-design']
 const namespaces = [
 	't3-code-35ce915b-46a3-4496-9544-eaf1261c948d',
 	't3-code-thread_x',

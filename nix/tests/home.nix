@@ -144,8 +144,6 @@ let
   connectedConfig = rendered connected;
   readWriteAgents = [
     "limitless"
-    "lead"
-    "unit"
     "oracle-solve"
     "oracle-design"
   ];
@@ -513,6 +511,8 @@ in
       }
       ''
         mkdir -p "$out"
+        test -f ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}/pull-request/SKILL.md
+        test -f ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}/repository-setup/SKILL.md
         cp ${pkgs.writeText "default-opencode.json" (opencodeJson defaults)} "$out/default.json"
         cp ${pkgs.writeText "connected-opencode.json" (opencodeJson connected)} "$out/connected.json"
         cp ${pkgs.writeText "executor-opencode.json" (opencodeJson executorHome)} "$out/executor.json"
@@ -586,24 +586,6 @@ in
           ${lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.opencode} \
           ${self}/packages/limitless/test/fixtures/t3-tool-names.json \
           ${lib.escapeShellArg self.packages.${pkgs.stdenv.hostPlatform.system}.opencode.version}
-        touch "$out"
-      '';
-
-  units-runtime =
-    pkgs.runCommand "limitless-native-units-runtime-check"
-      {
-        nativeBuildInputs = [
-          pkgs.bun
-          pkgs.git
-        ];
-      }
-      ''
-        mkdir -p "$TMPDIR/native-units"
-        export LIMITLESS_TEST_TMPDIR="$TMPDIR/native-units"
-        cp ${./validate-units-runtime.mjs} validate-units-runtime.mjs
-        bun validate-units-runtime.mjs \
-          ${self.packages.${pkgs.stdenv.hostPlatform.system}.limitless} \
-          ${lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.opencode}
         touch "$out"
       '';
 
