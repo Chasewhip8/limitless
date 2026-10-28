@@ -208,6 +208,26 @@ let
       })) true
     )).success;
 
+  linearSettings = {
+    enable = true;
+    teamId = "00000000-0000-4000-8000-00000000000a";
+    projectId = "00000000-0000-4000-8000-00000000000b";
+    states = {
+      in_progress = "00000000-0000-4000-8000-000000000001";
+      in_review = "00000000-0000-4000-8000-000000000002";
+      done = "00000000-0000-4000-8000-000000000003";
+      canceled = "00000000-0000-4000-8000-000000000004";
+    };
+  };
+  linearHome = evaluate {
+    linear = linearSettings // {
+      tokenFile = "/run/agenix/linear";
+    };
+  };
+  linearWith = settings: evaluate { linear = lib.recursiveUpdate linearSettings settings; };
+  linearAccepts =
+    settings: (builtins.tryEval (builtins.deepSeq (rendered (linearWith settings)) true)).success;
+
   supervised = evaluate {
     opencode.service = {
       enable = true;
@@ -432,6 +452,60 @@ in
       !(executorHome.config.home.file ? ".config/limitless/executor-read-tools.json")
     ) "Executor read policy must not be duplicated into a generated per-tool list";
     pkgs.runCommand "executor-client-check" { } ''touch "$out"'';
+  linear-task-board =
+    assert lib.assertMsg (
+      (plugin defaults).options.linear == { enable = false; }
+    ) "The Linear task board must be disabled by default and pass no board settings";
+    assert lib.assertMsg (
+      valid linearHome
+      &&
+        (plugin linearHome).options.linear == (
+          linearSettings
+          // {
+            tokenEnv = "LINEAR_API_KEY";
+            tokenFile = "/run/agenix/linear";
+          }
+        )
+      &&
+        (plugin (linearWith {
+          tokenEnv = "WORK_LINEAR_KEY";
+        })).options.linear.tokenEnv == "WORK_LINEAR_KEY"
+      && !((plugin (linearWith { })).options.linear ? tokenFile)
+    ) "An enabled board must pass only IDs and credential locations to the plugin";
+    assert lib.assertMsg (lib.all (settings: !valid (linearWith settings)) [
+      { teamId = null; }
+      { projectId = null; }
+      { states.done = null; }
+      { states.done = linearSettings.states.canceled; }
+      { states.done = lib.toUpper linearSettings.states.canceled; }
+      { tokenFile = "${builtins.storeDir}/00000000000000000000000000000000-linear-token"; }
+    ]) "An enabled board needs every ID, distinct states, and a runtime token file";
+    assert lib.assertMsg (lib.all (settings: !linearAccepts settings) [
+      { teamId = "ENG"; }
+      { states.in_review = "In Review"; }
+      { tokenEnv = "LINEAR-KEY"; }
+      { tokenFile = "secrets/linear"; }
+    ]) "Board IDs must be UUIDs and credentials must name a variable or absolute file";
+    assert lib.assertMsg (valid (evaluate {
+      linear = {
+        enable = false;
+        teamId = null;
+      };
+    })) "A disabled board must not require its settings";
+    assert lib.assertMsg (lib.all
+      (
+        name:
+        !valid (withServers {
+          ${name}.preset = "notion";
+        })
+      )
+      [
+        "task"
+        "task_board"
+      ]
+    ) "MCP names must not shadow the reserved task tool namespace";
+    pkgs.runCommand "limitless-linear-task-board-check" { } ''touch "$out"'';
+
   home-module =
     assert lib.assertMsg (valid defaults && valid connected) "valid configuration failed assertions";
     assert lib.assertMsg (
@@ -518,11 +592,12 @@ in
         cp ${pkgs.writeText "executor-opencode.json" (opencodeJson executorHome)} "$out/executor.json"
         cp ${pkgs.writeText "executor-full-opencode.json" (opencodeJson executorFull)} "$out/executor-full.json"
         cp ${pkgs.writeText "executor-direct-opencode.json" (opencodeJson executorWithDirect)} "$out/executor-direct.json"
+        cp ${pkgs.writeText "linear-opencode.json" (opencodeJson linearHome)} "$out/linear.json"
         ln -s ${
           self.packages.${pkgs.stdenv.hostPlatform.system}.limitless.dependencies
         }/packages/limitless/node_modules node_modules
         cp ${./validate-config.mjs} validate-config.mjs
-        bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/executor.json" "$out/executor-full.json" "$out/executor-direct.json"
+        bun validate-config.mjs ${agentsPackage} "$out/default.json" "$out/connected.json" "$out/executor.json" "$out/executor-full.json" "$out/executor-direct.json" "$out/linear.json"
         cp ${./validate-plugin.mjs} validate-plugin.mjs
         # Node needs fixture dependencies beside hosted artifacts. The runtime
         # check separately loads the original store package in real OpenCode.

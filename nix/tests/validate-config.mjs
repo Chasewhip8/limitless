@@ -88,6 +88,14 @@ const paseoWorkspaceTools = [
 	'capture_terminal',
 	'send_terminal_keys',
 ]
+// Optional Linear task board tools: Lead manages its cards; a Unit reports on one.
+const taskToolRoles = {
+	task_create: ['lead'],
+	task_list: ['lead'],
+	task_review: ['lead'],
+	task_report: ['unit'],
+	task_future: [],
+}
 const unitDeniedPaseoTools = [
 	'create_agent',
 	'create_workspace',
@@ -138,6 +146,9 @@ for (const file of files) {
 		expectEffect('t3-code-thread_delegate_task', '*', 'deny')
 		for (const action of primaryOnlyActions) {
 			expectEffect(action, '*', supportAgents.includes(name) ? 'deny' : 'allow')
+		}
+		for (const [action, roles] of Object.entries(taskToolRoles)) {
+			expectEffect(action, '*', roles.includes(name) ? 'allow' : 'deny')
 		}
 		for (const resource of [
 			'src/example.ts',

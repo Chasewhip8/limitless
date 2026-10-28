@@ -29,6 +29,11 @@
 			"action": "t3-code_*",
 			"resource": "*",
 			"effect": "deny"
+		},
+		{
+			"action": "task_*",
+			"resource": "*",
+			"effect": "deny"
 		}
 	],
 	"providers": {

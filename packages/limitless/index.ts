@@ -19,19 +19,40 @@ import {
 	normalizeGitHubPluginConfig,
 } from './tools/github/index'
 import { decodeLspConfig, lspTools } from './tools/lsp/index'
+import {
+	decodeTaskBoardConfig,
+	makeSessionReader,
+	openLinearBoard,
+	registerTaskBoardGuidance,
+	registerTaskBoardTools,
+	taskBoardTools,
+} from './tools/tasks/index'
 
 export const resolveGitHubConfig = normalizeGitHubPluginConfig
+
+// The task board is optional, so an invalid `linear` block disables only its
+// tools instead of failing the whole plugin.
+const resolveTaskBoardConfig = (options: unknown) =>
+	decodeTaskBoardConfig(options).pipe(
+		Effect.catch((error) =>
+			Effect.logError(
+				`[limitless] Linear task board configuration is invalid; task tools are disabled: ${error.message}`,
+			).pipe(Effect.as(undefined)),
+		),
+	)
 
 export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* (options: unknown) {
 	const githubConfig = yield* normalizeGitHubPluginConfig(options)
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
 	const lspConfig = yield* decodeLspConfig(options)
 	const providerPolicy = yield* normalizeProviderPolicyConfig(options)
+	const taskBoardConfig = yield* resolveTaskBoardConfig(options)
 	return {
 		githubConfig,
 		githubCloneRuntime,
 		lspConfig,
 		providerPolicy,
+		taskBoardConfig,
 	}
 })
 
@@ -97,12 +118,23 @@ export default Plugin.define({
 			configs.lspConfig,
 		)
 		const tools = limitlessTools(executeTool, configs.githubConfig, configs.githubCloneRuntime)
+		// Opt-in: without a valid `linear` block no task tool or guidance exists.
+		// Credentials and Linear are reached only when a task tool runs.
+		const taskTools =
+			configs.taskBoardConfig === undefined
+				? undefined
+				: taskBoardTools(executeTool, configs.taskBoardConfig, {
+						openBoard: openLinearBoard,
+						readSession: makeSessionReader(ctx.session),
+					})
 
 		yield* registerT3Policy(ctx)
 		yield* registerUnits(ctx)
 		yield* ctx.tool.transform((draft) => {
 			registerLimitlessTools(draft, tools)
+			if (taskTools !== undefined) registerTaskBoardTools(draft, taskTools)
 		})
+		if (taskTools !== undefined) yield* registerTaskBoardGuidance(ctx)
 		yield* ctx.provider.transform((providers) => {
 			applyProviderPolicy(providers, configs.providerPolicy)
 		})

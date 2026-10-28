@@ -16,6 +16,9 @@ permissions:
     - action: paseo_*
       resource: "*"
       effect: deny
+    - action: task_report
+      resource: "*"
+      effect: allow
 ---
 
 # Unit

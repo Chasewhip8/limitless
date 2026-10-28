@@ -64,6 +64,10 @@ let
     "lsp_symbols"
     "lsp_rename"
     "github_clone"
+    "task_create"
+    "task_list"
+    "task_review"
+    "task_report"
   ];
   rule = action: effect: {
     inherit action effect;
@@ -217,9 +221,11 @@ in
         {
           assertion = lib.all (
             name:
+            # `task` is reserved whole: the base policy denies `task_*` outside its roles.
             !lib.any (namespace: name == namespace || lib.hasPrefix "${namespace}_" name) [
               "browser"
               "opencode"
+              "task"
             ]
             && !lib.any (action: lib.hasPrefix "${name}_" action) reservedActions
           ) normalizedNames;

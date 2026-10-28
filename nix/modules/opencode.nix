@@ -44,6 +44,30 @@ let
     else
       cfg.opencode.package;
 
+  taskStatuses = [
+    "in_progress"
+    "in_review"
+    "done"
+    "canceled"
+  ];
+  linearId = lib.types.strMatching "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}";
+  linearStates = map (status: cfg.linear.states.${status}) taskStatuses;
+  # Only IDs and credential locations reach the plugin; token values stay at runtime.
+  linearOptions =
+    if cfg.linear.enable then
+      {
+        inherit (cfg.linear)
+          enable
+          teamId
+          projectId
+          states
+          tokenEnv
+          ;
+      }
+      // lib.optionalAttrs (cfg.linear.tokenFile != null) { inherit (cfg.linear) tokenFile; }
+    else
+      { enable = false; };
+
   pluginOptions = {
     github = {
       inherit (cfg.github)
@@ -54,6 +78,7 @@ let
         ;
     }
     // lib.optionalAttrs (cfg.github.tokenFile != null) { inherit (cfg.github) tokenFile; };
+    linear = linearOptions;
     lsp = cfg._generated.lsp;
     providers = { inherit (cfg.providers) disabled; };
   };
@@ -235,6 +260,39 @@ in
       };
     };
 
+    linear = {
+      enable = lib.mkEnableOption "the optional Linear task board for Lead and Unit assignments";
+      teamId = lib.mkOption {
+        type = lib.types.nullOr linearId;
+        default = null;
+        description = "UUID of the Linear team that owns task cards. Required when enabled.";
+      };
+      projectId = lib.mkOption {
+        type = lib.types.nullOr linearId;
+        default = null;
+        description = "UUID of the Linear project, associated with the team, that holds task cards. Required when enabled.";
+      };
+      states = lib.genAttrs taskStatuses (
+        status:
+        lib.mkOption {
+          type = lib.types.nullOr linearId;
+          default = null;
+          description = "UUID of the team's Linear workflow state for ${status} cards. Required when enabled.";
+        }
+      );
+      tokenEnv = lib.mkOption {
+        type = lib.types.strMatching "[A-Za-z_][A-Za-z0-9_]*";
+        default = "LINEAR_API_KEY";
+        description = "Environment variable holding the Linear API key when tokenFile is unset. The OpenCode service must inherit it.";
+      };
+      tokenFile = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "/.*");
+        default = null;
+        example = "/run/agenix/linear-api-key";
+        description = "Absolute runtime path of a file holding the Linear API key; overrides tokenEnv. Read when a task tool runs; its contents never enter generated configuration.";
+      };
+    };
+
     providers.disabled = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [
@@ -264,6 +322,24 @@ in
       {
         assertion = lib.attrByPath [ "agents" "limitless" "disabled" ] false cfg.opencode.settings != true;
         message = "programs.limitless keeps the limitless default agent enabled.";
+      }
+      {
+        assertion =
+          !cfg.linear.enable
+          || (cfg.linear.teamId != null && cfg.linear.projectId != null && !(lib.elem null linearStates));
+        message = "programs.limitless.linear requires teamId, projectId, and every states entry when enabled.";
+      }
+      {
+        assertion =
+          !cfg.linear.enable
+          || lib.elem null linearStates
+          || builtins.length (lib.unique (map lib.toLower linearStates)) == builtins.length linearStates;
+        message = "programs.limitless.linear.states must name a distinct workflow state for each status.";
+      }
+      {
+        assertion =
+          cfg.linear.tokenFile == null || !lib.hasPrefix "${builtins.storeDir}/" cfg.linear.tokenFile;
+        message = "programs.limitless.linear.tokenFile must be a runtime path outside the Nix store.";
       }
     ];
     home = {

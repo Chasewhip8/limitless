@@ -4,7 +4,7 @@ import { Agent } from '@opencode/schema/agent'
 import { AbsolutePath } from '@opencode/schema/schema'
 import { Session } from '@opencode/schema/session'
 import { Tool } from '@opencode/schema/tool'
-import { Effect, Schema } from 'effect'
+import { Effect, Option, Schema } from 'effect'
 
 const metadataKey = 'limitless.unit'
 const placementVersion = '2.1.4'
@@ -14,6 +14,23 @@ const Placement = Schema.Struct({
 	directory: Schema.String,
 	initializeModel: Schema.Boolean,
 })
+export type UnitPlacement = typeof Placement.Type
+
+type PlacedSession = {
+	readonly id: string
+	readonly location: { readonly directory: string }
+	readonly metadata?: Readonly<Record<string, unknown>> | undefined
+}
+
+/** A Unit's worktree placement, once the session has moved into it. */
+export function completedUnitPlacement(session: PlacedSession): Option.Option<UnitPlacement> {
+	return Schema.decodeUnknownOption(Placement)(session.metadata?.[metadataKey]).pipe(
+		Option.filter(
+			(placement) =>
+				placement.sessionID === session.id && placement.directory === session.location.directory,
+		),
+	)
+}
 
 // The native subagent schema remains the input boundary. The registry erases
 // its TypeScript input type when exposing an executable to other plugins.
@@ -82,12 +99,8 @@ export const registerUnits = Effect.fn('registerUnits')(function* (ctx: Plugin.C
 										}),
 								),
 							)
-						const placement = Schema.decodeUnknownOption(Placement)(child.metadata?.[metadataKey])
-						if (
-							placement._tag === 'None' ||
-							placement.value.sessionID !== child.id ||
-							placement.value.directory !== child.location.directory
-						)
+						const placement = completedUnitPlacement(child)
+						if (placement._tag === 'None')
 							return yield* new Tool.Error({
 								message: `Unit ${child.id} has no completed worktree placement. Inspect it before continuing.`,
 							})

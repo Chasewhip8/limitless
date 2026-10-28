@@ -19,6 +19,15 @@ permissions:
     - action: subagent
       resource: research
       effect: allow
+    - action: task_create
+      resource: "*"
+      effect: allow
+    - action: task_list
+      resource: "*"
+      effect: allow
+    - action: task_review
+      resource: "*"
+      effect: allow
 ---
 
 # Lead

@@ -37,7 +37,7 @@ let
       find "$out/node_modules/.bun" -type f -name '.bun-tag-*' -empty -delete
     '';
 
-    outputHash = "sha256-fyIz++RRhA0CdIzd7bJdId6361vhdGAjx1ADRpxsNlk=";
+    outputHash = "sha256-DmgpncWYtbTa2MQBOjFdelAvdHRiBxEWhJEFqs58Nlk=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };

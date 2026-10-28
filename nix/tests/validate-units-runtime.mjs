@@ -129,6 +129,11 @@ const provider = Bun.serve({
 		}
 		if (command?.kind === 'dispatch' && phase > 1 && command.answer)
 			delta = { content: command.answer }
+		if (command?.kind === 'call')
+			delta =
+				phase === 1
+					? toolCall(command.tool, command.input)
+					: { content: command.answer ?? `Called ${command.tool}` }
 		const chunk = (value, finish_reason = null) => ({
 			id: 'chatcmpl_fixture',
 			object: 'chat.completion.chunk',
@@ -188,12 +193,30 @@ const model = {
 	variants: [{ id: 'thorough', settings: { reasoningEffort: 'high' } }],
 }
 const rule = (action, effect, resource = '*') => ({ action, resource, effect })
+// The task board is enabled without credentials: its tools must load, reach
+// only their roles, and fail on use with a credential error, never at startup.
+const linear = {
+	enable: true,
+	teamId: '00000000-0000-4000-8000-00000000000a',
+	projectId: '00000000-0000-4000-8000-00000000000b',
+	states: {
+		in_progress: '00000000-0000-4000-8000-000000000001',
+		in_review: '00000000-0000-4000-8000-000000000002',
+		done: '00000000-0000-4000-8000-000000000003',
+		canceled: '00000000-0000-4000-8000-000000000004',
+	},
+}
 const config = {
 	default_agent: 'lead',
 	model: 'fixture/lead',
 	experimental: { subagent_depth: 3 },
-	permissions: [rule('*', 'allow')],
-	plugins: ['-opencode.browser', resolve(bundleDirectory), join(directory, 'identity')],
+	// Mirrors the packaged role policy for task board tools.
+	permissions: [rule('*', 'allow'), rule('task_*', 'deny')],
+	plugins: [
+		'-opencode.browser',
+		{ package: `file://${resolve(bundleDirectory)}`, options: { linear } },
+		join(directory, 'identity'),
+	],
 	providers: {
 		fixture: {
 			package: '@opencode/ai/providers/openai-compatible',
@@ -203,13 +226,22 @@ const config = {
 		},
 	},
 	agents: {
-		lead: { mode: 'primary', model: 'fixture/lead' },
+		lead: {
+			mode: 'primary',
+			model: 'fixture/lead',
+			permissions: [
+				rule('task_create', 'allow'),
+				rule('task_list', 'allow'),
+				rule('task_review', 'allow'),
+			],
+		},
 		unit: {
 			mode: 'subagent',
 			permissions: [
 				rule('subagent', 'deny'),
 				rule('subagent', 'allow', 'oracle-solve'),
 				rule('subagent', 'allow', 'research'),
+				rule('task_report', 'allow'),
 			],
 		},
 		'oracle-design': { mode: 'subagent', model: 'fixture/caller' },
@@ -372,6 +404,46 @@ async function verify() {
 	assert(!unitDelegation.includes('- oracle-design:'))
 	assert(!unitDelegation.includes('- unit:'))
 	check('unit-technical-support-catalog')
+
+	const toolNames = (entry) => entry.body.tools.map((tool) => tool.function.name)
+	const taskTools = (entry) => toolNames(entry).filter((name) => name.startsWith('task_'))
+	const board = await create()
+	await prompt(board.id, { kind: 'call', tag: 'board-list', tool: 'task_list', input: {} })
+	await api('POST', `/api/experimental/session/${board.id}/wait`)
+	const boardLead = requests.find(
+		(entry) => entry.sessionID === board.id && entry.kind === 'primary',
+	)
+	assert.deepEqual(taskTools(boardLead).sort(), ['task_create', 'task_list', 'task_review'])
+	assert(JSON.stringify(boardLead.body.messages).includes('## Linear task board'))
+	assert(JSON.stringify(await context(board.id)).includes('No Linear token is available'))
+	check('task-board-lead-tools-guidance-and-lazy-credentials')
+
+	await prompt(board.id, {
+		kind: 'dispatch',
+		tag: 'board-dispatch',
+		child: {
+			kind: 'call',
+			tag: 'board-report',
+			tool: 'task_report',
+			input: {
+				taskId: '10000000-0000-4000-8000-000000000000',
+				result: 'ready',
+				summary: 'Implemented and reviewed.',
+			},
+			answer: 'Board unit finished',
+		},
+	})
+	await waitNotice(board.id, 1)
+	const [boardUnit] = await children(board.id)
+	const boardUnitRequest = requests.find(
+		(entry) => entry.sessionID === boardUnit.id && entry.kind === 'primary',
+	)
+	assert.deepEqual(taskTools(boardUnitRequest), ['task_report'])
+	assert(JSON.stringify(boardUnitRequest.body.messages).includes('report on that card'))
+	// Identity checks run first, so a credential error shows the placed Unit
+	// and its parent Lead were accepted.
+	assert(JSON.stringify(await context(boardUnit.id)).includes('No Linear token is available'))
+	check('task-board-unit-identity-and-advisory-failure')
 
 	const subdirectory = await create([], join(project, 'sub'))
 	await prompt(subdirectory.id, {
@@ -550,7 +622,13 @@ async function verify() {
 		child: { kind: 'unit', tag: 'research-child' },
 	})
 	await waitNotice(ordinary.id, 1)
-	assert.equal((await children(ordinary.id))[0].location.directory, project)
+	const [researchChild] = await children(ordinary.id)
+	assert.equal(researchChild.location.directory, project)
+	const researchRequest = requests.find(
+		(entry) => entry.sessionID === researchChild.id && entry.kind === 'primary',
+	)
+	assert.deepEqual(taskTools(researchRequest), [])
+	assert(!JSON.stringify(researchRequest.body.messages).includes('## Linear task board'))
 	check('ordinary-subagents-unchanged')
 
 	const nativeProject = (await api('GET', '/api/project')).find(

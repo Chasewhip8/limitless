@@ -47,13 +47,15 @@ avoid conflicts with T3 Code's and Paseo's browser tools. Use either for browser
 - **Language servers:** TypeScript, Biome, JSON, YAML, Markdown, TOML, and Nix.
 - **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
 - **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
+- **Task board:** an optional [Linear board](#linear-task-board) with one card per
+  approved Unit assignment, behind four role-scoped tools.
 - **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
   MCP presets with account-specific connection names and audited reads for Research.
 - **Anthropic subscription authentication:** a pinned Claude Pro/Max plugin.
 - **Git hygiene:** `.limitless/` is globally ignored by default.
 
-The plugin exposes 13 core tools directly with `codemode = false`. MCP tools use
-OpenCode's native Code Mode. Every Limitless tool resolves the invoking session's
+The plugin exposes 13 core tools directly with `codemode = false`, plus four
+opt-in task board tools. MCP tools use OpenCode's native Code Mode. Every Limitless tool resolves the invoking session's
 `location.directory` as its project root.
 
 ## MCP connections
@@ -136,9 +138,13 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless`, `lead`, `unit` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection. `unit` can delegate only to Oracle Solve and Research; it has no T3 or Paseo tools |
+| `limitless`, `lead`, `unit` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection. `unit` can delegate only to Oracle Solve and Research; it has no T3 or Paseo tools. Only `lead` creates, lists, and reviews task cards, and only `unit` reports on one |
 | `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell/edit/AST; no T3 or Paseo tools; deny artifact creation and session changes |
 | `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell/edit/AST; no T3 or Paseo tools; deny external mutations, artifact creation and session changes |
+
+The base policy denies `task_*` to every agent before `lead` and `unit` add their
+task board exceptions, so no agent, including Oracles and Research, has the other
+roles' task tools. MCP connection names `task` and `task_*` are reserved.
 
 With Executor enabled, Research can use only `executor-read`; Executor's
 connection policy owns read-only enforcement. Direct MCPs are denied to Research,
@@ -371,7 +377,7 @@ nix/modules/
 └── mcp.nix        # named connections and permission generation
 nix/mcp-presets.nix # first-party endpoints and audited read-tool names
 opencode/          # native defaults, agents, and shared instructions
-packages/limitless/ # code-intelligence tools, artifacts, source research, policies
+packages/limitless/ # code-intelligence tools, artifacts, source research, task board, policies
 ```
 
 Native server settings go in `programs.limitless.opencode.settings`. Limitless
@@ -476,10 +482,12 @@ Explicitly requested model overrides are preserved. Other subagents keep their
 normal placement. Follow-ups pass the same `sessionID` to `subagent` and reuse the
 worktree. The depth limit is three for Lead → Unit → Oracle → Research.
 
-The brief and Unit's final response are ordinary prose. No Lead ID, report status,
-reporting tool, callback subscription, or ledger artifact is required. OpenCode's
-background job owns the return to the parent, including its durable completion
-record and managed-server restart recovery. The returned execution outcome is not an assertion
+The brief and Unit's final response are ordinary prose. Native execution needs no
+Lead ID, report status, reporting tool, callback subscription, or ledger artifact.
+OpenCode's background job owns the return to the parent, including its durable
+completion record and managed-server restart recovery. The optional
+[Linear task board](#linear-task-board) mirrors assignments for people; it does not
+replace that return. The returned execution outcome is not an assertion
 that the assignment is complete; Lead reads the answer and decides what follows.
 
 Native worktrees use the project's configured strategy, inventory, and startup
@@ -514,6 +522,99 @@ keeps the standard runtime and this known limitation rather than introducing a
 second reporting system. Native recovery does not guarantee exactly-once execution
 or external side effects; interrupted launches require inspecting the existing
 child before another dispatch.
+
+### Linear task board
+
+An optional Linear board shows one card per approved Unit assignment. Lead and
+Unit use four narrow tools, so no agent handles the Linear API. Dispatch,
+follow-ups, and returns stay native; the board is advisory and gates nothing.
+
+```text
+Lead  task_create ─────────────► In Progress ── taskId in the brief ──► Unit
+Unit  task_report ready|blocked ► In Review
+Lead  task_review accept ──────► Done
+      task_review continue ────► In Progress   (same Unit, same card)
+      task_review cancel ──────► Canceled
+```
+
+Enable it with existing Linear IDs:
+
+```nix
+programs.limitless.linear = {
+  enable = true;
+  teamId = "<team UUID>";
+  projectId = "<project UUID>";   # associated with the team
+  states = {
+    in_progress = "<started state UUID>";
+    in_review = "<started state UUID>";
+    done = "<completed state UUID>";
+    canceled = "<canceled state UUID>";
+  };
+  tokenFile = "/run/agenix/linear-api-key";   # optional
+};
+```
+
+Every ID is a UUID; look them up through Linear's GraphQL API (`teams`,
+`projects`, and `workflowStates`). The four states must be distinct workflow
+states of that team with the types shown. Before each write the tools confirm the
+states and the project's association with the team; they never create labels,
+states, or projects.
+
+Use a Linear personal API key with access to the team. The tools read
+`tokenFile` when set, and otherwise `tokenEnv` (default `LINEAR_API_KEY`) from the
+OpenCode service environment, only when a task tool runs. Nothing is read or
+contacted at startup or while the board is disabled, and the key never enters Nix
+expressions, generated files, or tool results. As with GitHub, a variable exported
+in a new terminal does not reach an already-running service. Requests go only to
+Linear's fixed API endpoint.
+
+Lead receives workflow guidance only when its task tools are available: create a
+card before dispatching an approved assignment, put the `taskId` in the brief,
+check `task_list`, continue the same card for corrections, and accept or cancel
+after review. A Unit with a `taskId` calls `task_report` before its final response,
+with `ready` only once the brief is implemented, validated, and reviewed, or
+`blocked` when it needs a Lead decision. Without the board, both work as before.
+
+- **Status** is the card's Linear workflow state. `blocked` marks an in-review
+  card that is waiting for a Lead decision. `continue` reopens an in-review or
+  done card, clears `blocked`, and marks the last report as superseded. Repeated
+  decisions are harmless; canceled cards stay canceled, and done cards reopen
+  only through `continue`. Reports on closed cards are refused; the Unit's native
+  response still reaches Lead. A card moved by hand to another state appears as
+  `unsupported` until it is moved back.
+- **Ownership** comes from OpenCode's session records, never from model input.
+  `task_list` shows only cards created by the calling Lead session, including
+  after that session moves. Only that session can review them. The first report
+  from a Unit placed in its worktree by that Lead claims the card; other Units
+  are refused.
+- **Storage** is the issue description: people's text (initially Lead's
+  assignment summary) followed by a **Limitless task board** section with the
+  latest report and review and one fenced JSON block. That block records the
+  owning Lead session, the claimed Unit's session, worktree, and directory, and
+  the latest report and review. Everyone with access to the team can read it,
+  so keep secrets out of summaries. Text outside the section is preserved, and
+  text that would read as a second metadata block is refused. The block is
+  cooperative state, not a security boundary: anyone who can edit the issue can
+  change it. Cards with missing, duplicate, or inconsistent metadata are
+  refused, and `task_list` reports them as unreadable.
+- **Failures** are returned to the calling agent with an allowlisted code; Linear's
+  own error details are discarded. Each request is attempted once with a
+  15-second limit. A write Linear may have applied, including one answered with
+  both a result and an error, reports an unknown outcome with its `taskId`; check
+  `task_list` before retrying. Cards get their IDs before creation, so a failed
+  confirmation never needs a blind re-create, and each new card is read back to
+  confirm Linear stored it as written. Listing stops with an error past 1,000
+  cards rather than truncating.
+
+Linear has no compare-and-set. One OpenCode process serializes its own writes to
+a card and verifies each by reading it back, but writes from another host or a
+person can still interleave; a detected interleaving is reported, not repaired.
+The board does not poll, use webhooks, launch or resume agents, or complete
+cards automatically, and it does not fix the lost-return limitation above: a card
+can sit in review while Lead never received the Unit's response, so check
+`task_list` after a restart or long silence. The repository tests use a stubbed
+Linear transport; verify create, report, list, and review once against your
+workspace after setup.
 
 ## Anthropic subscription authentication
 

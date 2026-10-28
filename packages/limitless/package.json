@@ -11,6 +11,7 @@
 	},
 	"dependencies": {
 		"@effect/platform-node": "4.0.1",
+		"@linear/sdk": "99.0.0",
 		"@opencode/client": "2.1.4",
 		"@opencode/plugin": "2.1.4",
 		"@opencode/schema": "2.1.4",
