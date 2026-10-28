@@ -81,7 +81,7 @@ async function fixture(agents: ReadonlyArray<Record<string, unknown>> = defaultA
 
 const defaultAgents = [
 	{ id: 'limitless', mode: 'primary', hidden: false },
-	{ id: 'unit', mode: 'primary', hidden: false },
+	{ id: 'custom', mode: 'primary', hidden: false },
 ]
 
 const creation = {
@@ -93,9 +93,9 @@ const creation = {
 
 test('session creation drops Paseo permission rules and keeps an explicit agent', async () => {
 	const { received, call } = await fixture()
-	const response = await call('POST', '/api/session', { ...creation, agent: 'unit' })
+	const response = await call('POST', '/api/session', { ...creation, agent: 'custom' })
 	expect(response.status).toBe(200)
-	const { permissions: _dropped, ...expected } = { ...creation, agent: 'unit' }
+	const { permissions: _dropped, ...expected } = { ...creation, agent: 'custom' }
 	expect(await echoed(response)).toEqual(expected)
 	expect(received.map((entry) => entry.url)).toEqual(['/api/session'])
 })
@@ -120,8 +120,8 @@ test('switching to build selects the default; other switches pass through', asyn
 	const { received, call } = await fixture()
 	const toBuild = await call('POST', '/api/session/ses_existing/agent', { agent: 'build' })
 	expect(await echoed(toBuild)).toEqual({ agent: 'limitless' })
-	const toUnit = await call('POST', '/api/session/ses_existing/agent', { agent: 'unit' })
-	expect(await echoed(toUnit)).toEqual({ agent: 'unit' })
+	const toCustom = await call('POST', '/api/session/ses_existing/agent', { agent: 'custom' })
+	expect(await echoed(toCustom)).toEqual({ agent: 'custom' })
 	expect(received.map((entry) => `${entry.method} ${entry.url}`)).toEqual([
 		'GET /api/session/ses_existing',
 		'GET /api/agent',

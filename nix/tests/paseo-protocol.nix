@@ -56,7 +56,7 @@ let
     };
     "${agent}/tools/paseo-tools.ts" = {
       sha256 = "4801b6d4f63793ceccceeca38edbde39d0d733e659c52a5045f4935b87a68760";
-      review = "the tool catalog: unit's allowlist and support agents' denial in opencode/agents";
+      review = "the tool catalog: excluded terminal tools in paseo/plugin.ts and support agents' denial in opencode/agents";
     };
     "packages/server/src/server/persisted-config.ts" = {
       sha256 = "8b05b353adcbe97ea2f7eb9d9621ae15a6b5f632e8d270385f907b0e97a669a5";

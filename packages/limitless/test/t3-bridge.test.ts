@@ -237,7 +237,7 @@ test('normal-mode agent selection restores the configured default and encodes lo
 			response.writeHead(204).end()
 		})()
 	})
-	for (const agent of ['build', 'plan', 'build', 'build', 'unit']) {
+	for (const agent of ['build', 'plan', 'build', 'build', 'custom']) {
 		const response = await fetch(`${bridge.url}/api/session/ses_test/agent`, {
 			method: 'POST',
 			headers: { authorization: frontAuth, 'content-type': 'application/json' },
@@ -245,7 +245,7 @@ test('normal-mode agent selection restores the configured default and encodes lo
 		})
 		expect(response.status).toBe(204)
 	}
-	expect(selections).toEqual([{ agent: 'plan' }, { agent: 'limitless' }, { agent: 'unit' }])
+	expect(selections).toEqual([{ agent: 'plan' }, { agent: 'limitless' }, { agent: 'custom' }])
 })
 
 test('caller-selected URL forms cannot redirect backend credentials to another origin', async () => {

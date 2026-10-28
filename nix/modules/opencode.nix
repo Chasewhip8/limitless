@@ -94,7 +94,7 @@ let
     };
     agents =
       (mergedConfig.agents or { })
-      // lib.genAttrs [ "limitless" "lead" "unit" "oracle-solve" "oracle-design" ] (
+      // lib.genAttrs [ "limitless" "oracle-solve" "oracle-design" ] (
         name:
         (mergedConfig.agents.${name} or { })
         // {

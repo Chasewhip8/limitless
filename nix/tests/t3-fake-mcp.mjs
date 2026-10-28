@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 export function createRuntimeFixture(bundleDirectory, catalogFile) {
 	const names = JSON.parse(readFileSync(catalogFile, 'utf8'))
 	assert.equal(names.length, 83, 'Review the runtime expectations when T3 changes its catalog')
-	const support = ['unit', 'research', 'oracle-solve', 'oracle-design']
+	const support = ['research', 'oracle-solve', 'oracle-design']
 	const prohibited = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
 	const sourceOwn = 't3-code-thread_with_underscores'
 	const sourceSibling = 't3-code-thread_with_underscores_child'

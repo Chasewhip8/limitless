@@ -9,7 +9,7 @@ export class T3PermissionError extends Schema.TaggedError<T3PermissionError>()(
 	},
 ) {}
 
-const supportAgents = new Set(['unit', 'research', 'oracle-solve', 'oracle-design'])
+const supportAgents = new Set(['research', 'oracle-solve', 'oracle-design'])
 export const isT3SupportAgent = (agent: string | undefined) =>
 	agent !== undefined && supportAgents.has(agent)
 const disabledTools = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']

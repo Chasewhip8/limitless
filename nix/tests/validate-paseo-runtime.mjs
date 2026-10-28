@@ -241,12 +241,6 @@ const configuration = {
 			model: 'fixture/fixture',
 			permissions: [],
 		},
-		unit: {
-			mode: 'subagent',
-			description: 'Fixture',
-			model: 'fixture/fixture',
-			permissions: [rule('paseo_*', 'deny')],
-		},
 		research: {
 			mode: 'subagent',
 			description: 'Fixture',
@@ -427,14 +421,6 @@ async function verify() {
 	assert.deepEqual(paseoTools(unbound), [])
 	assert.equal(guidanceCount(unbound), 0)
 	check('unbound-session')
-
-	const unit = await create(bridge.url, { agent: 'unit', permissions: [] })
-	assert.equal(unit.agent, 'unit')
-	bindings.set(unit.id, allTools)
-	const unitStep = await snapshot(unit.id, 'unit')
-	assert.deepEqual(paseoTools(unitStep), [])
-	assert.equal(guidanceCount(unitStep), 0)
-	check('unit-without-paseo-tools')
 
 	const limited = await create(bridge.url, { agent: 'build', permissions: [] })
 	bindings.set(limited.id, ['list_agents'])
