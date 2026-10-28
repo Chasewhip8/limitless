@@ -25,19 +25,19 @@
   versionCheckHook,
 }:
 let
-  version = "0.1.2";
+  version = "0.1.3";
   sources = {
     aarch64-linux = {
       arch = "arm64";
-      hash = "sha256-3xEuHxl3K0BVooyXsDLrbQONXXGCAV8cr9MlStb6vQ8=";
+      hash = "sha256-Vt+HzLN9RqD2U3Szh5mKCKpz8SP9jADBE5yLTHvUOdU=";
     };
     x86_64-linux = {
       arch = "x64";
-      hash = "sha256-eu1iXLlhk43xdMGgZ8DwUjU2CUC1PogqFkMSa3VNoWw=";
+      hash = "sha256-Y80PBUfu9iu07OJ/p3m7+eK6hTHMaFQlaLqeeIONxoQ=";
     };
   };
   source = sources.${stdenv.hostPlatform.system};
-  # T3 downloads chrome-headless-shell 154.0.8037.92 at runtime. Recheck its
+  # T3 downloads chrome-headless-shell 156.0.8078.70 at runtime. Recheck its
   # ELF dependencies and the browser smoke fixture whenever the T3 pin changes.
   browserLibraries = [
     alsa-lib

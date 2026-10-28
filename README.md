@@ -717,9 +717,10 @@ Only after confirming the record is stale and no T3 backend uses this home, move
 unrelated process or remove settings or databases. Timestamps are not used to
 bypass this guard because clock changes can make a live process look stale.
 
-Home Manager leaves an already-running T3 service on its old version. When idle,
-run `systemctl --user restart t3code` to apply changes. OpenCode configuration
-changes can still restart OpenCode during a switch. Do not use `t3 service install`
+With `systemd.user.startServices = true`, Home Manager automatically restarts T3
+when its package or service configuration changes during a switch. Active clients
+may briefly disconnect. OpenCode configuration changes can also restart OpenCode
+during a switch. Do not use `t3 service install`
 or `t3 service update` alongside Home Manager: they own the same unit. T3 requests
 OpenCode startup when both units are enabled, but stopping either does not stop
 the other. With external OpenCode supervision, ensure that service is available.

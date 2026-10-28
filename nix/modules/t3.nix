@@ -82,13 +82,15 @@ in
           message = "programs.limitless.t3 requires systemd.user.enable.";
         }
       ];
+      warnings = lib.optional (!config.systemd.user.startServices) ''
+        Limitless T3 service changes require systemd.user.startServices = true
+        for automatic application during Home Manager switches.
+      '';
       home.packages = [ t3.package ];
       systemd.user.services.t3code = {
         Unit = {
           Description = "T3 Code headless environment";
           StartLimitIntervalSec = 0;
-          # Rebuilds must not terminate conversations. Restart explicitly when idle.
-          X-SwitchMethod = "keep-old";
         }
         // lib.optionalAttrs managedOpenCode {
           Wants = [ "opencode.service" ];

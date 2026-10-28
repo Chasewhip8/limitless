@@ -722,7 +722,13 @@ in
         && t3Unit.Unit.After == [ "opencode.service" ]
         && !(t3Unit.Unit ? Requires)
         && !(t3Unit.Unit ? PartOf)
-        && t3Unit.Unit.X-SwitchMethod == "keep-old"
+        && !(t3Unit.Unit ? X-SwitchMethod)
+        && t3Standalone.config.warnings == [ ]
+        &&
+          builtins.length
+            (evaluateWith { t3.enable = true; } [
+              { systemd.user.startServices = false; }
+            ]).config.warnings == 1
         && t3Unit.Service.Type == "exec"
         && lib.hasInfix "--host 127.0.0.1 --port 3773 --base-dir /home/test/.t3" t3Unit.Service.ExecStart
         && builtins.elem "T3CODE_TAILSCALE_SERVE=false" t3Unit.Service.Environment
