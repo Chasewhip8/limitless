@@ -389,7 +389,9 @@ Home Manager and relaunch the TUI after changing these Nix settings.
 
 `skills.package` can supply your own skill directories; `skills.enable = false`
 disables installation. The default package copies a top-level `skills/` directory
-when present and is otherwise empty. OpenCode's built-in skills remain available.
+when present and is otherwise empty. `skills.extraDirectories` adds directories of
+`<name>/SKILL.md` skills beside the package; a skill name defined twice fails the
+build. OpenCode's built-in skills remain available.
 
 ## Agents and models
 

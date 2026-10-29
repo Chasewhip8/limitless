@@ -44,6 +44,31 @@ let
     else
       cfg.opencode.package;
 
+  # Interpolation copies path literals into the store so the build can read them.
+  extraSkillSources = map (directory: "${directory}") cfg.skills.extraDirectories;
+  skillsPackage =
+    if extraSkillSources == [ ] then
+      cfg.skills.package
+    else
+      pkgs.runCommand "limitless-skills-combined" { } ''
+        shopt -s nullglob
+        mkdir -p "$out"
+        for source in ${cfg.skills.package} ${lib.escapeShellArgs extraSkillSources}; do
+          if [ ! -d "$source" ]; then
+            echo "skill source is not a directory: $source" >&2
+            exit 1
+          fi
+          for skill in "$source"/*/; do
+            name=$(basename "$skill")
+            if [ -e "$out/$name" ]; then
+              echo "duplicate skill '$name' in $source" >&2
+              exit 1
+            fi
+            cp -r "''${skill%/}" "$out/$name"
+          done
+        done
+      '';
+
   pluginOptions = {
     github = {
       inherit (cfg.github)
@@ -160,6 +185,12 @@ in
         type = lib.types.package;
         default = self.packages.${system}.skills;
         description = "Package containing user-supplied skill directories.";
+      };
+      extraDirectories = lib.mkOption {
+        type = lib.types.listOf lib.types.path;
+        default = [ ];
+        example = lib.literalExpression "[ ./skills ]";
+        description = "Additional directories of skills, each holding <name>/SKILL.md, installed beside skills.package. Skill names must be unique across all sources.";
       };
     };
 
@@ -296,7 +327,7 @@ in
     }
     // lib.optionalAttrs cfg.skills.enable {
       "${opencodeDir}/skills" = {
-        source = cfg.skills.package;
+        source = skillsPackage;
         recursive = true;
       };
     }

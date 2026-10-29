@@ -223,6 +223,18 @@ let
     opencode.service.enable = true;
     skills.enable = false;
   };
+  installedSkills = home: home.config.xdg.configFile."opencode/skills".source;
+  # A literal path exercises the copy into the store that consumer paths need.
+  withExtraSkills = evaluate {
+    skills = {
+      package = pkgs.emptyDirectory;
+      extraDirectories = [
+        ../../skills
+        (pkgs.writeTextDir "extra-skill/SKILL.md" "extra")
+      ];
+    };
+  };
+  withDuplicateSkills = evaluate { skills.extraDirectories = [ ../../skills ]; };
   customXdg = evaluateWith { opencode.service.enable = pkgs.stdenv.hostPlatform.isLinux; } [
     { xdg.configHome = "/home/test/preferences"; }
   ];
@@ -498,6 +510,11 @@ in
         mkdir -p "$out"
         test -f ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}/pull-request/SKILL.md
         test -f ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}/repository-setup/SKILL.md
+        test ${installedSkills defaults} = ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}
+        test -f ${installedSkills withExtraSkills}/pull-request/SKILL.md
+        test -f ${installedSkills withExtraSkills}/repository-setup/SKILL.md
+        test "$(cat ${installedSkills withExtraSkills}/extra-skill/SKILL.md)" = extra
+        grep -q "duplicate skill 'pull-request'" ${pkgs.testers.testBuildFailure (installedSkills withDuplicateSkills)}/testBuildFailure.log
         cp ${pkgs.writeText "default-opencode.json" (opencodeJson defaults)} "$out/default.json"
         cp ${pkgs.writeText "connected-opencode.json" (opencodeJson connected)} "$out/connected.json"
         cp ${pkgs.writeText "executor-opencode.json" (opencodeJson executorHome)} "$out/executor.json"
