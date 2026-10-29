@@ -1,8 +1,8 @@
 import path from 'node:path'
 
-export const LIMITLESS_STORAGE_DIRECTORY = '.limitless'
-export const ARTIFACTS_STORAGE_DIRECTORY = 'artifacts'
-export const MANAGED_REPOS_STORAGE_DIRECTORY = 'repos'
+const LIMITLESS_STORAGE_DIRECTORY = '.limitless'
+const ARTIFACTS_STORAGE_DIRECTORY = 'artifacts'
+const MANAGED_REPOS_STORAGE_DIRECTORY = 'repos'
 
 export const ARTIFACTS_STORAGE_RELATIVE_PATH = path.posix.join(
 	LIMITLESS_STORAGE_DIRECTORY,

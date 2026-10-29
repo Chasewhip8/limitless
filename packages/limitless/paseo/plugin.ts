@@ -25,9 +25,8 @@ import {
 const toolPrefix = 'paseo_'
 
 /**
- * Paseo tools this plugin never provides, whatever Paseo offers. Agents run
- * commands and background processes with OpenCode's own shell instead of
- * Paseo's terminals.
+ * Commands and background processes must stay owned by OpenCode's shell,
+ * not a second terminal lifecycle in Paseo.
  */
 const excludedTools: ReadonlySet<string> = new Set([
 	'list_terminals',
@@ -47,13 +46,12 @@ const loadGuidance = Effect.tryPromise({
 	catch: () => new PaseoGuidanceError({ message: 'Unable to read the packaged Paseo guidance' }),
 })
 
-/** Where a session stands with Paseo; `Unavailable` means Paseo could not say. */
+/** Lookup failure is Unavailable, not evidence that a binding has closed. */
 type Resolution = SessionBinding | { readonly _tag: 'Unavailable' }
 
 /**
- * Paseo agents run in OpenCode sessions the shared service also uses for TUI
- * and T3 work. A session's binding decides whether it sees Paseo tools: only
- * the session Paseo bound, or a native child of one, may use them.
+ * Shared-service TUI/T3 sessions must not inherit Paseo tools; only a bound
+ * session or its native children may use them.
  */
 const resolveBinding = (
 	session: Plugin.Context['session'],
@@ -73,10 +71,17 @@ const resolveBinding = (
 		return { _tag: 'Unbound' } as Resolution
 	}).pipe(Effect.catch(() => Effect.succeed<Resolution>({ _tag: 'Unavailable' })))
 
-/** Paseo's image results become data-URI files, as its own OpenCode plugin delivers them. */
+/** Match Paseo's OpenCode plugin's image convention. */
 function toContent(part: ToolResponse['content'][number]): Tool.Content {
-	if (part.type === 'text' && 'text' in part) return { type: 'text', text: part.text }
-	if (part.type === 'image' && 'data' in part)
+	if (part.type === 'text' && 'text' in part && typeof part.text === 'string')
+		return { type: 'text', text: part.text }
+	if (
+		part.type === 'image' &&
+		'data' in part &&
+		typeof part.data === 'string' &&
+		'mimeType' in part &&
+		typeof part.mimeType === 'string'
+	)
 		return { type: 'file', uri: `data:${part.mimeType};base64,${part.data}`, mime: part.mimeType }
 	return { type: 'text', text: JSON.stringify(part) }
 }
@@ -100,22 +105,15 @@ export function restoreServiceEnvironment(
 	}
 }
 
-/**
- * An execution seen bound to a Paseo agent: the registration token that bound
- * it, and when the session last went idle before it, which identifies the
- * execution.
- */
 interface BoundExecution {
 	readonly token: string
 	readonly lastIdle: number | undefined
 }
 
 /**
- * OpenCode evaluates this plugin separately per Location and a session can move
- * between them mid-run, so the records are process-wide. A record is acted on
- * only while the session's idle time still matches it; OpenCode's event stream
- * is volatile and cannot tell executions apart. A record is replaced at its
- * session's next bound step and removed at its next unbound one.
+ * Sessions can move between per-Location plugin instances mid-run, so ownership
+ * is process-wide. The daemon token and last idle time identify an execution;
+ * volatile OpenCode events cannot distinguish one execution from the next.
  */
 export const boundExecutionsKey: unique symbol = Symbol.for('limitless.paseo.bound-executions.v2')
 const processState: typeof globalThis & {
@@ -141,7 +139,6 @@ export default Plugin.define({
 			Effect.sync(() => restoreServiceEnvironment(input)),
 		)
 
-		// The plugin stays inert, with no Paseo tools, until a launcher registers Paseo.
 		const path = yield* registrationPath().pipe(
 			Effect.tapError(({ message }) => Effect.logError(`[paseo] ${message}`)),
 			Effect.option,
@@ -202,10 +199,7 @@ export default Plugin.define({
 				if (!excludedTools.has(tool.name)) editor.add(paseoTool(tool))
 		})
 
-		// A launcher replaces the registration when Paseo starts or restarts.
-		// Watching it updates every Location promptly, including one a running
-		// session moves into; checking again before a prompt is admitted
-		// guarantees a new agent's first step sees the current tools.
+		// Watchers cover active and moved sessions; the prompt check covers a new agent's first step.
 		const refreshing = Semaphore.makeUnsafe(1)
 		const refresh = refreshing.withPermit(
 			Effect.gen(function* () {
@@ -235,11 +229,8 @@ export default Plugin.define({
 		yield* ctx.session.hook('prompt', () => refresh)
 
 		/**
-		 * Keeps Paseo tools to the sessions Paseo drives, and each to the tools
-		 * its agent may use. Paseo stops an agent by closing its session's
-		 * binding and relies on the agent's OpenCode server exiting; the shared
-		 * service keeps running, so an execution whose binding the same Paseo
-		 * daemon closes is interrupted at its next step instead.
+		 * Paseo normally stops an agent by closing its binding and exiting its server.
+		 * The shared server outlives it, so binding closure must interrupt that execution instead.
 		 */
 		const scope = (input: SessionContext, agentStep: boolean) =>
 			Effect.gen(function* () {
@@ -274,7 +265,6 @@ export default Plugin.define({
 				)
 					return
 				boundExecutions.delete(input.sessionID)
-				// The same execution only if the session has not gone idle since.
 				const idle = yield* lastIdle(ctx.session, input.sessionID).pipe(Effect.option)
 				if (idle._tag === 'Some' && idle.value === record.lastIdle) {
 					yield* Effect.logInfo(`[paseo] interrupting ${input.sessionID}: Paseo closed its agent`)

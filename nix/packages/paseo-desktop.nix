@@ -7,7 +7,6 @@
 }:
 let
   pname = "paseo-desktop";
-  # The desktop and the daemon come from the same Paseo release.
   inherit (paseo) version;
   src = fetchurl {
     name = "paseo-desktop-${version}-x86_64.AppImage";

@@ -7,7 +7,6 @@ import { objectProperty } from '../../lib/guards'
 import { optionalField } from '../../lib/type-utils'
 import { CloneFailure, cloneFailure } from './errors'
 import { git } from './git'
-import { cleanRemoteUrl } from './repository'
 import type { GitRuntime } from './runtime'
 
 function filesystemFailure(action: string, error: unknown) {
@@ -153,7 +152,3 @@ export const assertClean = Effect.fn('assertClean')(function* (
 			'Managed checkout has tracked, untracked, or submodule changes; refusing to update it.',
 		)
 })
-
-export function expectedRemote(repo: string): string {
-	return cleanRemoteUrl(repo)
-}

@@ -6,9 +6,7 @@ import { hasT3Permissions, isT3SupportAgent } from './permissions'
 import { makeT3SessionPolicy, resolveSessionAgent, T3PolicyLocationError } from './session-policy'
 
 type ServerEvent = Stream.Success<ReturnType<Plugin.Context['event']['subscribe']>>
-// Both events carry a session's stored permissions: creation (including the
-// inherited rules of a native child) and every later replacement, such as T3
-// writing its mode's rules before a turn.
+// Native children inherit permissions at creation, before any later replacement event.
 type PermissionEvent = Extract<ServerEvent, { type: 'session.created' | 'session.permissions' }>
 const isPermissionEvent = (event: ServerEvent): event is PermissionEvent =>
 	event.type === 'session.created' || event.type === 'session.permissions'
@@ -22,7 +20,6 @@ export const registerT3Policy = Effect.fn('registerT3Policy')(function* (context
 	const guidance = yield* loadT3Guidance().pipe(Effect.orDie)
 	const policy = makeT3SessionPolicy(context)
 
-	// Repair T3's permission writes as soon as OpenCode records them.
 	yield* context.event.subscribe().pipe(
 		Stream.filter(isPermissionEvent),
 		Stream.runForEach((event) => {
@@ -47,7 +44,6 @@ export const registerT3Policy = Effect.fn('registerT3Policy')(function* (context
 		}),
 		Effect.forkScoped({ startImmediately: true }),
 	)
-	// Every prompt, including a native child's first, runs under repaired rules.
 	yield* context.session.hook('prompt', (event) =>
 		policy.reconcile(event.sessionID).pipe(Effect.orDie),
 	)

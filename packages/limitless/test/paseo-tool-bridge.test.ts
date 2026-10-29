@@ -96,6 +96,7 @@ test('executes a tool with raw arguments and reports Paseo’s validation issues
 				content: [
 					{ type: 'text', text: 'created' },
 					{ type: 'image', data: 'aGk=', mimeType: 'image/png' },
+					{ type: 'resource_link', uri: 'https://example.test/document', name: 'Document' },
 				],
 				structuredContent: { agentId: 'a2' },
 			})
@@ -108,6 +109,7 @@ test('executes a tool with raw arguments and reports Paseo’s validation issues
 		content: [
 			{ type: 'text', text: 'created' },
 			{ type: 'image', data: 'aGk=', mimeType: 'image/png' },
+			{ type: 'resource_link', uri: 'https://example.test/document', name: 'Document' },
 		],
 	})
 	const exit = await Effect.runPromiseExit(executeTool(bridge, 'ses_bound', 'create_agent', {}))

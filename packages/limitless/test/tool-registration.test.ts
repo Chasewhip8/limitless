@@ -4,6 +4,23 @@ import { limitlessTools, registerLimitlessTools, resolvePluginConfigs } from '..
 import { testToolExecution, testToolExecutor } from './execution'
 
 describe('OpenCode 2 tool registrations', () => {
+	test('disabled GitHub support exposes no clone tool even with repository access configured', async () => {
+		const configs = await Effect.runPromise(
+			resolvePluginConfigs({
+				github: { enable: false, allowedRepos: ['owner/repo'], allowUnrestrictedRepos: true },
+			}),
+		)
+		const tools = limitlessTools(
+			testToolExecutor(testToolExecution('/project')),
+			configs.githubConfig,
+			configs.githubCloneRuntime,
+		)
+		const registered: Array<string> = []
+		registerLimitlessTools({ add: (tool) => registered.push(tool.name) }, tools)
+		expect(Object.keys(tools).sort()).toEqual(['artifact_create', 'artifact_list'])
+		expect(registered.sort()).toEqual(['artifact_create', 'artifact_list'])
+	})
+
 	test.each([
 		'draft-07',
 		'draft-2020-12',

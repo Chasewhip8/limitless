@@ -7,7 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": true,
-		"includes": ["**", "!!**/dist", "!!**/.sisyphus", "!!**/coverage"]
+		"includes": ["**", "!!**/dist", "!!**/coverage"]
 	},
 	"formatter": {
 		"enabled": true,

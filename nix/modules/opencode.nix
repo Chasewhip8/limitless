@@ -9,7 +9,7 @@ let
   cfg = config.programs.limitless;
   jsonFormat = pkgs.formats.json { };
   inherit (pkgs.stdenv.hostPlatform) system;
-  opencodeDir = ".config/opencode";
+  opencodeDir = "opencode";
   permissionRule = action: resource: effect: { inherit action resource effect; };
 
   wrapperArgs =
@@ -82,11 +82,17 @@ let
       package = "file://${cfg.plugins.limitless.package}/paseo";
     };
 
+  managedPermissions = [
+    (permissionRule "edit" ".limitless/repos" "deny")
+    (permissionRule "edit" ".limitless/repos/**" "deny")
+    (permissionRule "t3-code-*" "*" "deny")
+    (permissionRule "t3-code_*" "*" "deny")
+  ];
   baseConfig = builtins.fromJSON (builtins.readFile "${self}/opencode/opencode.json");
   mergedConfig = lib.recursiveUpdate baseConfig cfg.opencode.settings;
   opencodeConfig = mergedConfig // {
     default_agent = "limitless";
-    permissions = cfg.opencode.permissions ++ baseConfig.permissions;
+    permissions = baseConfig.permissions ++ cfg.opencode.permissions ++ managedPermissions;
     plugins = (cfg.opencode.settings.plugins or [ ]) ++ managedPlugins;
     mcp = (mergedConfig.mcp or { }) // {
       servers = cfg._generated.mcpServers;
@@ -125,7 +131,7 @@ in
       settings = lib.mkOption {
         type = lib.types.attrsOf jsonFormat.type;
         default = { };
-        description = "Native OpenCode V2 settings. Limitless enforces its default agent, managed plugins, and permission rules.";
+        description = "Native OpenCode V2 settings. Limitless enforces its default agent, managed plugins, and permission rules. Configure ordered permissions through opencode.permissions instead of settings.permissions.";
       };
       cliSettings = lib.mkOption {
         type = lib.types.attrsOf jsonFormat.type;
@@ -148,7 +154,7 @@ in
         default = [
           (permissionRule "*" "*" "allow")
         ];
-        description = "Ordered native permissions. Defaults to automatic approval for all tools. Managed-repository edit denials are appended; Research receives read-only MCP rules, while primary agents and Oracles retain read/write MCP access.";
+        description = "Ordered native permissions after the default edit allowance. Defaults to automatic approval for all tools. Managed-repository edit and T3 namespace denials are appended; Research receives read-only MCP rules, while primary agents and Oracles retain read/write MCP access.";
       };
     };
 
@@ -272,41 +278,41 @@ in
       ]
       ++ lib.optional cfg.paseo.enable paseoLauncher;
       shellAliases.oc = "opencode";
-      file = {
-        "${opencodeDir}/opencode.json".text = builtins.toJSON opencodeConfig;
-        "${opencodeDir}/AGENTS.md".text =
-          builtins.readFile "${self}/opencode/AGENTS.md"
-          + lib.optionalString (cfg.opencode.extraAgentsFile != null) (
-            "\n\n" + builtins.readFile cfg.opencode.extraAgentsFile
-          )
-          + lib.optionalString cfg.mcp.executor.enable ''
+    };
+    xdg.configFile = {
+      "${opencodeDir}/opencode.json".text = builtins.toJSON opencodeConfig;
+      "${opencodeDir}/AGENTS.md".text =
+        builtins.readFile "${self}/opencode/AGENTS.md"
+        + lib.optionalString (cfg.opencode.extraAgentsFile != null) (
+          "\n\n" + builtins.readFile cfg.opencode.extraAgentsFile
+        )
+        + lib.optionalString cfg.mcp.executor.enable ''
 
 
-            ## Executor
+          ## Executor
 
-            Read the relevant Executor skills and discover exact tool signatures before calling an app.
-            Check the selected account; work and personal connections are separate identities.
-            Executor approvals do not replace the user's authorization requirements.
-            A connection failure or lost execution does not prove that its writes failed.
-            After an interrupted or lost call, inspect current state before retrying a mutation;
-            never automatically replay an execute program whose effects are uncertain.
-          '';
-        "${opencodeDir}/agents" = {
-          source = cfg.agents.package;
-          recursive = true;
-        };
-      }
-      // lib.optionalAttrs cfg.skills.enable {
-        "${opencodeDir}/skills" = {
-          source = cfg.skills.package;
-          recursive = true;
-        };
-      }
-      # The TUI discovers TUI-only plugin directories here; the server skips them for lacking a server entrypoint.
-      // lib.optionalAttrs cfg.plugins.limitless.cacheStatus.enable {
-        "${opencodeDir}/plugins/limitless-cache-status".source =
-          "${cfg.plugins.limitless.package}/cache-status";
+          Read the relevant Executor skills and discover exact tool signatures before calling an app.
+          Check the selected account; work and personal connections are separate identities.
+          Executor approvals do not replace the user's authorization requirements.
+          A connection failure or lost execution does not prove that its writes failed.
+          After an interrupted or lost call, inspect current state before retrying a mutation;
+          never automatically replay an execute program whose effects are uncertain.
+        '';
+      "${opencodeDir}/agents" = {
+        source = cfg.agents.package;
+        recursive = true;
       };
+    }
+    // lib.optionalAttrs cfg.skills.enable {
+      "${opencodeDir}/skills" = {
+        source = cfg.skills.package;
+        recursive = true;
+      };
+    }
+    # The TUI discovers TUI-only plugin directories here; the server skips them for lacking a server entrypoint.
+    // lib.optionalAttrs cfg.plugins.limitless.cacheStatus.enable {
+      "${opencodeDir}/plugins/limitless-cache-status".source =
+        "${cfg.plugins.limitless.package}/cache-status";
     };
   };
 }

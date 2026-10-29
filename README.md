@@ -47,8 +47,9 @@ avoid conflicts with T3 Code's and Paseo's browser tools. Use either for browser
 - **Anthropic subscription authentication:** a pinned Claude Pro/Max plugin.
 - **Git hygiene:** `.limitless/` is globally ignored by default.
 
-The plugin exposes three core tools directly with `codemode = false`: `artifact_create`,
-`artifact_list`, and `github_clone`. MCP tools use
+The plugin exposes `artifact_create` and `artifact_list` directly with `codemode = false`.
+Enabling `github.enable` adds `github_clone`; disabling it removes that tool even
+when repository access remains configured. MCP tools use
 OpenCode's native Code Mode. Every Limitless tool resolves the invoking session's
 `location.directory` as its project root.
 
@@ -133,8 +134,8 @@ Tool access follows the agent's role:
 | Agents | Access |
 | --- | --- |
 | `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection |
-| `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell/edit/AST; no T3 or Paseo tools; deny artifact creation and session changes |
-| `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell/edit/AST; no T3 or Paseo tools; deny external mutations, artifact creation and session changes |
+| `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell and edits; no T3 or Paseo tools; deny artifact creation and session changes |
+| `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell and edits; no T3 or Paseo tools; deny external mutations, artifact creation and session changes |
 
 With Executor enabled, Research can use only `executor-read`; Executor's
 connection policy owns read-only enforcement. Direct MCPs are denied to Research,
@@ -373,6 +374,10 @@ Native server settings go in `programs.limitless.opencode.settings`. Limitless
 enforces the default agent, managed plugins, ordered permissions, generated MCP
 policies, and the managed-checkout edit denial. Managed plugin directives disable
 `opencode.browser` independently of agent and session permissions.
+Set ordered rules through `opencode.permissions`, not `opencode.settings.permissions`.
+Caller rules override the default edit allowance; managed-checkout edit and T3
+namespace denials remain last. Managed configuration, instructions, agents, skills,
+and TUI plugins are installed under `$XDG_CONFIG_HOME/opencode` (normally `~/.config/opencode`).
 `opencode.extraAgentsFile` appends additional instructions.
 `opencode.disableClaudeCode = true` wraps the executable with
 `OPENCODE_DISABLE_CLAUDE_CODE=1`.
@@ -421,7 +426,7 @@ All agents account for shared files, services, and test resources and preserve
 concurrent work. Diagnostic scope and implementation ownership are instruction-level
 policies; edit permissions cannot distinguish those purposes.
 
-Astra, Sol 6.1, and their Fast modes use conservative client budgets of 872,000
+Astra and its Fast mode use conservative client budgets of 872,000
 context tokens and 828,400 input tokens, overriding OpenCode's 400K subscription
 default. These derive from the
 [Codex catalog's override ceiling](https://github.com/openai/codex/blob/5937592c07e7321f6b0469ef34dd58a03c39a84c/codex-rs/models-manager/models.json)
@@ -518,7 +523,7 @@ normal writes below `.limitless/repos/`; shell access is not sandboxed. Set
 a manifest recording its slug, optional title, timestamp, and creating session.
 Use normal file tools to add notes, source, assets, or generated outputs.
 `artifact_list` reports valid artifacts and folders with invalid/missing manifests.
-Explicit duplicate slugs fail; generated slugs include a random suffix. Failed
+Explicit duplicate slugs fail; generated slugs include a random component. Failed
 creation cleans up only its own incomplete manifest and empty folder.
 
 ## Native service and Tailscale
@@ -641,8 +646,9 @@ ordinary OpenCode configuration. Add remote servers through Desktop's pairing UI
 T3 and Paseo desktop installation likewise does not configure their local backend
 settings. Follow the sections below when attaching them to managed Linux services.
 Their Linux packages ship with matching server versions; independently updated
-clients need compatible protocols and feature support. After upgrades, restart
-the T3 and Paseo services when idle: their `keep-old` policy preserves running work.
+clients need compatible protocols and feature support. Home Manager restarts T3
+on changed units when service switching is enabled. Paseo keeps the old daemon
+running until you restart it when idle.
 
 ## T3 Code
 
@@ -788,7 +794,7 @@ independent T3 OAuth connections. Underscore-containing thread namespaces, such 
 a fork's `<thread>_fork`, receive stable `t3-code-<32 hex>` aliases so
 prefix-related names cannot grant sibling tools.
 
-This adapter targets OpenCode `2.1.4` and upstream stable T3 `0.1.2` on both
+This adapter targets OpenCode `2.1.4` and upstream stable T3 `0.1.3` on both
 x86_64 and ARM Linux. T3 uses the configured default OpenCode agent; this release
 does not include the per-thread agent picker proposed in
 [pingdotgg/t3code#21532](https://github.com/pingdotgg/t3code/pull/21532).
@@ -831,7 +837,7 @@ including a password hash from `paseo daemon set-password`:
 
 Like T3's provisioning, the merge refuses to run while another daemon holds
 `paseo.pid` in that home, ignoring a lock left by an earlier boot as Paseo does, and
-refuses symlinked or malformed files. Limitless does not publish the port itself;
+refuses symlinked or malformed configuration files. Limitless does not publish the port itself;
 configure a private HTTPS proxy as described below. Set a password before exposing
 the daemon API. Rebuilds keep the old daemon running; restart
 it with `systemctl --user restart paseo` when idle.
@@ -1021,7 +1027,8 @@ breakpoints) and 30 minutes for `openai` (GPT-5.6 and later guarantee at least
 TUI, and providers can evict early.
 
 The plugin is TUI-only and ships as Solid source that OpenCode compiles at load.
-Home Manager links it into `~/.config/opencode/plugins/limitless-cache-status`.
+Home Manager links it into `$XDG_CONFIG_HOME/opencode/plugins/limitless-cache-status`
+(normally `~/.config/opencode/plugins/limitless-cache-status`).
 Disable it with `programs.limitless.plugins.limitless.cacheStatus.enable = false`.
 
 ## Migration from the previous Limitless layout
@@ -1061,6 +1068,7 @@ and state backup; never run V1 and V2 against the same writable state directory.
 
 ## Development
 
+See [AGENTS.md](AGENTS.md) for repository-local architecture, code style, and review guidance.
 Use `nix develop`, then `bun install --frozen-lockfile` and `bun run ci`. The gate
 runs formatting/lint checks, TypeScript, tests, module checks, and all five package
 builds. The suite covers Limitless-owned behavior: tool safety and lifecycle,
@@ -1082,7 +1090,7 @@ rendering, using temporary profiles and no live T3 state or external websites.
 
 Runtime, Limitless plugin SDK, and schema are pinned to `2.1.4`, with
 `effect@4.0.1`; update them together. Hosted plugins use OpenCode's shared Effect
-and plugin runtime; the standalone T3 bridge bundles its own dependencies.
+and plugin runtime; the standalone T3 and Paseo bridges bundle their own dependencies.
 The cache-status plugin's type-only dev dependencies (`@opencode/theme`,
 `@opentui/*`, `solid-js`) follow the same OpenCode release. Re-audit native
 capabilities and MCP read exceptions when upgrading. Vendor references for the

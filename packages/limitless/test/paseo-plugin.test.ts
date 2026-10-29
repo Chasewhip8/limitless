@@ -1,12 +1,9 @@
-import { mkdir, mkdtemp, rename, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DateTime, Effect, Exit, Scope } from 'effect'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import plugin, { boundExecutionsKey, restoreServiceEnvironment } from '../paseo/plugin'
-
-// The real `paseo` plugin against a minimal host: per-Location hook and tool
-// registries, sessions' idle times, and a fake Paseo tool bridge behind fetch.
 
 type Hook = (input: unknown) => Effect.Effect<void>
 type Tool = { name: string }
@@ -20,7 +17,6 @@ let runtime: string
 const scopes: Scope.Closeable[] = []
 const bindings = new Map<string, string[]>()
 const parents = new Map<string, string>()
-/** When each session last went idle, as OpenCode records it. */
 const idles = new Map<string, number>()
 
 beforeEach(async () => {
@@ -36,17 +32,15 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-	for (const scope of scopes.splice(0))
-		await Effect.runPromise(Scope.close(scope, Exit.void))
-		// The plugin's execution records are process-wide by design.
-	;(globalThis as unknown as Record<symbol, Map<string, unknown> | undefined>)[
-		boundExecutionsKey
-	]?.clear()
+	for (const scope of scopes.splice(0)) await Effect.runPromise(Scope.close(scope, Exit.void))
+	const state = globalThis as unknown as Record<symbol, Map<string, unknown> | undefined>
+	state[boundExecutionsKey]?.clear()
 	bindings.clear()
 	parents.clear()
 	idles.clear()
 	vi.unstubAllEnvs()
 	vi.unstubAllGlobals()
+	await rm(runtime, { recursive: true, force: true })
 })
 
 async function register(token: string, tools = ['list_agents', 'create_agent']) {
@@ -73,7 +67,6 @@ async function until(condition: () => boolean, what: string) {
 		if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`)
 }
 
-/** One Location's instance of the plugin. */
 async function location() {
 	const hooks = new Map<string, Hook>()
 	const tools: Record<string, Tool> = {}

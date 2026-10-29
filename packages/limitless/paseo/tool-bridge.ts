@@ -1,13 +1,10 @@
 import { Effect, Schema } from 'effect'
 
 /**
- * A client for the Paseo daemon's tool bridge (`/_internal/opencode`), which
- * serves Paseo's tools to the OpenCode servers Paseo launches. Paseo's own
- * OpenCode plugin speaks the same unversioned protocol; the paseo-protocol
- * check pins the upstream source it was written against.
+ * Paseo's `/_internal/opencode` protocol is unversioned; the paseo-protocol
+ * check pins the upstream implementation this client must match.
  */
 
-/** Where a Paseo daemon's tool bridge listens, and the token it requires. */
 export interface ToolBridge {
 	readonly baseUrl: string
 	readonly token: string
@@ -23,7 +20,6 @@ export type PaseoTool = typeof PaseoTool.Type
 
 export class ToolBridgeError extends Schema.TaggedError<ToolBridgeError>()('ToolBridgeError', {
 	message: Schema.String,
-	/** The HTTP status the tool bridge answered with, when it answered at all. */
 	status: Schema.optional(Schema.Number),
 }) {}
 
@@ -46,7 +42,6 @@ const prefix = '/_internal/opencode'
 
 /** Lookups run before every step of a Paseo session, so a stalled daemon must not stall OpenCode. */
 const lookupTimeout = 1500
-/** Paseo's tools return once started; they do not wait for the work they start. */
 const executionTimeout = 120_000
 
 const request = (bridge: ToolBridge, pathname: string, timeout: number, body?: unknown) =>
@@ -80,21 +75,18 @@ const Failure = Schema.Struct({
 	details: Schema.optional(Schema.Unknown),
 })
 
-/** Paseo's error text, including schema issues, as its own plugin reports it. */
 const failure = (response: Response) =>
-	readJson(response).pipe(
-		Effect.orElseSucceed(() => undefined),
-		Effect.flatMap((payload) => {
-			const decoded = Schema.decodeUnknownOption(Failure)(payload)
-			const error = decoded._tag === 'Some' ? decoded.value : {}
-			const detail = describeIssues(error.issues ?? error.details)
-			const message = error.error || `Paseo tool bridge returned HTTP ${response.status}`
-			return new ToolBridgeError({
-				message: detail ? `${message}: ${detail}` : message,
-				status: response.status,
-			})
-		}),
-	)
+	Effect.gen(function* () {
+		const payload = yield* readJson(response).pipe(Effect.orElseSucceed(() => undefined))
+		const decoded = Schema.decodeUnknownOption(Failure)(payload)
+		const error = decoded._tag === 'Some' ? decoded.value : {}
+		const detail = describeIssues(error.issues ?? error.details)
+		const message = error.error || `Paseo tool bridge returned HTTP ${response.status}`
+		return yield* ToolBridgeError.make({
+			message: detail ? `${message}: ${detail}` : message,
+			status: response.status,
+		})
+	})
 
 function describeIssues(details: unknown): string {
 	if (typeof details === 'string') return details
@@ -119,7 +111,6 @@ const decode =
 
 const Manifest = Schema.Struct({ tools: Schema.Array(PaseoTool) })
 
-/** The tools Paseo offers to the agents it launches, before per-agent policy. */
 export const fetchManifest = (bridge: ToolBridge) =>
 	Effect.gen(function* () {
 		const response = yield* request(bridge, '/tools', lookupTimeout)
@@ -135,8 +126,7 @@ export type SessionBinding =
 	| { readonly _tag: 'Unbound' }
 
 /**
- * Whether Paseo drives this exact session, and which of its tools that agent
- * may use. Paseo answers 404 for sessions it has not bound.
+ * Paseo's binding endpoint uses 404 to mean Unbound, not an unavailable daemon.
  */
 export const sessionBinding = (bridge: ToolBridge, sessionID: string) =>
 	Effect.gen(function* () {
@@ -154,7 +144,9 @@ export const sessionBinding = (bridge: ToolBridge, sessionID: string) =>
 const ToolContent = Schema.Union([
 	Schema.Struct({ type: Schema.Literal('text'), text: Schema.String }),
 	Schema.Struct({ type: Schema.Literal('image'), data: Schema.String, mimeType: Schema.String }),
-	Schema.Struct({ type: Schema.String }),
+	Schema.StructWithRest(Schema.Struct({ type: Schema.String }), [
+		Schema.Record(Schema.String, Schema.Unknown),
+	]),
 ])
 
 const ToolResponse = Schema.Struct({
@@ -163,7 +155,6 @@ const ToolResponse = Schema.Struct({
 })
 export type ToolResponse = typeof ToolResponse.Type
 
-/** Runs one Paseo tool as the agent bound to `sessionID`, with the model's raw arguments. */
 export const executeTool = (bridge: ToolBridge, sessionID: string, name: string, input: unknown) =>
 	Effect.gen(function* () {
 		const response = yield* request(

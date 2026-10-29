@@ -1,13 +1,11 @@
 import { Service } from '@opencode/client/effect/service'
 import { Context, Effect, FileSystem, Layer, Schema } from 'effect'
 
-/** Where a bridge forwards its client's requests, with the credentials the managed service expects. */
 export interface Backend {
 	readonly url: URL
 	readonly headers: Readonly<Record<string, string>>
 }
 
-/** A request the bridge answers itself, with the HTTP status its client receives. */
 export class BridgeError extends Schema.TaggedError<BridgeError>()('BridgeError', {
 	status: Schema.Number,
 	message: Schema.String,

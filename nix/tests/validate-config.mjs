@@ -150,7 +150,6 @@ for (const file of files) {
 		if (name === 'limitless') {
 			for (const agent of supportAgents) expectEffect('subagent', agent, 'allow')
 		}
-		// Paseo tools belong to the primary conversation, not native subagents.
 		const paseoEffect = name === 'limitless' ? 'allow' : 'deny'
 		for (const tool of [
 			...paseoWorkspaceTools,

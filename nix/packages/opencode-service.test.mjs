@@ -114,23 +114,32 @@ test('persists changed settings while preserving unrelated private configuration
 	assert.equal(repeated.calls.filter((args) => args[1] === 'stop').length, 2)
 })
 
-test('rejects an invalid private environment before mutating the service or leaking it', async () => {
-	const instance = await fixture(
-		{},
-		{ rawEnvironment: '{"TEST_TOKEN":"fixture-private-value", invalid}' },
-	)
-	assert.throws(
-		() => prepareService(instance.opencode, '127.0.0.1', 4096, instance.environment),
-		(error) => {
-			assert.match(error.message, /invalid service environment/)
-			assert.equal(error.message.includes('fixture-private-value'), false)
-			return true
-		},
-	)
-	const state = await instance.state()
-	assert.deepEqual(state.calls, [['service', 'get', 'env']])
-	assert.equal(state.running, true)
-})
+for (const [name, rawEnvironment] of [
+	['malformed JSON', '{"TEST_TOKEN":"fixture-private-value", invalid}'],
+	['null', 'null'],
+	['an array', '["fixture-private-value"]'],
+	['a scalar', '"fixture-private-value"'],
+	['a non-string value', '{"TEST_TOKEN":123}'],
+	['an empty key', '{"":"fixture-private-value"}'],
+	['an equals sign in a key', '{"TEST=TOKEN":"fixture-private-value"}'],
+	['a NUL in a key', JSON.stringify({ 'TEST\0TOKEN': 'fixture-private-value' })],
+	['a NUL in a value', JSON.stringify({ TEST_TOKEN: 'fixture-private-value\0' })],
+]) {
+	test(`rejects ${name} in the private environment before mutating or leaking it`, async () => {
+		const instance = await fixture({}, { rawEnvironment })
+		assert.throws(
+			() => prepareService(instance.opencode, '127.0.0.1', 4096, instance.environment),
+			(error) => {
+				assert.match(error.message, /invalid service environment/)
+				assert.equal(error.message.includes('fixture-private-value'), false)
+				return true
+			},
+		)
+		const state = await instance.state()
+		assert.deepEqual(state.calls, [['service', 'get', 'env']])
+		assert.equal(state.running, true)
+	})
+}
 
 test('executes foreground native service in the launcher process with the private environment', async () => {
 	const instance = await fixture({

@@ -50,12 +50,29 @@ function json(response: ServerResponse, value: unknown, status = 200) {
 	response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value))
 }
 
+test.each([
+	{ hostname: '0.0.0.0', password: 'front', error: /must listen on loopback/ },
+	{ hostname: '127.0.0.1', password: '', error: /must supply a bridge password/ },
+])('rejects unsafe bridge configuration: $hostname with password "$password"', async ({
+	error,
+	...options
+}) => {
+	await expect(
+		startT3Bridge({
+			...options,
+			backend: async () => ({ url: new URL('http://127.0.0.1:9'), headers: {} }),
+		}),
+	).rejects.toThrow(error)
+})
+
 test('authenticates the caller and preserves upstream errors without leaking either password', async () => {
 	let calls = 0
 	const { bridge } = await fixture((request, response) => {
 		calls++
 		expect(request.headers.authorization).toBe(backendAuth)
 		expect(request.headers['x-opencode-directory']).toBe('/project')
+		expect(request.headers.traceparent).toBeUndefined()
+		expect(request.headers.tracestate).toBeUndefined()
 		json(response, { error: 'fixture conflict' }, 409)
 	})
 	expect((await fetch(`${bridge.url}/api/info`)).status).toBe(401)
@@ -336,13 +353,17 @@ test('shutdown detaches promptly without stopping the service or its event strea
 })
 
 test('a client that leaves before the service answers cancels the forwarded request', async () => {
+	let upstreamReceived: (() => void) | undefined
+	const received = new Promise<void>((resolve) => {
+		upstreamReceived = resolve
+	})
 	let upstreamClosed: (() => void) | undefined
 	const cancelled = new Promise<void>((resolve) => {
 		upstreamClosed = resolve
 	})
 	const { bridge } = await fixture((request) => {
-		// Never answer: the service is still working when the client leaves.
 		request.once('close', () => upstreamClosed?.())
+		upstreamReceived?.()
 	})
 	const controller = new AbortController()
 	const pending = fetch(`${bridge.url}/api/experimental/session/ses_test/wait`, {
@@ -350,7 +371,7 @@ test('a client that leaves before the service answers cancels the forwarded requ
 		headers: { authorization: frontAuth },
 		signal: controller.signal,
 	}).catch(() => undefined)
-	await new Promise((resolve) => setTimeout(resolve, 100))
+	await received
 	controller.abort()
 	await pending
 	await cancelled

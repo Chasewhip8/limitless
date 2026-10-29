@@ -11,14 +11,12 @@ export { startPaseoBridge } from './bridge'
 
 const launcherName = 'opencode-paseo'
 
-/** Promise-facing registration for JavaScript callers such as integration tests. */
 export const registerPaseoToolBridge = (environment: NodeJS.ProcessEnv) =>
 	Effect.runPromise(registerToolBridge(environment))
 
 /**
- * Everything except `serve` is OpenCode's own CLI: Paseo probes `--version`
- * and runs diagnostics such as `auth list`. Paseo's server credentials stay out
- * of those commands.
+ * Paseo probes non-serve commands too; its server credentials and injected config
+ * must not reach those ordinary OpenCode CLI invocations.
  */
 const passThrough = (args: ReadonlyArray<string>) =>
 	Effect.gen(function* () {

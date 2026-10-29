@@ -8,18 +8,11 @@ import {
 } from 'effect/http'
 import { type Backend, BridgeError, backendURL } from './backend'
 
-/**
- * How one client request reaches the managed service. Most requests forward
- * unchanged; a forward may replace the path or the JSON body. A reply answers
- * the client without contacting the service, and a relay returns a response the
- * service already gave while the bridge resolved the request.
- */
 export type BridgeRoute =
 	| { readonly _tag: 'Forward'; readonly pathname?: string; readonly body?: Uint8Array }
 	| { readonly _tag: 'Reply'; readonly status: number }
 	| { readonly _tag: 'Relay'; readonly response: HttpClientResponse.HttpClientResponse }
 
-/** Chooses how a bridge client's request reaches the managed service. */
 export type BridgeRouter = (
 	request: HttpServerRequest.HttpServerRequest,
 	pathname: string,
@@ -41,7 +34,6 @@ export const forwardWith = (
 const ControlBody = Schema.Record(Schema.String, Schema.Unknown)
 const maximumControlBody = ByteSize.mebibytes(1)
 
-/** Reads a small JSON control request the bridge rewrites before forwarding. */
 export const readControlBody = (request: HttpServerRequest.HttpServerRequest, client: string) =>
 	request.json.pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(ControlBody)),
@@ -61,12 +53,10 @@ export const decodePathSegment = (segment: string) =>
 		catch: () => new BridgeError({ status: 400, message: 'Malformed request path' }),
 	})
 
-/** The service answered a lookup with an error that the client should see as sent. */
 export class BackendRejected extends Data.TaggedError('BackendRejected')<{
 	readonly response: HttpClientResponse.HttpClientResponse
 }> {}
 
-/** Relays a lookup the service rejected, so the client sees the service's own error. */
 export const relayRejection = <A, R>(effect: Effect.Effect<A, BackendRejected | BridgeError, R>) =>
 	effect.pipe(
 		Effect.catchTag('BackendRejected', ({ response }) =>
@@ -133,8 +123,7 @@ export const defaultAgentFor = Effect.fn('Bridge.defaultAgentFor')(function* (
 	return selected.id
 })
 
-/** The session's current agent and its Location's configured default. */
-export const sessionAgents = Effect.fn('Bridge.sessionAgents')(function* (
+const sessionAgents = Effect.fn('Bridge.sessionAgents')(function* (
 	backend: Backend,
 	sessionID: string,
 ) {
@@ -149,10 +138,6 @@ export const sessionAgents = Effect.fn('Bridge.sessionAgents')(function* (
 
 const agentSelectionPath = /^\/api\/(?:experimental\/)?session\/([^/]+)\/agent$/
 
-/**
- * Selecting the disabled `build` agent selects the Location's configured
- * default instead; selecting the agent a session already has is a no-op.
- */
 export const routeBuildSelection = Effect.fn('Bridge.routeBuildSelection')(function* (
 	request: HttpServerRequest.HttpServerRequest,
 	pathname: string,
@@ -165,12 +150,10 @@ export const routeBuildSelection = Effect.fn('Bridge.routeBuildSelection')(funct
 	if (body.agent !== 'build') return forwardWith({ body })
 	const sessionID = yield* decodePathSegment(selection[1])
 	return yield* relayRejection(
-		sessionAgents(backend, sessionID).pipe(
-			Effect.map(({ current, configured }) =>
-				current === undefined || current === configured
-					? reply(204)
-					: forwardWith({ body: { ...body, agent: configured } }),
-			),
-		),
+		Effect.gen(function* () {
+			const { current, configured } = yield* sessionAgents(backend, sessionID)
+			if (current === undefined || current === configured) return reply(204)
+			return forwardWith({ body: { ...body, agent: configured } })
+		}),
 	)
 })

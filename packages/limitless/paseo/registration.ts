@@ -6,11 +6,8 @@ import { Effect, Schema } from 'effect'
 import { fetchManifest, isLoopbackToolBridge, PaseoTool, type ToolBridge } from './tool-bridge'
 
 /**
- * How the short-lived `opencode-paseo` launcher tells the long-lived `paseo`
- * plugin where the Paseo daemon's tool bridge listens. Paseo hands the tool
- * bridge's address and token only to the OpenCode servers it launches, so the
- * launcher records them, with Paseo's tool list, for the plugin running in the
- * managed service.
+ * Paseo gives this capability only to the short-lived server launcher; the
+ * long-lived shared plugin needs it after that launcher exits.
  */
 
 export const Registration = Schema.Struct({
@@ -76,7 +73,6 @@ export const toolBridgeFromLaunchConfig = (content: string | undefined) =>
 		return bridge satisfies ToolBridge
 	})
 
-/** Identifies one version of the registration file, so readers notice replacement. */
 export type RegistrationStamp = string
 
 export interface RegistrationSnapshot {
@@ -89,7 +85,6 @@ const decodeRegistration = Schema.decodeUnknownEffect(Schema.fromJsonString(Regi
 const stampOf = (status: Stats): RegistrationStamp =>
 	`${status.ino}:${status.mtimeMs}:${status.size}`
 
-/** The file's status, or undefined when it does not exist. */
 const statIfPresent = (path: string) =>
 	Effect.tryPromise({
 		try: () =>
@@ -127,7 +122,6 @@ export const readRegistration = (path: string) =>
 		return { stamp: stampOf(status), registration } satisfies RegistrationSnapshot
 	})
 
-/** Only the stamp, for cheap change detection. */
 export const registrationStamp = (path: string) =>
 	statIfPresent(path).pipe(
 		Effect.map((status) => (status === undefined ? undefined : stampOf(status))),
@@ -172,9 +166,9 @@ export const registerToolBridge = (environment: NodeJS.ProcessEnv) =>
 		const tools = yield* fetchManifest(bridge)
 		const path = yield* registrationPath(environment)
 		const registration: Registration = { v: 1, ...bridge, tools }
-		const previous = (yield* readRegistration(path).pipe(
+		const { registration: previous } = yield* readRegistration(path).pipe(
 			Effect.orElseSucceed(() => ({ registration: undefined })),
-		)).registration
+		)
 		if (previous !== undefined && sameRegistration(previous, registration)) return
 		if (
 			previous !== undefined &&

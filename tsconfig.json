@@ -20,9 +20,6 @@
 		"forceConsistentCasingInFileNames": true
 	},
 	"include": [
-		"scripts/**/*",
-		"src/**/*",
-		"packages/*/src/**/*",
 		"packages/*/index.ts",
 		"packages/*/tui.ts",
 		"packages/limitless/core/**/*.ts",

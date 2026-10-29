@@ -13,8 +13,6 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 // Run with Bun: <limitless-package> <opencode-binary> <expected-version>.
-// Real OpenCode with the limitless and paseo plugins, a scripted model provider,
-// and a fake Paseo daemon bridge that answers Paseo's internal protocol.
 const [bundleDirectory, executable, expectedVersion] = process.argv.slice(2)
 assert(
 	bundleDirectory && executable && expectedVersion,
@@ -43,7 +41,19 @@ const deferred = () => {
 	return { promise, resolve }
 }
 
-// ---------------------------------------------------------------- model provider
+async function within(promise, description, timeout = 30000) {
+	let timer
+	try {
+		return await Promise.race([
+			promise,
+			new Promise((_resolve, reject) => {
+				timer = setTimeout(() => reject(new Error(`Timed out waiting for ${description}`)), timeout)
+			}),
+		])
+	} finally {
+		clearTimeout(timer)
+	}
+}
 
 const requests = []
 const requestWaiters = new Map()
@@ -53,7 +63,7 @@ const awaitRequest = (tag, phase = 1) => {
 	if (found) return Promise.resolve(found)
 	const key = `${tag}#${phase}`
 	if (!requestWaiters.has(key)) requestWaiters.set(key, deferred())
-	return requestWaiters.get(key).promise
+	return within(requestWaiters.get(key).promise, `model request ${key}`)
 }
 const toolCall = (name, input) => ({
 	tool_calls: [
@@ -114,10 +124,15 @@ const provider = Bun.serve({
 			})
 		if (command?.kind === 'hold' && phase === 1) delta = toolCall('shell', { command: 'sleep 2' })
 		if (command?.kind === 'hold' && phase >= 2) {
-			// Never released: only an interruption ends this run.
 			await new Promise((done) => {
-				request.signal.addEventListener('abort', done)
-				setTimeout(done, 60000)
+				const finish = () => {
+					clearTimeout(timer)
+					request.signal.removeEventListener('abort', finish)
+					done()
+				}
+				const timer = setTimeout(finish, 60000)
+				request.signal.addEventListener('abort', finish, { once: true })
+				if (request.signal.aborted) finish()
 			})
 			record.aborted = request.signal.aborted
 		}
@@ -134,8 +149,6 @@ const provider = Bun.serve({
 		)
 	},
 })
-
-// ------------------------------------------------------------ fake Paseo bridge
 
 const pixel =
 	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -182,7 +195,16 @@ function paseoBridge(token, { hangBindings = false } = {}) {
 				if (!bindings.get(sessionID)?.includes(name))
 					return json({ error: `Paseo tool not found: ${name}` }, 404)
 				if (name === 'image_probe')
-					return json({ content: [{ type: 'image', data: pixel, mimeType: 'image/png' }] })
+					return json({
+						content: [
+							{ type: 'image', data: pixel, mimeType: 'image/png' },
+							{
+								type: 'resource_link',
+								uri: 'https://example.test/document',
+								name: 'RESOURCE_PAYLOAD',
+							},
+						],
+					})
 				if (name === 'failing_probe')
 					return json({ content: [{ type: 'text', text: 'PROBE_FAILED' }], isError: true })
 				return json({ content: [{ type: 'text', text: `PASEO_RESULT:${name}:${input.marker}` }] })
@@ -203,12 +225,20 @@ const launchEnvironment = (bridge, token) => ({
 	}),
 })
 
-// --------------------------------------------------------------------- OpenCode
-
 writeFileSync(join(directory, 'identity', 'package.json'), JSON.stringify({ type: 'module' }))
 writeFileSync(
 	join(directory, 'identity', 'index.js'),
-	`export default {id:'runtime-fixture-identity',async setup(ctx){await ctx.session.hook('model.request',async event=>{const session=await ctx.session.get({sessionID:event.sessionID});event.headers['x-test-session']=event.sessionID;event.headers['x-test-agent']=session.agent??'limitless';event.headers['x-test-kind']=event.kind})}}`,
+	`export default {
+		id: 'runtime-fixture-identity',
+		async setup(ctx) {
+			await ctx.session.hook('model.request', async event => {
+				const session = await ctx.session.get({ sessionID: event.sessionID });
+				event.headers['x-test-session'] = event.sessionID;
+				event.headers['x-test-agent'] = session.agent ?? 'limitless';
+				event.headers['x-test-kind'] = event.kind;
+			});
+		}
+	}`,
 )
 const configuration = {
 	default_agent: 'limitless',
@@ -363,24 +393,30 @@ const snapshot = async (id, tag) => {
 }
 
 async function verify() {
-	backend = await listening.promise
+	backend = await within(
+		Promise.race([
+			listening.promise,
+			opencode.exited.then((code) => {
+				throw new Error(
+					`OpenCode exited before announcing its listener (${code}); see ${directory}/stderr.log`,
+				)
+			}),
+		]),
+		'OpenCode listener',
+	)
 	assert.equal((await api('GET', '/api/info')).version, expectedVersion)
 	bridge = await startPaseoBridge({
 		password: 'isolated-paseo',
 		backend: async () => ({ url: new URL(backend), headers: { authorization: backendAuth } }),
 	})
 
-	// Paseo polls the Location's plugin inventory until it loads, then requires
-	// an active plugin with ID `paseo`.
-	let plugins = []
-	for (const deadline = Date.now() + 30000; plugins.length === 0; await sleep(50)) {
-		assert(Date.now() < deadline, 'The plugin inventory never loaded')
-		plugins = (await api('GET', '/api/plugin', undefined, bridge.url)).data
+	for (const deadline = Date.now() + 30000; ; await sleep(50)) {
+		const plugins = (await api('GET', '/api/plugin', undefined, bridge.url)).data
+		const paseo = plugins.find((entry) => entry.id === 'paseo')
+		assert(paseo?.state?.status !== 'failed', `paseo plugin failed: ${JSON.stringify(paseo)}`)
+		if (paseo?.state?.status === 'active') break
+		assert(Date.now() < deadline, `paseo plugin never became active: ${JSON.stringify(plugins)}`)
 	}
-	assert(
-		plugins.some((entry) => entry.id === 'paseo' && entry.state?.status === 'active'),
-		`paseo plugin is not active: ${JSON.stringify(plugins)}`,
-	)
 	check('readiness')
 
 	// Without a registration the plugin is inert.
@@ -466,6 +502,8 @@ async function verify() {
 	assert((await awaitRequest('call-list', 2)).sent.includes('PASEO_RESULT:list_agents:listed'))
 	await prompt(paseo.id, { kind: 'call', tag: 'call-image', tool: 'paseo_image_probe', input: {} })
 	assert((await awaitRequest('call-image', 2)).sent.includes(pixel.slice(0, 24)))
+	assert((await awaitRequest('call-image', 2)).sent.includes('RESOURCE_PAYLOAD'))
+	assert((await awaitRequest('call-image', 2)).sent.includes('https://example.test/document'))
 	await prompt(paseo.id, { kind: 'call', tag: 'call-fail', tool: 'paseo_failing_probe', input: {} })
 	assert((await awaitRequest('call-fail', 2)).sent.includes('PROBE_FAILED'))
 	check('tool-execution')

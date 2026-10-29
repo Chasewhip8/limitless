@@ -128,17 +128,12 @@ function harness() {
 			},
 		},
 	}
-	const cleanup = registerNotifications(context)
+	registerNotifications(context)
 	return {
-		sessions,
 		messages,
-		pending,
-		statuses,
 		notifications,
 		toasts,
 		sync,
-		cleanup,
-		listeners,
 		sounds: () => notifications.filter((input) => input.sound !== false),
 		async emit(event: Event) {
 			await Promise.all([...listeners].map((listener) => listener(event)))

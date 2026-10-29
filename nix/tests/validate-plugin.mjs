@@ -19,12 +19,12 @@ const tui = await Host.load(entrypoints.tui)
 assert.equal(tui.default.id, 'opencode.notifications')
 assert.equal(typeof tui.default.setup, 'function')
 
-// The TUI discovers this directory as a TUI-only plugin; a server entrypoint would make the server load it too.
+// Keep this TUI-only; a server entrypoint would cause server-side loading.
 const cacheStatus = Host.resolve({ directory: join(directory, 'cache-status') })
 assert(cacheStatus.tui?.endsWith('/cache-status/tui.tsx'), 'Missing cache-status TUI entrypoint')
 assert.equal(cacheStatus.server, undefined)
 
-// Paseo requires an active plugin with ID `paseo`; it must be server-only.
+// Paseo requires an active server plugin with ID `paseo`.
 const paseo = Host.resolve({ directory: join(directory, 'paseo') })
 assert(paseo.server?.endsWith('/paseo/index.js'), 'Missing paseo server entrypoint')
 assert.equal(paseo.tui, undefined)

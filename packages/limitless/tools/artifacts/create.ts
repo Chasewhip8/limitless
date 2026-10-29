@@ -167,12 +167,15 @@ export const artifactCreate = Effect.fn(function* artifactCreate(input: Artifact
 				})
 				// Finish the small manifest write before cancellation can release the directory.
 				return yield* Effect.uninterruptible(
-					writeJsonFile(path.join(root, slug, 'manifest.json'), manifest, 'artifact_create').pipe(
-						Effect.map(() => {
-							committed = true
-							return result
-						}),
-					),
+					Effect.gen(function* () {
+						yield* writeJsonFile(
+							path.join(root, slug, 'manifest.json'),
+							manifest,
+							'artifact_create',
+						)
+						committed = true
+						return result
+					}),
 				)
 			}).pipe(Effect.exit),
 		(slug) =>
