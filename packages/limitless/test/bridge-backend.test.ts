@@ -15,7 +15,7 @@ afterEach(async () => {
 	)
 })
 
-test('an absent managed service is a 502 that launchers may wait out', async () => {
+test('an absent managed service is a 502 with a start instruction', async () => {
 	const directory = await mkdtemp(join(tmpdir(), 'limitless-no-service-'))
 	directories.push(directory)
 	vi.stubEnv('XDG_STATE_HOME', directory)
@@ -28,7 +28,6 @@ test('an absent managed service is a 502 that launchers may wait out', async () 
 	expect(error).toMatchObject({
 		_tag: 'BridgeError',
 		status: 502,
-		unavailable: true,
 		message: 'The managed OpenCode service is unavailable; start it before connecting',
 	})
 })

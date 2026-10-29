@@ -1,13 +1,13 @@
 # Limitless
 
-A Nix flake and Home Manager module for OpenCode, with an Effect 4 TypeScript plugin, T3 Code and Paseo bridges, agent definitions, and skills. These instructions govern development of this repository. `opencode/AGENTS.md` is a separate, packaged global instruction file for consumers.
+A Nix flake and Home Manager module for OpenCode, with an Effect 4 TypeScript plugin, a T3 Code bridge, agent definitions, and skills. These instructions govern development of this repository. `opencode/AGENTS.md` is a separate, packaged global instruction file for consumers.
 
 ## Architecture and ownership
 
 - Prefer cohesive subsystems with small public APIs and private dependency assembly. Keep dependencies acyclic and coordinate subsystems at composition roots.
 - Home Manager owns packages, non-secret configuration, and optional service supervision. OpenCode owns its native service discovery, credentials, sessions, and tool execution.
-- Hosted plugins share OpenCode's Effect and plugin runtime. Standalone bridges bundle their own dependencies. Use `portableSchema` at the tool schema boundary between runtimes.
-- The shared bridge owns authenticated loopback HTTP transport. Client adapters own their documented request rewrites; plugins own session and tool policy. Do not duplicate policy in the proxy.
+- Hosted plugins share OpenCode's Effect and plugin runtime. The standalone T3 bridge bundles its own dependencies. Use `portableSchema` at the tool schema boundary between runtimes.
+- The bridge owns authenticated loopback HTTP transport. The T3 adapter owns its documented request rewrites; plugins own session and tool policy. Do not duplicate policy in the proxy.
 - Treat Nix options, tool and plugin IDs, environment variables, launcher announcements, runtime paths, and exported overlay names as consumer contracts. Trace callers before changing them.
 - Preserve credential redaction, managed-checkout safety, ordered permission rules, cancellation, and resource ownership when refactoring. Changes to upstream integration assumptions need version-correct evidence and the owning compatibility check.
 
@@ -99,7 +99,7 @@ Keep tests deterministic, isolated, and focused on consequential guarantees or c
 
 ## Safety and delivery
 
-- Do not apply Home Manager/NixOS or restart live `opencode`, `t3code`, or `paseo` services from an agent working inside them. Ask the user to apply reviewed changes; validation uses isolated fixtures.
+- Do not apply Home Manager/NixOS or restart live `opencode` or `t3code` services from an agent working inside them. Ask the user to apply reviewed changes; validation uses isolated fixtures.
 - Never print credentials, mutable account databases, or private service environment values. Keep secrets outside the Nix store.
 - Preserve unrelated changes and concurrent work. A PR request authorizes a task branch, intended commits, push, and PR creation, not deployment.
 - Use conventional commits with the narrowest truthful type and a concise, imperative, lowercase description. Add a scope when it clarifies the affected area.
@@ -108,7 +108,7 @@ Keep tests deterministic, isolated, and focused on consequential guarantees or c
 
 - `flake.nix`, `nix/modules/`, `nix/packages/` — exported packages, consumer options, and pinned builds.
 - `packages/limitless/index.ts`, `plugin/`, `tools/` — hosted plugin composition, execution boundary, artifacts, and guarded source research.
-- `packages/limitless/bridge/`, `t3/`, `paseo/` — shared transport, client adapters, and runtime policy.
+- `packages/limitless/bridge/`, `t3/` — loopback transport, the T3 adapter, and its runtime policy.
 - `packages/limitless/tui.ts`, `cache-status/` — notification handler and prompt-cache indicator.
 - `opencode/`, `skills/` — packaged defaults and instructions; changes here affect consumers, not just this repo.
 - `README.md` — consumer setup, compatibility boundaries, migration notes, and development checks.

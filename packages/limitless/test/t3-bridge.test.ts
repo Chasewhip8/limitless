@@ -265,6 +265,30 @@ test('normal-mode agent selection restores the configured default and encodes lo
 	expect(selections).toEqual([{ agent: 'plan' }, { agent: 'limitless' }, { agent: 'custom' }])
 })
 
+test('selecting build fails visibly when the location has no selectable default agent', async () => {
+	const forwarded: string[] = []
+	const { bridge } = await fixture((request, response) => {
+		if (request.url === '/api/agent') {
+			json(response, { data: [{ id: 'research', mode: 'subagent', hidden: false }] })
+			return
+		}
+		if (request.method === 'GET') {
+			json(response, { data: { id: 'ses_test', location: { directory: '/project' } } })
+			return
+		}
+		forwarded.push(`${request.method} ${request.url}`)
+		response.writeHead(204).end()
+	})
+	const response = await fetch(`${bridge.url}/api/session/ses_test/agent`, {
+		method: 'POST',
+		headers: { authorization: frontAuth, 'content-type': 'application/json' },
+		body: JSON.stringify({ agent: 'build' }),
+	})
+	expect(response.status).toBe(502)
+	expect(await response.text()).toBe('Unable to resolve the default OpenCode agent')
+	expect(forwarded).toEqual([])
+})
+
 test('caller-selected URL forms cannot redirect backend credentials to another origin', async () => {
 	let foreignCalls = 0
 	const foreign = await fixture((_request, response) => {

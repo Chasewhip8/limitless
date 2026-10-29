@@ -53,11 +53,11 @@ export const decodePathSegment = (segment: string) =>
 		catch: () => new BridgeError({ status: 400, message: 'Malformed request path' }),
 	})
 
-export class BackendRejected extends Data.TaggedError('BackendRejected')<{
+class BackendRejected extends Data.TaggedError('BackendRejected')<{
 	readonly response: HttpClientResponse.HttpClientResponse
 }> {}
 
-export const relayRejection = <A, R>(effect: Effect.Effect<A, BackendRejected | BridgeError, R>) =>
+const relayRejection = <A, R>(effect: Effect.Effect<A, BackendRejected | BridgeError, R>) =>
 	effect.pipe(
 		Effect.catchTag('BackendRejected', ({ response }) =>
 			Effect.succeed<BridgeRoute>({ _tag: 'Relay', response }),
@@ -107,7 +107,7 @@ const AgentsResponse = Schema.Struct({
  * default. OpenCode lists its resolved default agent first, including project
  * overrides.
  */
-export const defaultAgentFor = Effect.fn('Bridge.defaultAgentFor')(function* (
+const defaultAgentFor = Effect.fn('Bridge.defaultAgentFor')(function* (
 	backend: Backend,
 	directory: string,
 ) {

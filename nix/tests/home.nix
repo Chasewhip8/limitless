@@ -118,7 +118,6 @@ let
   desktopSettings = {
     opencode.desktop.enable = true;
     t3.desktop.enable = true;
-    paseo.desktop.enable = true;
   };
   desktopsOnly = evaluate (desktopSettings // { enable = false; });
   desktopMismatch = pkgs.runCommand "desktop-mismatch-0" { version = "0"; } ''
@@ -238,31 +237,6 @@ let
   };
   t3Unit = t3Supervised.config.systemd.user.services.t3code;
   t3Standalone = evaluate { t3.enable = true; };
-  paseoSupervised = evaluate {
-    paseo.enable = true;
-    opencode.service.enable = true;
-  };
-  paseoUnit = paseoSupervised.config.systemd.user.services.paseo;
-  paseoCustom = evaluate {
-    paseo = {
-      enable = true;
-      port = 7777;
-      home = "/home/test/Paseo data";
-      browserTools = false;
-      hostnames = [
-        "pc.example.ts.net"
-        ".lan.example"
-      ];
-    };
-    opencode.service.enable = true;
-  };
-  paseoPluginOf =
-    home:
-    builtins.filter (
-      entry: builtins.isAttrs entry && lib.hasSuffix "/paseo" entry.package
-    ) (rendered home).plugins;
-  paseoLauncherOf =
-    home: lib.findFirst (package: package.name == "opencode-paseo") null home.config.home.packages;
   t3Custom = evaluate {
     t3 = {
       enable = true;
@@ -296,7 +270,6 @@ let
   t3Launcher = lib.findFirst (
     package: package.name == "opencode-t3"
   ) (throw "Missing opencode-t3 launcher") defaults.config.home.packages;
-  paseoLauncher = paseoLauncherOf paseoSupervised;
 in
 {
   executor-client =
@@ -597,117 +570,6 @@ in
         touch "$out"
       '';
 
-  paseo-runtime =
-    pkgs.runCommand "limitless-paseo-runtime-check"
-      {
-        nativeBuildInputs = [ pkgs.bun ];
-      }
-      ''
-        cp ${./validate-paseo-runtime.mjs} validate-paseo-runtime.mjs
-        export HOME="$TMPDIR/home"
-        mkdir -p "$HOME"
-        test "$(${lib.getExe paseoLauncher} --version)" = "$(${launcherOf paseoSupervised} --version)"
-        if OPENCODE_PASSWORD=check ${lib.getExe paseoLauncher} serve --hostname 127.0.0.1 --port 0 >launch.out 2>launch.err; then
-          echo "opencode-paseo started without a managed service" >&2
-          exit 1
-        fi
-        grep -q 'managed OpenCode service is unavailable' launch.err
-        if grep -q 'listening' launch.out; then
-          echo "opencode-paseo announced a server without a managed service" >&2
-          exit 1
-        fi
-        bun validate-paseo-runtime.mjs \
-          ${self.packages.${pkgs.stdenv.hostPlatform.system}.limitless} \
-          ${lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.opencode} \
-          ${lib.escapeShellArg self.packages.${pkgs.stdenv.hostPlatform.system}.opencode.version}
-        touch "$out"
-      '';
-
-  paseo-service =
-    assert lib.assertMsg (
-      !(defaults.config.systemd.user.services ? paseo)
-      && paseoPluginOf defaults == [ ]
-      && paseoLauncherOf defaults == null
-      && !valid (evaluate {
-        enable = false;
-        paseo.enable = true;
-      })
-      && !valid (evaluate {
-        paseo.enable = true;
-      })
-      && !valid (evaluate {
-        paseo.enable = true;
-        paseo.package = null;
-        opencode.service.enable = true;
-      })
-    ) "Paseo must be opt-in and require an enabled workspace, package and managed OpenCode service";
-    assert lib.assertMsg (
-      paseoPluginOf paseoSupervised == [
-        { package = "file://${paseoSupervised.config.programs.limitless.plugins.limitless.package}/paseo"; }
-      ]
-      && paseoLauncher != null
-    ) "Enabling Paseo must load the paseo plugin and install opencode-paseo";
-    assert lib.assertMsg (
-      if pkgs.stdenv.hostPlatform.isLinux then
-        valid paseoSupervised
-        && valid paseoCustom
-        && paseoUnit.Unit.Wants == [ "opencode.service" ]
-        && paseoUnit.Unit.After == [ "opencode.service" ]
-        && paseoUnit.Unit.X-SwitchMethod == "keep-old"
-        && paseoUnit.Service.Type == "exec"
-        && lib.hasSuffix "/bin/paseo-server" paseoUnit.Service.ExecStart
-        && builtins.elem "PASEO_HOME=/home/test/.paseo" paseoUnit.Service.Environment
-        && lib.any (lib.hasPrefix "PATH=/run/wrappers/bin:") paseoUnit.Service.Environment
-        && builtins.elem "PASEO_HOME=/home/test/Paseo data" paseoCustom.config.systemd.user.services.paseo.Service.Environment
-        && paseoUnit.Install.WantedBy == [ "default.target" ]
-        && !(lib.any (lib.hasPrefix "PASEO_HOSTNAMES=") paseoUnit.Service.Environment)
-        && builtins.elem "PASEO_HOSTNAMES=pc.example.ts.net,.lan.example" paseoCustom.config.systemd.user.services.paseo.Service.Environment
-        && !valid (
-          evaluateWith {
-            paseo.enable = true;
-            opencode.service.enable = true;
-          } [ { systemd.user.enable = false; } ]
-        )
-      else
-        !valid paseoSupervised && !(paseoSupervised.config.systemd.user.services ? paseo)
-    ) "Paseo supervision, platform constraints or OpenCode dependency changed";
-    assert lib.assertMsg (
-      !(builtins.tryEval (evaluate { paseo.home = "relative"; }).config.programs.limitless.paseo.home)
-      .success
-    ) "Paseo homes must be absolute";
-    assert lib.assertMsg (lib.all
-      (
-        name:
-        !(builtins.tryEval (
-          builtins.deepSeq
-            (evaluate { paseo.hostnames = [ name ]; }).config.programs.limitless.paseo.hostnames
-            true
-        )).success
-      )
-      [
-        "https://pc.example"
-        "pc.example:10443"
-        "pc.example."
-        "true"
-        "TRUE"
-        "a,b"
-        ""
-        "pc example"
-      ]
-    ) "Paseo hostnames must not accept URLs, ports, trailing dots or the allow-all sentinel";
-    pkgs.runCommand "limitless-paseo-service-check" { nativeBuildInputs = [ pkgs.nodejs ]; } ''
-      cp ${../packages/paseo-settings.mjs} paseo-settings.mjs
-      cp ${../packages/paseo-settings.test.mjs} paseo-settings.test.mjs
-      node --test paseo-settings.test.mjs
-      ${lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-        test -x ${paseoUnit.Service.ExecStartPre}
-        grep -F "/home/test/.paseo 127.0.0.1:6767 /home/test/.nix-profile/bin/opencode-paseo true" ${paseoUnit.Service.ExecStartPre}
-        grep -F "'/home/test/Paseo data' 127.0.0.1:7777 /home/test/.nix-profile/bin/opencode-paseo false" ${paseoCustom.config.systemd.user.services.paseo.Service.ExecStartPre}
-        test "$(HOME="$TMPDIR" ${lib.getExe' paseoSupervised.config.programs.limitless.paseo.package "paseo"} --version)" = '${paseoSupervised.config.programs.limitless.paseo.package.version}'
-      ''}
-      touch "$out"
-    '';
-
   t3-service =
     assert lib.assertMsg (
       !(defaults.config.systemd.user.services ? t3code)
@@ -780,7 +642,6 @@ in
     assert lib.assertMsg (lib.all (name: !defaults.config.programs.limitless.${name}.desktop.enable) [
       "opencode"
       "t3"
-      "paseo"
     ]) "Desktops must be opt-in";
     assert lib.assertMsg (
       !valid (evaluate {
@@ -798,7 +659,6 @@ in
           map lib.getName desktopsOnly.config.home.packages == [
             "opencode-desktop"
             "t3-desktop"
-            "paseo-desktop"
           ]
         && desktopsOnly.config.home.file == { }
         && desktopsOnly.config.systemd.user.services == { }
@@ -808,7 +668,6 @@ in
             lib.recursiveUpdate desktopSettings {
               opencode.service.enable = true;
               t3.enable = true;
-              paseo.enable = true;
             }
           )
         )
@@ -830,9 +689,6 @@ in
         &&
           lib.getVersion self.packages.${pkgs.stdenv.hostPlatform.system}.t3-desktop
           == lib.getVersion self.packages.${pkgs.stdenv.hostPlatform.system}.t3
-        &&
-          lib.getVersion self.packages.${pkgs.stdenv.hostPlatform.system}.paseo-desktop
-          == lib.getVersion self.packages.${pkgs.stdenv.hostPlatform.system}.paseo
       else
         !valid desktopsOnly && desktopsOnly.config.home.packages == [ ]
     ) "Desktop installation, standalone use, platform limits or version checks changed";

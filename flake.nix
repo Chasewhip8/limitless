@@ -9,11 +9,6 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    # opencode-paseo depends on Paseo internals: review the paseo-protocol check when bumping.
-    paseo = {
-      url = "github:getpaseo/paseo/v0.13.0";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
@@ -21,7 +16,6 @@
       self,
       nixpkgs,
       flake-utils,
-      paseo,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -49,7 +43,6 @@
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           t3 = pkgs.callPackage ./nix/packages/t3.nix { };
-          paseo = import ./nix/packages/paseo.nix { inherit pkgs paseo; };
         }
         // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
           opencode-desktop = pkgs.callPackage ./nix/packages/opencode-desktop.nix {
@@ -57,9 +50,6 @@
           };
           t3-desktop = pkgs.callPackage ./nix/packages/t3-desktop.nix {
             t3 = self.packages.${system}.t3;
-          };
-          paseo-desktop = pkgs.callPackage ./nix/packages/paseo-desktop.nix {
-            paseo = self.packages.${system}.paseo;
           };
         };
         checks =
@@ -70,15 +60,10 @@
               inherit pkgs;
               dependencies = self.packages.${system}.limitless.dependencies;
             };
-            paseo-protocol = import ./nix/tests/paseo-protocol.nix {
-              inherit pkgs;
-              source = paseo;
-            };
           }
           // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
             opencode-desktop = self.packages.${system}.opencode-desktop;
             t3-desktop = self.packages.${system}.t3-desktop;
-            paseo-desktop = self.packages.${system}.paseo-desktop;
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             executor-service = import ./nix/tests/executor-service.nix {

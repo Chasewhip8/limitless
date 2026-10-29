@@ -1,13 +1,12 @@
 { config, lib, ... }:
 let
   cfg = config.programs.limitless;
-  enabled = cfg.opencode.desktop.enable || cfg.t3.desktop.enable || cfg.paseo.desktop.enable;
+  enabled = cfg.opencode.desktop.enable || cfg.t3.desktop.enable;
 in
 {
   options.programs.limitless = {
     opencode.desktop.enable = lib.mkEnableOption "OpenCode Desktop through the native Homebrew cask";
     t3.desktop.enable = lib.mkEnableOption "stable T3 Code Desktop through the native Homebrew cask";
-    paseo.desktop.enable = lib.mkEnableOption "Paseo Desktop through the native Homebrew cask";
   };
 
   config = lib.mkIf enabled {
@@ -21,8 +20,7 @@ in
       enable = lib.mkDefault true;
       casks =
         lib.optional cfg.opencode.desktop.enable "opencode-desktop"
-        ++ lib.optional cfg.t3.desktop.enable "t3-code"
-        ++ lib.optional cfg.paseo.desktop.enable "paseo";
+        ++ lib.optional cfg.t3.desktop.enable "t3-code";
     };
   };
 }

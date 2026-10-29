@@ -60,36 +60,6 @@ const sharedActions = [
 	'opencode_models',
 ]
 const primaryOnlyActions = ['artifact_create', 'opencode_session_move', 'opencode_session_rename']
-const paseoWorkspaceTools = [
-	'send_agent_prompt',
-	'get_agent_status',
-	'get_agent_activity',
-	'list_agents',
-	'create_heartbeat',
-	'delete_heartbeat',
-	'list_schedules',
-	'list_workspace_scripts',
-	'start_workspace_script',
-	'stop_workspace_script',
-	'list_terminals',
-	'create_terminal',
-	'kill_terminal',
-	'capture_terminal',
-	'send_terminal_keys',
-]
-const paseoManagementTools = [
-	'create_agent',
-	'create_workspace',
-	'archive_workspace',
-	'cancel_agent',
-	'archive_agent',
-	'kill_agent',
-	'update_agent',
-	'set_agent_mode',
-	'create_schedule',
-	'run_schedule_once',
-	'respond_to_permission',
-]
 
 for (const file of files) {
 	const input = JSON.parse(await readFile(file, 'utf8'))
@@ -150,14 +120,6 @@ for (const file of files) {
 		if (name === 'limitless') {
 			for (const agent of supportAgents) expectEffect('subagent', agent, 'allow')
 		}
-		const paseoEffect = name === 'limitless' ? 'allow' : 'deny'
-		for (const tool of [
-			...paseoWorkspaceTools,
-			...paseoManagementTools,
-			'browser_snapshot',
-			'future_tool',
-		])
-			expectEffect(`paseo_${tool}`, '*', paseoEffect)
 		if (supportAgents.includes(name)) {
 			expectEffect('question', '*', 'deny')
 			expectEffect('subagent', 'research', name === 'research' ? 'deny' : 'allow')

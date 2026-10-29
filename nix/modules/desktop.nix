@@ -11,7 +11,6 @@ let
   clients = [
     "opencode"
     "t3"
-    "paseo"
   ];
   desktopOptions = name: {
     enable = lib.mkEnableOption "the ${name} desktop client, independently of the Limitless workspace and services";

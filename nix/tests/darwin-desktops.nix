@@ -31,7 +31,6 @@ let
   clients = {
     opencode = "opencode-desktop";
     t3 = "t3-code";
-    paseo = "paseo";
   };
   settings = lib.mapAttrs (_: _: { desktop.enable = true; }) clients;
   defaults = (evaluate { } { }).config;
@@ -49,7 +48,6 @@ assert lib.assertMsg (
     lib.sort builtins.lessThan all.homebrew.casks == [
       "existing-app"
       "opencode-desktop"
-      "paseo"
       "t3-code"
     ]
 ) "Desktop flags must add the stable casks and preserve existing applications";

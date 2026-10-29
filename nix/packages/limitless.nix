@@ -66,19 +66,15 @@ pkgs.stdenvNoCC.mkDerivation {
     }
     buildHostedPlugin packages/limitless/index.ts limitless
     buildHostedPlugin packages/limitless/tui.ts tui
-    # Paseo checks for an active plugin with ID `paseo`, so its bridge client is a separate plugin.
-    buildHostedPlugin packages/limitless/paseo/plugin.ts paseo-plugin
-    # Bridges run outside OpenCode, so they must carry their own dependencies.
-    # They run under Bun, which provides undici; the bridges use Node's HTTP client
-    # and never call platform-node's undici client.
-    for bridge in t3 paseo; do
-      bun build "packages/limitless/$bridge/cli.ts" \
-        --target=node \
-        --format=esm \
-        --packages=bundle \
-        --external undici \
-        --outfile="dist/$bridge.js"
-    done
+    # The T3 bridge runs outside OpenCode, so it must carry its own dependencies.
+    # It runs under Bun, which provides undici; the bridge uses Node's HTTP client
+    # and never calls platform-node's undici client.
+    bun build packages/limitless/t3/cli.ts \
+      --target=node \
+      --format=esm \
+      --packages=bundle \
+      --external undici \
+      --outfile=dist/t3.js
   '';
 
   doCheck = true;
@@ -86,7 +82,7 @@ pkgs.stdenvNoCC.mkDerivation {
     bun -e '
       const assert = require("node:assert/strict");
       const fs = require("node:fs");
-      for (const name of ["limitless", "tui", "paseo-plugin"]) {
+      for (const name of ["limitless", "tui"]) {
         const { inputs } = JSON.parse(fs.readFileSync(`dist/''${name}.meta.json`, "utf8"));
         const bundled = Object.keys(inputs);
         assert(bundled.length > 0, `Missing build inputs for ''${name}`);
@@ -106,10 +102,6 @@ pkgs.stdenvNoCC.mkDerivation {
     cp "dist/tui.js" "$out/tui.js"
     cp "dist/t3.js" "$out/t3.js"
     cp -r packages/limitless/t3/prompts "$out/prompts"
-    cp "dist/paseo.js" "$out/paseo.js"
-    mkdir -p "$out/paseo"
-    cp "dist/paseo-plugin.js" "$out/paseo/index.js"
-    cp -r packages/limitless/paseo/prompts "$out/paseo/prompts"
     # OpenCode's TUI compiles discovered Solid sources and links them to its own runtime.
     mkdir -p "$out/cache-status"
     cp packages/limitless/cache-status/tui.tsx packages/limitless/cache-status/status.ts "$out/cache-status/"

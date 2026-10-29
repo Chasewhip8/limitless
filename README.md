@@ -29,15 +29,15 @@ Run `opencode`, or its `oc` shell alias, from a project. It discovers or starts
 its native background service. Connect model providers through `/connect`.
 
 Limitless disables OpenCode's built-in browser plugin (`opencode.browser`) to
-avoid conflicts with T3 Code's and Paseo's browser tools. Use either for browser access.
+avoid conflicts with T3 Code's browser tools. Use them for browser access.
 
 ## Included capabilities
 
 - **Agents:** `limitless`, a research subagent, and technical and design
   Oracle advisers.
-- **Clients:** optional supervised [T3 Code](#t3-code) and [Paseo](#paseo)
-  environments, both served by the one managed OpenCode service, plus opt-in
-  [desktop apps](#desktop-clients) for OpenCode, T3 Code and Paseo.
+- **Clients:** an optional supervised [T3 Code](#t3-code) environment served by
+  the managed OpenCode service, plus opt-in [desktop apps](#desktop-clients) for
+  OpenCode and T3 Code.
 - **Skills:** `repository-setup` for parallel worktrees and `pull-request` for
   end-to-end PR delivery.
 - **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
@@ -134,8 +134,8 @@ Tool access follows the agent's role:
 | Agents | Access |
 | --- | --- |
 | `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection |
-| `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell and edits; no T3 or Paseo tools; deny artifact creation and session changes |
-| `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell and edits; no T3 or Paseo tools; deny external mutations, artifact creation and session changes |
+| `oracle-solve`, `oracle-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell and edits; no T3 tools; deny artifact creation and session changes |
+| `research` | Executor's read-only connection, or audited reads in direct-MCP mode; investigative shell and edits; no T3 tools; deny external mutations, artifact creation and session changes |
 
 With Executor enabled, Research can use only `executor-read`; Executor's
 connection policy owns read-only enforcement. Direct MCPs are denied to Research,
@@ -361,7 +361,6 @@ nix/modules/
 ├── opencode.nix   # runtime, agents, plugins, and configuration assembly
 ├── service.nix    # optional Linux supervision and native service binding
 ├── t3.nix         # optional headless T3 service and OpenCode provider binding
-├── paseo.nix      # optional Paseo daemon and OpenCode provider binding
 ├── desktop.nix    # independent Linux desktop installation
 ├── darwin.nix     # macOS desktop installation through Homebrew
 └── mcp.nix        # named connections and permission generation
@@ -597,30 +596,28 @@ On other systemd distributions, an administrator can enable lingering with
 
 ## Desktop clients
 
-Limitless installs OpenCode Desktop, T3 Code and Paseo through independent flags:
+Limitless installs OpenCode Desktop and T3 Code through independent flags:
 
 ```nix
 programs.limitless = {
   opencode.desktop.enable = true;
   t3.desktop.enable = true;
-  paseo.desktop.enable = true;
 };
 ```
 
 On **x86_64 Linux**, import `limitless.homeModules.default` into Home Manager.
-The flags install pinned AppImages, also exported as `packages.opencode-desktop`,
-`packages.t3-desktop` and `packages.paseo-desktop`. Each has a `desktop.package`
+The flags install pinned AppImages, also exported as `packages.opencode-desktop`
+and `packages.t3-desktop`. Each has a `desktop.package`
 override. Desktop-only use does not require `programs.limitless.enable` and does
 not provision agents, configuration or background services.
 
 On **macOS**, import `limitless.darwinModules.default` into nix-darwin and set the
 same flags in the system configuration. They install the native Homebrew casks
-`opencode-desktop`, `t3-code` and `paseo`. Homebrew must already be installed.
+`opencode-desktop` and `t3-code`. Homebrew must already be installed.
 The module enables Homebrew by default when a desktop is requested, but leaves
 its upgrade and cleanup policy to the host. Cask versions follow Homebrew rather
 than the Linux pins, and apps may update themselves. Use cleanup `"uninstall"`,
-not `"zap"`, to preserve app data when removing or switching clients. Paseo's cask
-also installs its CLI; cask upgrades/removal can stop the Mac's local Paseo daemon.
+not `"zap"`, to preserve app data when removing or switching clients.
 
 ```text
 Linux Home Manager flags → pinned desktop packages
@@ -643,12 +640,11 @@ Selecting a remote server in Desktop does not disable local service startup.
 On Macs without a configured local Limitless workspace, this local service uses
 ordinary OpenCode configuration. Add remote servers through Desktop's pairing UI.
 
-T3 and Paseo desktop installation likewise does not configure their local backend
-settings. Follow the sections below when attaching them to managed Linux services.
-Their Linux packages ship with matching server versions; independently updated
-clients need compatible protocols and feature support. Home Manager restarts T3
-on changed units when service switching is enabled. Paseo keeps the old daemon
-running until you restart it when idle.
+T3 desktop installation likewise does not configure its local backend settings.
+Follow the section below when attaching it to a managed Linux service. Its Linux
+package ships with a matching server version; an independently updated client
+needs compatible protocols and feature support. Home Manager restarts T3 on
+changed units when service switching is enabled.
 
 ## T3 Code
 
@@ -776,7 +772,7 @@ The bridge never interrupts sessions or stops the service.
 
 ### Compatibility boundary
 
-The bridge (`packages/limitless/t3/{cli,bridge,rewrites}.ts` over the shared
+The bridge (`packages/limitless/t3/{cli,bridge,rewrites}.ts` over
 `packages/limitless/bridge/`) is an Effect loopback proxy. It authenticates T3,
 forwards HTTP and server-sent events to the managed service with that service's
 credentials, and rewrites three requests: the
@@ -799,184 +795,6 @@ x86_64 and ARM Linux. T3 uses the configured default OpenCode agent; this releas
 does not include the per-thread agent picker proposed in
 [pingdotgg/t3code#21532](https://github.com/pingdotgg/t3code/pull/21532).
 Keep the integration checks with runtime upgrades.
-
-## Paseo
-
-[Paseo](https://paseo.sh) runs agents in workspaces and worktrees from its desktop,
-web and mobile apps. Limitless connects it to the managed OpenCode service through
-the packaged `opencode-paseo` launcher, so Paseo agents, the TUI and T3 share one
-OpenCode server, one session database, and its restart recovery. Paseo would
-otherwise start OpenCode servers of its own against the same database.
-
-```text
-Paseo desktop / web ─► paseo.service ─launches─► opencode-paseo ─► opencode.service
-                                                       │                 │ paseo plugin
-                                                       └── registration ─┘ ⇄ Paseo tools
-```
-
-### Paseo setup
-
-```nix
-programs.limitless = {
-  enable = true;
-  opencode.service.enable = true;
-  paseo.enable = true;
-};
-```
-
-The `paseo` user service runs the pinned daemon (`packages.paseo`, Paseo `0.13.0`)
-on `127.0.0.1:6767` with `PASEO_HOME=~/.paseo`. Options `paseo.port`, `paseo.home`,
-`paseo.browserTools` and `paseo.package` override these defaults. Before each start
-it merges these keys into Paseo's `config.json`, preserving everything else,
-including a password hash from `paseo daemon set-password`:
-
-- `daemon.listen` on loopback, `daemon.relay.enabled = false`;
-- `daemon.mcp.enabled` and `injectIntoAgents`, so agents receive Paseo's tools;
-- `daemon.browserTools.enabled` from `paseo.browserTools`;
-- `agents.providers.opencode` enabled with `command = [ "<profile>/bin/opencode-paseo" ]`.
-
-Like T3's provisioning, the merge refuses to run while another daemon holds
-`paseo.pid` in that home, ignoring a lock left by an earlier boot as Paseo does, and
-refuses symlinked or malformed configuration files. Limitless does not publish the port itself;
-configure a private HTTPS proxy as described below. Set a password before exposing
-the daemon API. Rebuilds keep the old daemon running; restart
-it with `systemctl --user restart paseo` when idle.
-
-Enable `paseo.desktop.enable` to install the desktop app (on Linux, the same
-release). It attaches to the running daemon in `~/.paseo`; turn off its built-in
-daemon management in the desktop's settings so it never starts its own.
-
-### Paseo over a private HTTPS proxy
-
-Keep the daemon on loopback and terminate HTTPS at the host's proxy, for example
-Tailscale Serve. Configure the exact external hostname without its scheme or port:
-
-```nix
-programs.limitless.paseo.hostnames = [ "pc.example.ts.net" ];
-```
-
-Limitless supplies `PASEO_HOSTNAMES` at service startup. Paseo combines these names
-with its persisted allowlist in memory, without saving them. Localhost and IP
-addresses remain allowed. Removing a
-name from Nix removes this launch allowance on restart, not any independently
-persisted allowance. Host validation does not authenticate clients.
-
-Set a password interactively on the daemon host with `paseo daemon set-password`,
-then restart **the managed unit** with `systemctl --user restart paseo` when all
-agents are idle. Use an ordinary terminal: restarting Paseo interrupts its agents.
-For a non-default `paseo.home`, set `PASEO_HOME` to that directory when running the
-password command. Nix never stores the password; Paseo stores its hash privately.
-Rebuilds keep the previous daemon running, and neither setting the password nor
-reloading Paseo applies password authentication to that running process.
-
-Before starting the HTTPS proxy, an unauthenticated request to
-`http://127.0.0.1:6767/api/status` with the external `Host` header must return
-**401**. A **200** means no password is active; **403** means the hostname is not
-allowed. `/api/health` cannot establish that authentication is enabled. Preserve
-the external Host header and WebSocket upgrades through the proxy.
-
-**Workspace services have a separate trust boundary.** Paseo routes registered
-workspace-service hostnames before daemon authentication. A peer able to reach
-the proxy can supply such a Host header and reach that service without the Paseo
-password; the service's own authentication still applies. A direct Tailscale
-Serve route therefore trusts permitted tailnet peers with those services. The
-password protects Paseo's daemon APIs, not every route on the listener.
-
-On your phone, connect Tailscale, then use Paseo's **Settings → Add host → Direct
-connection** with the hostname, the proxy's HTTPS port, **Use SSL** enabled, and
-the password. A desktop app on the daemon host also needs that password saved for its connection to
-the systemd-managed daemon; it does not receive Desktop's automatic local-daemon
-credential. Local direct connections use `localhost:6767` with SSL off. Paseo's
-relay stays disabled, and agent tool bridges keep their own capability tokens.
-
-### Paseo behavior
-
-Paseo starts `opencode-paseo serve` wherever it would start an OpenCode server.
-The launcher answers `--version` and other subcommands with the pinned OpenCode,
-and `serve` starts only a loopback proxy to the managed service, waiting up to 20
-seconds for the service at login. Paseo's tools reach agents through Paseo's tool
-bridge, a loopback endpoint in the Paseo daemon. The launcher records its address,
-token and tool list in `$XDG_RUNTIME_DIR/limitless/paseo-tool-bridge.json` (mode
-0600) for the `paseo` plugin in the managed service, leaving an unchanged
-registration untouched. A launch fails when a different, still-running Paseo
-daemon owns the registration; two daemons launching at the same moment can both
-register, and the later one wins. If a launcher from a crashed Paseo worker wins,
-Paseo sessions lose their tools until Paseo launches another server; restart the
-`paseo` service to force it.
-
-The proxy rewrites three kinds of request:
-
-- Session creation drops Paseo's session permission rules, which would override
-  the agents' own rules and pass to their native children.
-- Paseo's default `build` agent, at creation or on a switch, becomes the configured
-  default agent.
-- Per-agent MCP registration is refused: Paseo isolates those servers by giving the
-  agent its own OpenCode server, and in the shared service they would reach every
-  session in the directory.
-
-The `paseo` plugin satisfies Paseo's readiness check and provides Paseo's tools as
-direct `paseo_*` tools. Before each step it asks Paseo which agent drives the
-session, walking up to the parent for native children: sessions Paseo does not
-drive, such as TUI and T3 sessions, see no Paseo tools, and an agent sees only the
-tools Paseo allows it. Paseo's terminal tools (`list_terminals`, `create_terminal`,
-`kill_terminal`, `capture_terminal`, `send_terminal_keys`) are never provided;
-agents use OpenCode's shell for commands and background processes such as dev
-servers. Paseo sessions also receive a short Paseo guidance block. A
-stopped daemon removes the tools at once; a stalled one after a 1.5-second lookup,
-which then delays each step of `limitless` sessions until it
-answers or stops. The plugin watches the registration and checks it again before
-admitting a prompt, so a new agent's first step has the current tools.
-
-Agent roles add their own limits. Research and both Oracles receive no Paseo
-tools. Their delegation and returns use OpenCode's native subagents.
-
-Paseo replaces a session's shell environment with its daemon's. Shells in Paseo
-sessions instead keep the managed service's environment plus Paseo's `PASEO_*`
-variables, such as `PASEO_AGENT_ID`. Process-level environment Paseo sets for a
-single agent does not reach the shared service.
-
-Paseo stops an agent by closing its binding and relies on that agent's OpenCode
-server exiting. When the daemon that bound an execution closes its binding, the
-plugin interrupts the execution at its next step, including after the session moves
-between directories. Once an execution ends, a later prompt to that session runs
-normally without Paseo tools.
-
-The shared service outlives the launchers. If an `opencode-paseo` process dies
-mid-turn, Paseo reports the turn as failed while OpenCode finishes it, and rejects
-a new prompt until it does. Paseo's `run --output-schema` is unsupported: it needs
-a structured-output tool the `paseo` plugin does not provide. Paseo's own generated
-names and messages do not use it.
-
-### Paseo troubleshooting
-
-A working setup shows each of these:
-
-- `systemctl --user status paseo` shows the only Paseo daemon. The desktop's Daemon
-  settings show "Attached to an existing daemon", with "Manage built-in daemon" off.
-- `$XDG_RUNTIME_DIR/limitless/paseo-tool-bridge.json` exists, with mode 0600, once
-  Paseo has first launched `opencode-paseo`.
-- OpenCode's log, `~/.local/share/opencode/log/opencode.log`, shows the `paseo`
-  plugin loading. Paseo's log is `journalctl --user -u paseo`.
-- Inside a Paseo agent, `echo $PASEO_AGENT_ID` prints its ID and `paseo_list_agents`
-  lists it. Its `$PATH` starts with OpenCode's ripgrep entry followed by
-  `/run/wrappers/bin`: the shell has the OpenCode service's environment rather than
-  the Paseo daemon's.
-
-### Paseo compatibility boundary
-
-`opencode-paseo` (`packages/limitless/paseo/{cli,bridge,rewrites,registration}.ts`
-over the shared `packages/limitless/bridge/`), the plugin
-(`packages/limitless/paseo/{plugin,tool-bridge}.ts`) and the settings merge
-reimplement Paseo's OpenCode integration against Paseo internals that carry no
-version: its launch contract, readiness check, `/_internal/opencode` tool bridge,
-configuration schema and daemon lock. The `paseo-protocol` check pins the upstream
-files they depend on; bump the Paseo input deliberately and review what the check
-names. Upstream's recorded npm dependency hash does not match what `fetchNpmDeps`
-produces for its lockfile, with its own nixpkgs or ours, so `nix/packages/paseo.nix`
-records the verified hash; refresh it from the build's reported hash when bumping.
-
-This is not a sandbox: Paseo's tool limits are agent permissions, and every agent
-can reach the host through its shell.
 
 ## Notifications
 
@@ -1037,6 +855,7 @@ This release removes these options and packages:
 
 | Removed | Migration |
 | --- | --- |
+| `paseo.*`, `paseo.desktop.enable`, `opencode-paseo`, `paseo_*` tools, `packages.paseo` and `packages.paseo-desktop` | Remove `programs.limitless.paseo` settings and any Paseo hostname or proxy configuration. Use T3 Code or the OpenCode TUI with the managed service. The Paseo daemon's data in `~/.paseo` is left in place. |
 | `lsp.*`, bundled language servers, `ast_grep_*` and `lsp_*` tools | Remove `programs.limitless.lsp` settings. Install any language servers or TypeScript needed on PATH through `home.packages`. Use project tooling or an independently installed `ast-grep` CLI through the shell. |
 | `lead` and `unit` agents, automatic Unit worktree placement | Finish active Lead/Unit runs before upgrading, then select `limitless` to continue existing sessions. Use separate Limitless sessions for independent changes and native subagents for Research and the Oracles. Existing sessions and worktrees remain available. |
 | `slack.*`, Gary, Slack tools | Remove Slack configuration and retire its bot credentials when no longer used. |
@@ -1090,15 +909,15 @@ rendering, using temporary profiles and no live T3 state or external websites.
 
 Runtime, Limitless plugin SDK, and schema are pinned to `2.1.4`, with
 `effect@4.0.1`; update them together. Hosted plugins use OpenCode's shared Effect
-and plugin runtime; the standalone T3 and Paseo bridges bundle their own dependencies.
+and plugin runtime; the standalone T3 bridge bundles its own dependencies.
 The cache-status plugin's type-only dev dependencies (`@opencode/theme`,
 `@opentui/*`, `solid-js`) follow the same OpenCode release. Re-audit native
 capabilities and MCP read exceptions when upgrading. Vendor references for the
 current allowlists are linked in the integration table above.
 
-When upgrading OpenCode, T3 or Paseo, update the matching `*-desktop.nix` hash and
-build `.#opencode-desktop`, `.#t3-desktop` and `.#paseo-desktop`. The x86_64 Linux
-flake checks build all three to catch stale desktop pins before deployment.
+When upgrading OpenCode or T3, update the matching `*-desktop.nix` hash and
+build `.#opencode-desktop` and `.#t3-desktop`. The x86_64 Linux flake checks
+build both to catch stale desktop pins before deployment.
 
 When upgrading OpenCode, verify that the TUI still replaces a built-in handler with
 a later external definition of the same ID, that the built-in notifications ID is

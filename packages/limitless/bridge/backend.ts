@@ -9,8 +9,6 @@ export interface Backend {
 export class BridgeError extends Schema.TaggedError<BridgeError>()('BridgeError', {
 	status: Schema.Number,
 	message: Schema.String,
-	/** The managed service is not running yet; a launcher may wait for it. */
-	unavailable: Schema.optional(Schema.Boolean),
 }) {}
 
 export class ServiceBackend extends Context.Service<
@@ -44,7 +42,6 @@ export const managedBackend = Layer.effect(ServiceBackend)(
 				return yield* new BridgeError({
 					status: 502,
 					message: 'The managed OpenCode service is unavailable; start it before connecting',
-					unavailable: true,
 				})
 			const headers = Service.headers({
 				url: endpoint.url,

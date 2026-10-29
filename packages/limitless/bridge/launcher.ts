@@ -1,16 +1,16 @@
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
-import { Config, Console, type Duration, Effect, Layer, Redacted, Schedule, Schema } from 'effect'
+import { Config, Console, Effect, Layer, Redacted, Schema } from 'effect'
 import { HttpServer, HttpServerError } from 'effect/http'
 import { ChildProcess, ChildProcessSpawner } from 'effect/process'
 import { managedBackend, ServiceBackend } from './backend'
 import type { BridgeRouter } from './requests'
 import { BridgeConfigError, layer as bridgeLayer } from './server'
 
-export class LauncherError extends Schema.TaggedError<LauncherError>()('LauncherError', {
+class LauncherError extends Schema.TaggedError<LauncherError>()('LauncherError', {
 	message: Schema.String,
 }) {}
 
-export const openCodeExecutable = (launcher: string) =>
+const openCodeExecutable = (launcher: string) =>
 	Config.String('LIMITLESS_OPENCODE_BIN').pipe(
 		Effect.mapError(() => new LauncherError({ message: `Use the packaged ${launcher} launcher` })),
 	)
@@ -27,25 +27,18 @@ export const printOpenCodeVersion = (launcher: string) =>
 		yield* Console.log(version.trim())
 	})
 
-export interface ServeOptions<E, R> {
+export interface ServeOptions {
 	readonly launcher: string
 	readonly client: string
 	readonly route: BridgeRouter
 	readonly hostname: string
 	readonly port: number
-	/**
-	 * How long to wait for the managed service before failing. A client launched
-	 * at boot can otherwise start before the service is listening.
-	 */
-	readonly serviceWait?: Duration.Input
-	/** Runs once the managed service is reachable, before the server is announced. */
-	readonly prepare?: Effect.Effect<void, E, R>
 }
 
 /**
  * Stdout is the client's server-discovery protocol; reserve it for the listening announcement.
  */
-export const serveBridge = <E = never, R = never>(options: ServeOptions<E, R>) =>
+export const serveBridge = (options: ServeOptions) =>
 	Effect.gen(function* () {
 		const password = yield* Config.Redacted('OPENCODE_PASSWORD').pipe(
 			Effect.mapError(
@@ -65,19 +58,7 @@ export const serveBridge = <E = never, R = never>(options: ServeOptions<E, R>) =
 		return yield* Effect.gen(function* () {
 			// Fail visibly at launch rather than answering the client's first check with a 502.
 			const backend = yield* ServiceBackend
-			yield* backend.resolve.pipe(
-				options.serviceWait === undefined
-					? (resolve) => resolve
-					: Effect.retry({
-							// Only an absent service is worth waiting for; misconfiguration fails at once.
-							while: (error) => error.unavailable === true,
-							schedule: Schedule.spaced('250 millis').pipe(
-								Schedule.upTo({ duration: options.serviceWait }),
-							),
-						}),
-				Effect.mapError(({ message }) => new LauncherError({ message })),
-			)
-			if (options.prepare !== undefined) yield* options.prepare
+			yield* backend.resolve.pipe(Effect.mapError(({ message }) => new LauncherError({ message })))
 			// Clients read this exact line to find the server they launched.
 			yield* HttpServer.addressFormattedWith((url) =>
 				Console.log(`opencode server listening on ${url}`),

@@ -21,9 +21,6 @@ permissions:
     - action: subagent
       resource: research
       effect: allow
-    - action: paseo_*
-      resource: "*"
-      effect: deny
 ---
 
 # Oracle Solve
