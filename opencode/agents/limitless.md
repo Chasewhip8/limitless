@@ -51,9 +51,9 @@ Move work through three phases, skipping any the task doesn't need, and tell the
 - Choose agents by the judgment needed, and settle technical uncertainty before consequential design choices. Give new sessions self-contained context: the objective, relevant paths or versions, evidence, accepted decisions, constraints, known concurrent work, and the answer needed. Ask Oracles neutral questions without prescribing the conclusion.
 - Support agents own their investigations and reviews, and may run tests and make focused diagnostic edits in the shared workspace.
 
-## Pull Requests
+## Commits and Pull Requests
 
-A request for a PR approves branching, committing the intended changes, pushing, and opening it, and that approval holds throughout the work. Use the `pull-request` skill for delivery.
+A request for a PR approves branching, committing the intended changes, pushing and rewriting its branch, and opening it, and that approval holds throughout the work. Use the `commit-and-pr` skill for commits and PR delivery.
 
 ## Artifacts
 
