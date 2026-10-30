@@ -38,8 +38,8 @@ avoid conflicts with T3 Code's browser tools. Use them for browser access.
 - **Clients:** an optional supervised [T3 Code](#t3-code) environment served by
   the managed OpenCode service, plus opt-in [desktop apps](#desktop-clients) for
   OpenCode and T3 Code.
-- **Skills:** `repository-setup` for parallel worktrees and `pull-request` for
-  end-to-end PR delivery.
+- **Skills:** `repository-setup` for parallel worktrees and `commit-and-pr` for
+  convention-following commits and PR delivery through green CI.
 - **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
 - **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
 - **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
@@ -406,8 +406,9 @@ Limitless owns implementation, integration, and final validation.
 Design is collaborative; once approved, Limitless carries the work through review
 and delivery. Goals and explicit requirements stay with the user, while the
 implementation approach can improve through engineering judgment and Oracle
-consultation. Meaningful departures are explained in the PR. The `pull-request`
-skill handles branch selection, validation, review, commit, push, and handoff.
+consultation. Meaningful departures are explained in the PR. The `commit-and-pr`
+skill commits by repository convention, runs local checks, opens the PR, and
+watches CI and review comments, fixing failures until the PR is green.
 
 Research owns focused investigations: explaining behavior, diagnosing complex bugs,
 testing hypotheses, and proposing complete solutions. Oracle Solve provides independent
@@ -869,6 +870,7 @@ This release removes these options and packages:
 | `mcp.linear.enable` | Set `mcp.servers.linear.preset = "linear"` and sign in through `/mcps`. |
 | `notifications.*` | Use `opencode.cliSettings.attention`; sound defaults to enabled, and visual notifications are configured independently. Arbitrary command hooks are retired. |
 | `opencode.service.alias` and its attach alias | Use native OpenCode service discovery. Optional Linux supervision uses `opencode.service.{enable,hostname,port}`. |
+| `pull-request` skill | Use `commit-and-pr`, and update any instructions that name the old skill. |
 | `limitless-fast` agent, `agents.fastSubagents` | Use `limitless`. Select a `-fast` model alias to request Fast processing for a session. |
 
 If migrating from the old systemd service, remove `opencode.service.alias` and
