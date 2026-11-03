@@ -385,19 +385,44 @@ async function verify() {
 		'Only primary agents receive T3 guidance, including generate and compaction'
 
 	const events = new AbortController()
-	const stream = await fetch(new URL('/api/event', bridge.url), {
+	const stream = await fetch(new URL('/api/event?types=session.execution.succeeded', bridge.url), {
 		headers: { authorization: bridgeAuth },
 		signal: AbortSignal.any([events.signal, AbortSignal.timeout(10000)]),
 	})
 	assert.equal(stream.status, 200)
 	assert(stream.headers.get('content-type').includes('text/event-stream'))
-	assert(
-		new TextDecoder()
-			.decode((await stream.body.getReader().read()).value)
-			.includes('server.connected'),
-	)
+	const reader = stream.body.getReader()
+	const decoder = new TextDecoder()
+	assert(decoder.decode((await reader.read()).value).includes('server.connected'))
+	await prompt(parent.id, { kind: 'bootstrap', tag: 'notification-boundary' })
+	let buffered = ''
+	let completion
+	while (!completion) {
+		const chunk = await reader.read()
+		assert(!chunk.done, 'Event stream ended before the completion boundary')
+		buffered += decoder.decode(chunk.value, { stream: true })
+		const frames = buffered.split('\n\n')
+		buffered = frames.pop()
+		for (const frame of frames) {
+			if (!frame.startsWith('data: ')) continue
+			const event = JSON.parse(frame.slice(6))
+			if (event.type === 'session.execution.succeeded' && event.data.sessionID === parent.id)
+				completion = event
+		}
+	}
+	const completedHistory = (await api('GET', `/api/session/${parent.id}/context`)).data
+	const boundary = completedHistory.at(-1)
+	assert.equal(boundary.type, 'idle')
+	assert.equal(boundary.outcome, 'succeeded')
+	assert.equal(boundary.id, completion.id.replace(/^evt_/, 'msg_'))
+	const answer = completedHistory.at(-2)
+	assert.equal(answer.type, 'assistant')
+	assert.equal(answer.finish, 'stop')
+	assert.notEqual(answer.time.completed, undefined)
 	events.abort()
 	report.integration.sse = 'native server.connected streamed through bridge'
+	report.integration.notificationBoundary =
+		'Native success event projects the matching idle message after the final response'
 	const unrelated = (
 		await api(
 			'POST',

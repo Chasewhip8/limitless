@@ -25,15 +25,15 @@
   versionCheckHook,
 }:
 let
-  version = "0.1.3";
+  version = "0.1.6";
   sources = {
     aarch64-linux = {
       arch = "arm64";
-      hash = "sha256-Vt+HzLN9RqD2U3Szh5mKCKpz8SP9jADBE5yLTHvUOdU=";
+      hash = "sha256-twjwWSAHdvUGI6dmhUhB5A7aC7Z2FCEc+LaQkpXOINo=";
     };
     x86_64-linux = {
       arch = "x64";
-      hash = "sha256-Y80PBUfu9iu07OJ/p3m7+eK6hTHMaFQlaLqeeIONxoQ=";
+      hash = "sha256-fPMdqQ3uQfUk3VtnnrttQEY3yl2dxv2LwBlRHVe7d+Y=";
     };
   };
   source = sources.${stdenv.hostPlatform.system};

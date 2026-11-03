@@ -2,7 +2,7 @@
 
 > A Home Manager module for a ready-to-use OpenCode 2 workspace.
 
-Limitless pins OpenCode `2.1.4`, supplies coding agents, artifact and source-research
+Limitless pins OpenCode `2.2.5`, supplies coding agents, artifact and source-research
 tools, and configures optional first-party MCP connections. OpenCode owns its
 service discovery, OAuth credentials, Code Mode, and native
 notification delivery. Home Manager owns packages and non-secret configuration, with
@@ -793,10 +793,10 @@ independent T3 OAuth connections. Underscore-containing thread namespaces, such 
 a fork's `<thread>_fork`, receive stable `t3-code-<32 hex>` aliases so
 prefix-related names cannot grant sibling tools.
 
-This adapter targets OpenCode `2.1.4` and upstream stable T3 `0.1.3` on both
-x86_64 and ARM Linux. T3 uses the configured default OpenCode agent; this release
-does not include the per-thread agent picker proposed in
-[pingdotgg/t3code#21532](https://github.com/pingdotgg/t3code/pull/21532).
+This adapter targets OpenCode `2.2.5` and upstream stable T3 `0.1.6` on both
+x86_64 and ARM Linux. T3's OpenCode 2 provider still selects `build` for normal
+mode, which the bridge maps to the configured default agent. The per-thread
+agent picker is not available on this V2 path.
 Keep the integration checks with runtime upgrades.
 
 ## Notifications
@@ -911,11 +911,14 @@ nix run .#checks.x86_64-linux.t3-browser
 It exercises isolated shared and persistent browser contexts plus direct HTML
 rendering, using temporary profiles and no live T3 state or external websites.
 
-Runtime, Limitless plugin SDK, and schema are pinned to `2.1.4`, with
-`effect@4.0.1`; update them together. Hosted plugins use OpenCode's shared Effect
+Runtime, Limitless plugin SDK, and schema are pinned to `2.2.5`, with
+`effect@4.0.6`; update them together. Hosted plugins use OpenCode's shared Effect
 and plugin runtime; the standalone T3 bridge bundles its own dependencies.
 The cache-status plugin's type-only dev dependencies (`@opencode/theme`,
-`@opentui/*`, `solid-js`) follow the same OpenCode release. Re-audit native
+`@opentui/*`, `solid-js`) follow the same OpenCode release: `2.2.5`, `0.8.0`,
+and `1.9.17`, respectively. The `@effect/platform-node-shared` override keeps
+the standalone bridge on Effect's matching `4.0.6` platform runtime instead of
+resolving a newer, incompatible peer requirement. Re-audit native
 capabilities and MCP read exceptions when upgrading. Vendor references for the
 current allowlists are linked in the integration table above.
 
