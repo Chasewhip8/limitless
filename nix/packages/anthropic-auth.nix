@@ -39,8 +39,12 @@ pkgs.stdenvNoCC.mkDerivation {
   version = packageVersion;
   inherit src;
 
-  # OpenCode disables WebSockets for every provider matched by an HTTP hook.
-  patches = [ ../../patches/opencode-anthropic-auth-provider-hooks.patch ];
+  patches = [
+    # OpenCode disables WebSockets for every provider matched by an HTTP hook.
+    ../../patches/opencode-anthropic-auth-provider-hooks.patch
+    # https://platform.claude.com/docs/en/api/overview#request-size-limits
+    ../../patches/opencode-anthropic-auth-request-limit.patch
+  ];
 
   nativeBuildInputs = [ pkgs.bun ];
 
