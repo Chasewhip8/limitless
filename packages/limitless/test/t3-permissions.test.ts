@@ -1,15 +1,31 @@
+import { readdirSync, readFileSync } from 'node:fs'
 import type { Permission } from '@opencode/schema/permission'
 import { describe, expect, test } from 'vitest'
 import {
 	canonicalT3Namespace,
 	hasT3Permissions,
+	isT3SupportAgent,
 	normalizeT3Permissions,
 	ownT3Namespace,
 	samePermissionRules,
 } from '../t3/permissions'
 import toolNames from './fixtures/t3-tool-names.json'
 
-const supportAgents = ['research', 'oracle-solve', 'oracle-design']
+const supportAgents = ['research', 'oracle']
+test('every packaged support agent receives T3 isolation', () => {
+	const directory = new URL('../../../opencode/agents/', import.meta.url)
+	const packagedSupportAgents = readdirSync(directory)
+		.filter((file) => file.endsWith('.md'))
+		.filter((file) => {
+			const contents = readFileSync(new URL(file, directory), 'utf8')
+			const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(contents)?.[1] ?? ''
+			return /^mode: subagent$/m.test(frontmatter) && !/^disabled: true$/m.test(frontmatter)
+		})
+		.map((file) => file.slice(0, -3))
+	expect(packagedSupportAgents.sort()).toEqual([...supportAgents].sort())
+	for (const agent of packagedSupportAgents) expect(isT3SupportAgent(agent)).toBe(true)
+	expect(isT3SupportAgent('limitless')).toBe(false)
+})
 const namespaces = [
 	't3-code-35ce915b-46a3-4496-9544-eaf1261c948d',
 	't3-code-thread_x',
@@ -125,7 +141,7 @@ describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 	test('replaces an inherited primary or support policy without accumulating rules', () => {
 		const primary = normalizeT3Permissions(t3Rules(sourceNamespace), 'limitless')
 		const child = normalizeT3Permissions(primary, 'research')
-		expect(normalizeT3Permissions(child, 'oracle-design')).toEqual(child)
+		expect(normalizeT3Permissions(child, 'oracle')).toEqual(child)
 		expect(normalizeT3Permissions(child, 'research')).toEqual(child)
 		expect(normalizeT3Permissions(child, 'limitless')).toEqual(primary)
 		expect(ownT3Namespace(child)).toBe(namespace)

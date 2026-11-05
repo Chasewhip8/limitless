@@ -92,7 +92,7 @@ in
       connection = lib.mkOption {
         type = lib.types.strMatching "[A-Za-z0-9_-]{0,64}";
         default = "";
-        description = "Scoped read/write connection ID shared by main and Oracles. Required unless fullAccess is explicitly enabled; leave empty with fullAccess.";
+        description = "Scoped read/write connection ID shared by Limitless and Oracle. Required unless fullAccess is explicitly enabled; leave empty with fullAccess.";
       };
       readConnection = lib.mkOption {
         type = lib.types.nullOr (lib.types.strMatching "[A-Za-z0-9_-]{1,64}");

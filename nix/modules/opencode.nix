@@ -116,7 +116,7 @@ let
     };
     agents =
       (mergedConfig.agents or { })
-      // lib.genAttrs [ "limitless" "oracle-solve" "oracle-design" ] (
+      // lib.genAttrs [ "limitless" "oracle" ] (
         name:
         (mergedConfig.agents.${name} or { })
         // {
@@ -171,7 +171,7 @@ in
         default = [
           (permissionRule "*" "*" "allow")
         ];
-        description = "Ordered native permissions after the default edit allowance. Defaults to automatic approval for all tools. Managed-repository edit and T3 namespace denials are appended; Research receives read-only MCP rules, while primary agents and Oracles retain read/write MCP access.";
+        description = "Ordered native permissions after the default edit allowance. Defaults to automatic approval for all tools. Managed-repository edit and T3 namespace denials are appended; Research receives read-only MCP rules, while Limitless and Oracle retain read/write MCP access.";
       };
     };
 
@@ -284,6 +284,13 @@ in
     programs.limitless.opencode.cliSettings.attention.sound = lib.mkDefault true;
     programs.limitless._generated.opencodePackage = opencodePackage;
     assertions = [
+      {
+        assertion = lib.all (name: !(builtins.hasAttr name (cfg.opencode.settings.agents or { }))) [
+          "oracle-design"
+          "oracle-solve"
+        ];
+        message = "Move programs.limitless.opencode.settings.agents.oracle-design and oracle-solve overrides to agents.oracle.";
+      }
       {
         assertion =
           !cfg.github.enable || cfg.github.allowedRepos != [ ] || cfg.github.allowUnrestrictedRepos;

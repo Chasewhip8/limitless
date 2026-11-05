@@ -20,11 +20,13 @@ for (const file of await readdir(agentsDirectory)) {
 	agents[basename(file, '.md')] = YAML.parse(frontmatter[1])
 }
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
-assert.equal(agents.limitless?.model, 'openai/gpt-6-astra#xhigh')
+assert.equal(agents.limitless?.model, 'anthropic/claude-opus-5-5#xhigh')
+assert.equal(agents.oracle?.model, 'openai/gpt-6-astra#xhigh')
+assert.equal(agents.research?.model, 'openai/gpt-6.1-sol#xhigh')
 assert.equal(agents.limitless?.mode, 'primary', 'Limitless must be a selectable primary agent')
 assert.notEqual(agents.limitless?.hidden, true, 'Limitless must be visible')
 const enabledAgents = Object.keys(agents).filter((name) => !agents[name].disabled)
-assert.deepEqual(enabledAgents.sort(), ['limitless', 'oracle-design', 'oracle-solve', 'research'])
+assert.deepEqual(enabledAgents.sort(), ['limitless', 'oracle', 'research'])
 
 function matches(pattern, value) {
 	const expression = pattern
@@ -43,7 +45,8 @@ function effectFor(rules, action, resource) {
 }
 
 const primaryAgents = ['limitless']
-const supportAgents = ['research', 'oracle-solve', 'oracle-design']
+const supportAgents = ['research', 'oracle']
+for (const name of supportAgents) assert.equal(agents[name].mode, 'subagent')
 const sharedActions = [
 	'shell',
 	'edit',
@@ -65,7 +68,7 @@ for (const file of files) {
 	const input = JSON.parse(await readFile(file, 'utf8'))
 	Schema.decodeUnknownSync(Config.Info)(input, { onExcessProperty: 'error' })
 	assert.deepEqual(Object.keys(input.agents).sort(), enabledAgents)
-	assert.equal(input.experimental.subagent_depth, 2, 'Allow Limitless → Oracle → Research')
+	assert.equal(input.experimental.subagent_depth, 1, 'Only Limitless delegates')
 	const browserRemoval = input.plugins.lastIndexOf('-opencode.browser')
 	assert(browserRemoval >= 0, `${file}: the native browser plugin must be disabled`)
 	assert(
@@ -122,9 +125,9 @@ for (const file of files) {
 		}
 		if (supportAgents.includes(name)) {
 			expectEffect('question', '*', 'deny')
-			expectEffect('subagent', 'research', name === 'research' ? 'deny' : 'allow')
-			expectEffect('subagent', 'oracle-solve', 'deny')
-			expectEffect('subagent', 'oracle-design', 'deny')
+			for (const target of [...primaryAgents, ...supportAgents, 'custom-agent']) {
+				expectEffect('subagent', target, 'deny')
+			}
 		}
 		expectEffect('edit', '.limitless/repos/example/file.ts', 'deny')
 	}

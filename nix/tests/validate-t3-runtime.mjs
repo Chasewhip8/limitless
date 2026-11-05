@@ -179,12 +179,11 @@ async function verify() {
 	}
 	for (const [agent, tag] of [
 		['research', 'research'],
-		['oracle-solve', 'oracleSolve'],
-		['oracle-design', 'oracleDesign'],
+		['oracle', 'oracle'],
 	])
 		await prompt(parent.id, invoke(agent, tag))
 	const research = await get((await snapshot('research')).sessionID)
-	const oracle = await get((await snapshot('oracleSolve')).sessionID)
+	const oracle = await get((await snapshot('oracle')).sessionID)
 	for (const id of [parent.id, research.id]) {
 		await api('POST', `/api/session/${id}/generate`, {
 			prompt: 'DIAG:{"kind":"bootstrap","tag":"generate"}',
@@ -193,17 +192,16 @@ async function verify() {
 	await prompt(parent.id, invoke('research', 'resumedResearch', { sessionID: research.id }))
 	await prompt(
 		parent.id,
-		invoke('oracle-solve', 'oracleResume', {
+		invoke('oracle', 'oracleResume', {
 			sessionID: oracle.id,
-			child: invoke('research', 'grandchild'),
 		}),
 	)
-	assert.equal((await get((await snapshot('grandchild')).sessionID)).parentID, oracle.id)
-	await prompt(parent.id, invoke('oracle-design', 'background', { background: true }))
+	assert.equal((await snapshot('oracleResume')).sessionID, oracle.id)
+	await prompt(parent.id, invoke('oracle', 'background', { background: true }))
 	await api('POST', `/api/experimental/session/${(await snapshot('background')).sessionID}/wait`)
 	const resetting = prompt(
 		parent.id,
-		invoke('oracle-solve', 'midrun', { child: { kind: 'midrun', tag: 'midrun' } }),
+		invoke('oracle', 'midrun', { child: { kind: 'midrun', tag: 'midrun' } }),
 	)
 	const mid = await midrun.promise
 	const sessions = (await api('GET', `/api/session?directory=${encodeURIComponent(workspace)}`))
@@ -303,10 +301,9 @@ async function verify() {
 	for (const tag of [
 		'primary',
 		'research',
-		'oracleSolve',
-		'oracleDesign',
+		'oracle',
 		'resumedResearch',
-		'grandchild',
+		'oracleResume',
 		'background',
 		'midrun-1',
 		'midrun-2',
@@ -322,8 +319,10 @@ async function verify() {
 	)
 	for (const value of snapshots.values()) {
 		assert(!value.tools.some((name) => name.startsWith('t3-code')))
-		if (support.includes(value.agent)) assert(!value.tools.includes('question'))
-		if (value.agent === 'research') assert(!value.tools.includes('subagent'))
+		if (support.includes(value.agent)) {
+			assert(!value.tools.includes('question'))
+			assert(!value.tools.includes('subagent'))
+		}
 	}
 	const requests = readFileSync(join(directory, 'provider-requests.jsonl'), 'utf8')
 	assert(!requests.includes('RAW_T3_INSTRUCTIONS_MARKER'))
@@ -339,7 +338,7 @@ async function verify() {
 			})
 		).data.effect
 	assert.equal(await effect(research.id, 'subagent', 'research'), 'deny')
-	assert.equal(await effect(oracle.id, 'subagent', 'research'), 'allow')
+	assert.equal(await effect(oracle.id, 'subagent', 'research'), 'deny')
 	assert.equal(await effect(mid.sessionID, 'edit', 'other/file'), 'deny')
 	assert.equal(await effect(mid.sessionID, 'edit', 'plan/file'), 'allow')
 	assert.equal(await effect(mid.sessionID, 'shell', 'rm fixture'), 'ask')

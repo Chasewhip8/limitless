@@ -150,13 +150,11 @@ let
   connectedConfig = rendered connected;
   readWriteAgents = [
     "limitless"
-    "oracle-solve"
-    "oracle-design"
+    "oracle"
   ];
   supportAgents = [
     "research"
-    "oracle-solve"
-    "oracle-design"
+    "oracle"
   ];
   connectedEffect =
     name: action:
@@ -433,6 +431,18 @@ in
     pkgs.runCommand "executor-client-check" { } ''touch "$out"'';
   home-module =
     assert lib.assertMsg (valid defaults && valid connected) "valid configuration failed assertions";
+    assert lib.assertMsg (lib.all
+      (
+        name:
+        !(valid (evaluate {
+          opencode.settings.agents.${name}.model = "openai/gpt-6-astra#xhigh";
+        }))
+      )
+      [
+        "oracle-design"
+        "oracle-solve"
+      ]
+    ) "retired Oracle overrides must fail with migration guidance";
     assert lib.assertMsg (
       disabled.config.home.file == { }
       && disabled.config.home.packages == [ ]
@@ -449,22 +459,24 @@ in
         "github_clone"
       ]
     ) "audited MCP reads and local investigation tools must stay available to support agents";
-    assert lib.assertMsg (lib.all
-      (
-        action:
-        lib.all (name: connectedEffect name action == "allow") readWriteAgents
-        && connectedEffect "research" action == "deny"
+    assert lib.assertMsg
+      (lib.all
+        (
+          action:
+          lib.all (name: connectedEffect name action == "allow") readWriteAgents
+          && connectedEffect "research" action == "deny"
+        )
+        [
+          "notion-work_notion-create-pages"
+          "notion-work_new-tool"
+          "atlassian_editJiraIssue"
+          "sentry_execute_sentry_tool"
+          "gh_create_pull_request"
+          "linear_unknown-tool"
+          "custom_write"
+        ]
       )
-      [
-        "notion-work_notion-create-pages"
-        "notion-work_new-tool"
-        "atlassian_editJiraIssue"
-        "sentry_execute_sentry_tool"
-        "gh_create_pull_request"
-        "linear_unknown-tool"
-        "custom_write"
-      ]
-    ) "MCP mutations and unaudited tools must be available to main and Oracles, but denied to Research";
+      "MCP mutations and unaudited tools must be available to Limitless and Oracle, but denied to Research";
     assert lib.assertMsg (lib.all
       (
         name:
