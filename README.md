@@ -38,8 +38,9 @@ avoid conflicts with T3 Code's browser tools. Use them for browser access.
 - **Clients:** an optional supervised [T3 Code](#t3-code) environment served by
   the managed OpenCode service, plus opt-in [desktop apps](#desktop-clients) for
   OpenCode and T3 Code.
-- **Skills:** `repository-setup` for parallel worktrees and `commit-and-pr` for
-  convention-following commits and PR delivery through green CI.
+- **Skills:** `repository-setup` for parallel worktrees, `commit-and-pr` for
+  convention-following commits and PR delivery through green CI, and
+  `behavior-model` for evidence-backed behavioral models.
 - **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
 - **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
 - **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
@@ -392,6 +393,11 @@ disables installation. The default package copies a top-level `skills/` director
 when present and is otherwise empty. `skills.extraDirectories` adds directories of
 `<name>/SKILL.md` skills beside the package; a skill name defined twice fails the
 build. OpenCode's built-in skills remain available.
+
+[Behavior Model](skills/behavior-model/SKILL.md) combines system probing and
+code-based state mapping in one skill. Its modeling procedure consolidates
+findings and compares revisions using a [common format and review checks](skills/behavior-model/references/format.md).
+Use the procedures the investigation needs; they contribute to the same model.
 
 ## Agents and models
 

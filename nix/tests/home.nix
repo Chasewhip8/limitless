@@ -234,7 +234,9 @@ let
       ];
     };
   };
-  withDuplicateSkills = evaluate { skills.extraDirectories = [ ../../skills ]; };
+  withDuplicateSkills = evaluate {
+    skills.extraDirectories = [ (pkgs.writeTextDir "commit-and-pr/SKILL.md" "duplicate") ];
+  };
   customXdg = evaluateWith { opencode.service.enable = pkgs.stdenv.hostPlatform.isLinux; } [
     { xdg.configHome = "/home/test/preferences"; }
   ];
@@ -508,11 +510,15 @@ in
       }
       ''
         mkdir -p "$out"
-        test -f ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}/commit-and-pr/SKILL.md
-        test -f ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}/repository-setup/SKILL.md
+        for skill in commit-and-pr repository-setup behavior-model; do
+          test -f ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}/$skill/SKILL.md
+          test -f ${installedSkills withExtraSkills}/$skill/SKILL.md
+        done
+        test -f ${
+          self.packages.${pkgs.stdenv.hostPlatform.system}.skills
+        }/behavior-model/references/format.md
+        test -f ${installedSkills withExtraSkills}/behavior-model/references/format.md
         test ${installedSkills defaults} = ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}
-        test -f ${installedSkills withExtraSkills}/commit-and-pr/SKILL.md
-        test -f ${installedSkills withExtraSkills}/repository-setup/SKILL.md
         test "$(cat ${installedSkills withExtraSkills}/extra-skill/SKILL.md)" = extra
         grep -q "duplicate skill 'commit-and-pr'" ${pkgs.testers.testBuildFailure (installedSkills withDuplicateSkills)}/testBuildFailure.log
         cp ${pkgs.writeText "default-opencode.json" (opencodeJson defaults)} "$out/default.json"
