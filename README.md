@@ -409,7 +409,7 @@ OpenCode, or supply custom agent definitions through `programs.limitless.agents.
 Agent Markdown model fields take precedence over settings in the same configuration
 directory, so `opencode.settings.agents.limitless.model` does not override the packaged default.
 
-Research uses `openai/gpt-6.1-sol#xhigh`; Oracle uses `openai/gpt-6-astra#xhigh`.
+Research uses `openai/gpt-6.1-sol-fast#high`; Oracle uses `openai/gpt-6-astra#xhigh`.
 Subagents keep the processing tier of their configured model.
 
 Limitless owns implementation, integration, and final validation.
@@ -462,7 +462,7 @@ pass the same `sessionID`. The depth limit is one, and both helpers deny subagen
 
 ```text
 Limitless (Opus xhigh)
-├── Research (Sol xhigh)
+├── Research (Sol Fast high)
 └── Oracle (Astra xhigh)
 ```
 

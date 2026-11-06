@@ -99,7 +99,6 @@ Keep tests deterministic, isolated, and focused on consequential guarantees or c
 
 ## Safety and delivery
 
-- Do not apply Home Manager/NixOS or restart live `opencode` or `t3code` services from an agent working inside them. Ask the user to apply reviewed changes; validation uses isolated fixtures.
 - Never print credentials, mutable account databases, or private service environment values. Keep secrets outside the Nix store.
 - Preserve unrelated changes and concurrent work. A PR request authorizes a task branch, intended commits, push, and PR creation, not deployment.
 - Use conventional commits with the narrowest truthful type and a concise, imperative, lowercase description. Add a scope when it clarifies the affected area.

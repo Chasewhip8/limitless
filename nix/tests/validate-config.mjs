@@ -22,7 +22,7 @@ for (const file of await readdir(agentsDirectory)) {
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
 assert.equal(agents.limitless?.model, 'anthropic/claude-opus-5-5#xhigh')
 assert.equal(agents.oracle?.model, 'openai/gpt-6-astra#xhigh')
-assert.equal(agents.research?.model, 'openai/gpt-6.1-sol#xhigh')
+assert.equal(agents.research?.model, 'openai/gpt-6.1-sol-fast#high')
 assert.equal(agents.limitless?.mode, 'primary', 'Limitless must be a selectable primary agent')
 assert.notEqual(agents.limitless?.hidden, true, 'Limitless must be visible')
 const enabledAgents = Object.keys(agents).filter((name) => !agents[name].disabled)
