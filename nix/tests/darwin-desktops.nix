@@ -17,8 +17,11 @@ let
                 type = lib.types.bool;
                 default = false;
               };
+              # Mirrors nix-darwin, which coerces cask names to attribute sets.
               casks = lib.mkOption {
-                type = lib.types.listOf lib.types.str;
+                type = lib.types.listOf (
+                  lib.types.coercedTo lib.types.str (name: { inherit name; }) lib.types.attrs
+                );
                 default = [ ];
               };
             };
@@ -37,6 +40,8 @@ let
   all = (evaluate settings { homebrew.casks = [ "existing-app" ]; }).config;
   disabledHomebrew = (evaluate settings { homebrew.enable = false; }).config;
   valid = config: lib.all (entry: entry.assertion) config.assertions;
+  caskNames = config: lib.sort builtins.lessThan (map (cask: cask.name) config.homebrew.casks);
+  desktopCasks = config: builtins.filter (cask: cask.name != "existing-app") config.homebrew.casks;
 in
 assert lib.assertMsg (
   !defaults.homebrew.enable && defaults.homebrew.casks == [ ] && valid defaults
@@ -45,18 +50,21 @@ assert lib.assertMsg (
   all.homebrew.enable
   && valid all
   &&
-    lib.sort builtins.lessThan all.homebrew.casks == [
+    caskNames all == [
       "existing-app"
       "opencode-desktop"
       "t3-code"
     ]
 ) "Desktop flags must add the stable casks and preserve existing applications";
+assert lib.assertMsg (lib.all (cask: cask.greedy or false) (
+  desktopCasks all
+)) "Desktop casks auto-update, so Homebrew must upgrade them greedily to leave old channels";
 assert lib.assertMsg (lib.all (
   name:
   let
     inherit (evaluate { ${name}.desktop.enable = true; } { }) config;
   in
-  valid config && config.homebrew.enable && config.homebrew.casks == [ clients.${name} ]
+  valid config && config.homebrew.enable && caskNames config == [ clients.${name} ]
 ) (builtins.attrNames clients)) "Each desktop flag must install only its own cask";
 assert lib.assertMsg (
   !valid disabledHomebrew
