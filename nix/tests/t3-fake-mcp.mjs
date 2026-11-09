@@ -9,7 +9,7 @@ export function createRuntimeFixture(bundleDirectory, catalogFile) {
 	const names = JSON.parse(readFileSync(catalogFile, 'utf8'))
 	// https://github.com/pingdotgg/t3code/tree/2359643cffa6ba9ee84d6f2694b935de54a8013e/apps/server/src/mcp/toolkits
 	assert.equal(names.length, 69, 'Review the runtime expectations when T3 changes its catalog')
-	const support = ['research', 'oracle']
+	const support = ['research', 'oracle', 'worker']
 	const prohibited = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
 	const sourceOwn = 't3-code-thread_with_underscores'
 	const sourceSibling = 't3-code-thread_with_underscores_child'
@@ -236,6 +236,7 @@ return {tag:${JSON.stringify(tag)},agent:${JSON.stringify(agent)},own,sibling,at
 					fixture: {
 						limit: { context: 1000000, output: 16000 },
 						capabilities: { tools: true, input: ['text'], output: ['text'] },
+						variants: [{ id: 'high' }],
 					},
 				},
 			},
@@ -246,7 +247,7 @@ return {tag:${JSON.stringify(tag)},agent:${JSON.stringify(agent)},own,sibling,at
 				{
 					mode: id === 'limitless' ? 'primary' : 'subagent',
 					description: 'Native runtime fixture',
-					model: 'fixture/fixture',
+					model: id === 'worker' ? 'fixture/fixture#high' : 'fixture/fixture',
 					system: `NATIVE_ROLE_GUIDANCE:${id}`,
 					permissions:
 						id === 'limitless'

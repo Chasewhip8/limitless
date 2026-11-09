@@ -11,7 +11,7 @@ import {
 } from '../t3/permissions'
 import toolNames from './fixtures/t3-tool-names.json'
 
-const supportAgents = ['research', 'oracle']
+const supportAgents = ['research', 'oracle', 'worker']
 test('every packaged support agent receives T3 isolation', () => {
 	const directory = new URL('../../../opencode/agents/', import.meta.url)
 	const packagedSupportAgents = readdirSync(directory)
@@ -141,8 +141,7 @@ describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 	test('replaces an inherited primary or support policy without accumulating rules', () => {
 		const primary = normalizeT3Permissions(t3Rules(sourceNamespace), 'limitless')
 		const child = normalizeT3Permissions(primary, 'research')
-		expect(normalizeT3Permissions(child, 'oracle')).toEqual(child)
-		expect(normalizeT3Permissions(child, 'research')).toEqual(child)
+		for (const agent of supportAgents) expect(normalizeT3Permissions(child, agent)).toEqual(child)
 		expect(normalizeT3Permissions(child, 'limitless')).toEqual(primary)
 		expect(ownT3Namespace(child)).toBe(namespace)
 		expect(hasT3Permissions(child)).toBe(true)

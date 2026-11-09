@@ -180,10 +180,17 @@ async function verify() {
 	for (const [agent, tag] of [
 		['research', 'research'],
 		['oracle', 'oracle'],
+		['worker', 'worker'],
 	])
 		await prompt(parent.id, invoke(agent, tag))
 	const research = await get((await snapshot('research')).sessionID)
 	const oracle = await get((await snapshot('oracle')).sessionID)
+	const worker = await get((await snapshot('worker')).sessionID)
+	assert.deepEqual(
+		worker.model,
+		{ providerID: 'fixture', id: 'fixture', variant: 'high' },
+		'Worker must use its configured model and reasoning variant',
+	)
 	for (const id of [parent.id, research.id]) {
 		await api('POST', `/api/session/${id}/generate`, {
 			prompt: 'DIAG:{"kind":"bootstrap","tag":"generate"}',
@@ -302,6 +309,7 @@ async function verify() {
 		'primary',
 		'research',
 		'oracle',
+		'worker',
 		'resumedResearch',
 		'oracleResume',
 		'background',
@@ -339,6 +347,7 @@ async function verify() {
 		).data.effect
 	assert.equal(await effect(research.id, 'subagent', 'research'), 'deny')
 	assert.equal(await effect(oracle.id, 'subagent', 'research'), 'deny')
+	assert.equal(await effect(worker.id, 'subagent', 'research'), 'deny')
 	assert.equal(await effect(mid.sessionID, 'edit', 'other/file'), 'deny')
 	assert.equal(await effect(mid.sessionID, 'edit', 'plan/file'), 'allow')
 	assert.equal(await effect(mid.sessionID, 'shell', 'rm fixture'), 'ask')

@@ -151,10 +151,12 @@ let
   readWriteAgents = [
     "limitless"
     "oracle"
+    "worker"
   ];
   supportAgents = [
     "research"
     "oracle"
+    "worker"
   ];
   connectedEffect =
     name: action:
@@ -476,7 +478,7 @@ in
           "custom_write"
         ]
       )
-      "MCP mutations and unaudited tools must be available to Limitless and Oracle, but denied to Research";
+      "MCP mutations and unaudited tools must be available to Limitless, Oracle, and Worker, but denied to Research";
     assert lib.assertMsg (lib.all
       (
         name:

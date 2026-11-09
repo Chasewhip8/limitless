@@ -33,8 +33,8 @@ avoid conflicts with T3 Code's browser tools. Use them for browser access.
 
 ## Included capabilities
 
-- **Agents:** `limitless`, a Research subagent, and one Oracle for technical and
-  design judgment. Only Limitless delegates.
+- **Agents:** `limitless`, Research for source discovery, Oracle for technical and
+  design judgment, and Worker for delegated execution. Only Limitless delegates.
 - **Clients:** an optional supervised [T3 Code](#t3-code) environment served by
   the managed OpenCode service, plus opt-in [desktop apps](#desktop-clients) for
   OpenCode and T3 Code.
@@ -136,11 +136,12 @@ Tool access follows the agent's role:
 | --- | --- |
 | `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection |
 | `oracle` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell and edits; no T3 tools or subagents; deny artifact creation and session changes |
+| `worker` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and edits for task execution; no T3 tools or subagents; deny questions, artifact creation, and session changes |
 | `research` | Executor's read-only connection, or audited reads in direct-MCP mode; local tools for source discovery, with code changes and diagnostic experiments excluded by instructions; no T3 tools; deny external mutations, artifact creation and session changes |
 
 With Executor enabled, Research can use only `executor-read`; Executor's
 connection policy owns read-only enforcement. Direct MCPs are denied to Research,
-even while retained for Limitless and Oracle. Without Executor, direct-MCP mode uses
+even while retained for Limitless, Oracle, and Worker. Without Executor, direct-MCP mode uses
 deny rules plus exact audited read exceptions for Research. Read tools such as
 web fetch and artifact listing inherit the global allow rule.
 
@@ -250,7 +251,7 @@ agent-controlled browser.
 
 For least privilege, create two scoped connections, excluding Executor's administrative apps:
 
-- **Read/write:** Limitless and Oracle use the intended accounts and tools, with model-handled elicitation.
+- **Read/write:** Limitless, Oracle, and Worker use the intended accounts and tools, with model-handled elicitation.
 - **Read:** Research uses a connection configured for read-only access inside
   Executor. Browser elicitation is a fail-safe, not the read-only boundary.
 
@@ -274,7 +275,7 @@ programs.limitless.mcp.executor = {
 };
 ```
 
-Alternatively, explicitly opt Limitless and Oracle into the broad endpoint:
+Alternatively, explicitly opt Limitless, Oracle, and Worker into the broad endpoint:
 
 ```nix
 programs.limitless.mcp.executor = {
@@ -284,7 +285,7 @@ programs.limitless.mcp.executor = {
 };
 ```
 
-This grants Limitless and Oracle the full consented interface, including Executor
+This grants Limitless, Oracle, and Worker the full consented interface, including Executor
 administration and all authorized apps. Do not also set `connection`. Research
 remains denied the broad connection; an optional `readConnection` still
 requires a separate read-only scope. One endpoint or scoped connection can be
@@ -315,7 +316,7 @@ parameter, and `elicitation_mode` only when it is not the default `model`. Any c
 to that URL, including the switch to canonical URLs, needs a new sign-in. With `readConnection = null`
 (the default), Research has no MCP tools in Executor mode. When supplied, Executor
 must enforce the read-only scope on every `call` and `execute`; Nix cannot verify
-the dashboard's mutable policy. Limitless and Oracle see only `executor`, and
+the dashboard's mutable policy. Limitless, Oracle, and Worker see only `executor`, and
 Research sees only tools from `executor-read`, including future wrappers whose
 authorization remains Executor's responsibility.
 
@@ -344,9 +345,9 @@ Keep direct MCP connections until all of these are verified:
 1. ARM64 startup, private routing, owner creation, and closed signup afterward.
 2. Both Notion identities, the intended Atlassian site, and Sentry scope through
    the exact callback origin.
-3. Main/Oracle reads and separately authorized writes; Research mutation denial
+3. Main/Oracle/Worker reads and separately authorized writes; Research mutation denial
    for both direct calls and programs. Scoped connections exclude administration;
-   an explicitly chosen `fullAccess` read/write connection for Limitless and Oracle intentionally includes it.
+   an explicitly chosen `fullAccess` read/write connection for Limitless, Oracle, and Worker intentionally includes it.
 4. Device revocation, reconnect, upstream refresh after expiry, and restart.
 5. Persistence/restore, inaccessible state for the agent user, and resource use.
 
@@ -409,10 +410,12 @@ OpenCode, or supply custom agent definitions through `programs.limitless.agents.
 Agent Markdown model fields take precedence over settings in the same configuration
 directory, so `opencode.settings.agents.limitless.model` does not override the packaged default.
 
-Research uses `openai/gpt-6.1-sol-fast#high`; Oracle uses `openai/gpt-6-astra#xhigh`.
-Subagents keep the processing tier of their configured model.
+Research uses `openai/gpt-6.1-sol-fast#high`; Oracle uses `openai/gpt-6-astra#xhigh`;
+Worker uses `openai/gpt-6.1-sol#xhigh`. Subagents keep the processing tier of their
+configured model.
 
-Limitless owns implementation, integration, and final validation.
+Limitless owns delivery, integration, and final validation, and can delegate
+implementation tasks to Worker.
 Design is collaborative; once approved, Limitless carries the work through review
 and delivery. Goals and explicit requirements stay with the user, while the
 implementation approach can improve through engineering judgment and Oracle
@@ -422,11 +425,18 @@ watches CI and review comments, fixing failures until the PR is green.
 
 Research finds relevant code, documentation, and external sources to answer focused
 questions. It returns findings and citations; Limitless owns decisions and implementation.
+Worker owns isolated, self-contained work that it can complete independently without
+ongoing oversight; routine work stays with Limitless. It implements changes, validates
+the result, and reports completed work, changed files or external actions, checks,
+and remaining gaps. Its prompt describes its own role without naming other agents.
 Oracle diagnoses difficult problems, resolves technical uncertainty, advises on
 consequential architecture and maintainability, and reviews changes. Limitless can
 investigate directly or consult Oracle when independent judgment is useful.
-Limitless gives helpers the context they need. Oracle investigates directly and may recommend a separate investigation
-to Limitless; neither helper starts subagents. Substantive completed changes receive
+Limitless delegates through natural, outcome-focused requests, passing through explicit
+requirements and leaving the approach to the helper. Any added restriction or required
+step must be essential to the task, with a concrete reason for its necessity.
+Oracle investigates directly and may recommend a separate investigation
+to Limitless; no helper starts subagents. Substantive completed changes receive
 one fresh Oracle review, followed by same-session checks of fixes and open findings.
 
 Oracle can run tests and make focused diagnostic edits directly in the
@@ -435,7 +445,7 @@ It reports changed files, their purpose, commands, results, and material interfe
 Limitless reviews the diagnostic changes and decides what to retain or remove;
 automatic cleanup is not required. Limitless waits when work could conflict or an
 investigation gates the next change, and otherwise works on independent tasks.
-Oracle accounts for shared files, services, and test resources and preserves
+Oracle and Worker account for shared files, services, and test resources and preserve
 concurrent work. Diagnostic scope and implementation ownership are instruction-level
 policies; edit permissions cannot distinguish those purposes.
 
@@ -457,13 +467,14 @@ by default. Configure `providers.openai.settings.compaction.type` through
 
 ### Native delegation
 
-Limitless uses OpenCode's native `subagent` tool for Research and Oracle. Follow-ups
-pass the same `sessionID`. The depth limit is one, and both helpers deny subagent calls:
+Limitless uses OpenCode's native `subagent` tool for Research, Oracle, and Worker. Follow-ups
+pass the same `sessionID`. The depth limit is one, and all helpers deny subagent calls:
 
 ```text
 Limitless (Opus xhigh)
 ├── Research (Sol Fast high)
-└── Oracle (Astra xhigh)
+├── Oracle (Astra xhigh)
+└── Worker (Sol xhigh)
 ```
 
 Independent changes can use separate Limitless sessions in native worktrees;
@@ -671,9 +682,9 @@ changed units when service switching is enabled.
 
 Use the packaged `opencode-t3` launcher to connect T3 to the existing managed
 OpenCode service. It starts only a loopback proxy, never another OpenCode server.
-OpenCode's native `subagent` tool owns Research and Oracle delegation and preserves
-native child sessions and events. Only Limitless delegates; Research and Oracle cannot
-delegate further. Resume an investigation with its `sessionID`.
+OpenCode's native `subagent` tool owns Research, Oracle, and Worker delegation and preserves
+native child sessions and events. Only Limitless delegates; helpers cannot
+delegate further. Resume related work with its `sessionID`.
 
 ### Setup
 
@@ -759,7 +770,7 @@ All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`, plus the
 broken HTML visual tools `html_preview` and `html_render`. The primary agent
 (`limitless`) retains T3's other tools, including top-level thread
 creation and management.
-Research and Oracle receive no T3 tools, including browser tools and
+Research, Oracle, and Worker receive no T3 tools, including browser tools and
 future additions. They are hidden from Code Mode and `search`; there is no
 execution-only deny hook. Subagents return findings and blockers through their
 native results. By default, unbound TUI/CLI sessions do not receive thread-bound tools.
@@ -777,7 +788,7 @@ to normal mode restores the default agent.
 
 Only T3's named `t3-code` instruction entry is replaced, with a neutral marker before
 persistence. The plugin expands that marker into T3 guidance for primary agents
-when preparing model requests. Research and Oracle receive no T3
+when preparing model requests. Research, Oracle, and Worker receive no T3
 guidance, and any inherited marker is removed from their outgoing requests.
 The primary template lives in `packages/limitless/t3/prompts/`; the base agent
 Markdown files are unchanged. Ordinary sessions receive no T3 guidance.
@@ -879,7 +890,7 @@ This release removes these options and packages:
 | `paseo.*`, `paseo.desktop.enable`, `opencode-paseo`, `paseo_*` tools, `packages.paseo` and `packages.paseo-desktop` | Remove `programs.limitless.paseo` settings and any Paseo hostname or proxy configuration. Use T3 Code or the OpenCode TUI with the managed service. The Paseo daemon's data in `~/.paseo` is left in place. |
 | `lsp.*`, bundled language servers, `ast_grep_*` and `lsp_*` tools | Remove `programs.limitless.lsp` settings. Install any language servers or TypeScript needed on PATH through `home.packages`. Use project tooling or an independently installed `ast-grep` CLI through the shell. |
 | `oracle-design` and `oracle-solve` agents | Use `oracle` and move any `opencode.settings.agents` overrides to that ID; the module rejects retired IDs. Update custom instructions and remove stale agent files in manual installations. Finish active consultations before applying. To continue an existing consultation, pass `agent: "oracle"` with its existing `sessionID` from the parent. Oracle no longer delegates to Research. Limitless now defaults to Opus xhigh; existing sessions retain their selected model. |
-| `lead` and `unit` agents, automatic Unit worktree placement | Finish active Lead/Unit runs before upgrading, then select `limitless` to continue existing sessions. Use separate Limitless sessions for independent changes and native subagents for Research and Oracle. Existing sessions and worktrees remain available. |
+| `lead` and `unit` agents, automatic Unit worktree placement | Finish active Lead/Unit runs before upgrading, then select `limitless` to continue existing sessions. Use separate Limitless sessions for independent changes and native subagents for Research, Oracle, and Worker. Existing sessions and worktrees remain available. |
 | `slack.*`, Gary, Slack tools | Remove Slack configuration and retire its bot credentials when no longer used. |
 | `desktop.enable` | Use `programs.limitless.opencode.desktop.enable`. The `opencode-desktop` package is available again as the upstream V2 client; it does not restore the old patched launcher. |
 | `tools.agentBrowser.*`, `agent-browser` package/skill | Use T3 Code's browser tools. OpenCode's native browser catalog is disabled. |
