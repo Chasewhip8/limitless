@@ -403,8 +403,8 @@ Use the procedures the investigation needs; they contribute to the same model.
 ## Agents and models
 
 `limitless` is the primary user-facing agent and defaults to
-`anthropic/claude-opus-5-5#xhigh`. Connect Anthropic through `/connect` to make
-Opus available; OpenCode falls back to its default model when the agent's model
+`anthropic/claude-fable-5-2#high`. Connect Anthropic through `/connect` to make
+Fable available; OpenCode falls back to its default model when the agent's model
 is unavailable. Existing sessions retain their selected model. Select a model in
 OpenCode, or supply custom agent definitions through `programs.limitless.agents.package`.
 Agent Markdown model fields take precedence over settings in the same configuration
@@ -471,7 +471,7 @@ Limitless uses OpenCode's native `subagent` tool for Research, Oracle, and Worke
 pass the same `sessionID`. The depth limit is one, and all helpers deny subagent calls:
 
 ```text
-Limitless (Opus xhigh)
+Limitless (Fable 5.2 high)
 ├── Research (Sol Fast high)
 ├── Oracle (Astra xhigh)
 └── Worker (Sol xhigh)
@@ -500,15 +500,15 @@ standard Anthropic request behavior.
 Connecting Max replaces the saved Anthropic API-key credential and vice versa.
 Credentials from the earlier experimental Limitless plugin require signing in
 again. OpenCode continues to display API prices for subscription models.
-The upstream plugin targets SDK `2.0.4` and reports Claude Code compatibility
-version `2.1.280`. When Anthropic returns a structured newer-version requirement,
+The upstream plugin targets SDK `2.0.4`; our package patches its bundled Claude Code
+compatibility version to `2.1.321`. When Anthropic returns a structured newer-version requirement,
 it adopts that exact minimum and permits one retry for the affected session,
 agent, and model. Ordinary errors and rate limits do not trigger this recovery.
 
 An optional override is available when an explicit version is required:
 
 ```nix
-programs.limitless.plugins.anthropicAuth.claudeCodeVersion = "2.1.280";
+programs.limitless.plugins.anthropicAuth.claudeCodeVersion = "2.1.321";
 ```
 
 The option defaults to `null`, preserving the bundled version and automatic
@@ -889,7 +889,7 @@ This release removes these options and packages:
 | --- | --- |
 | `paseo.*`, `paseo.desktop.enable`, `opencode-paseo`, `paseo_*` tools, `packages.paseo` and `packages.paseo-desktop` | Remove `programs.limitless.paseo` settings and any Paseo hostname or proxy configuration. Use T3 Code or the OpenCode TUI with the managed service. The Paseo daemon's data in `~/.paseo` is left in place. |
 | `lsp.*`, bundled language servers, `ast_grep_*` and `lsp_*` tools | Remove `programs.limitless.lsp` settings. Install any language servers or TypeScript needed on PATH through `home.packages`. Use project tooling or an independently installed `ast-grep` CLI through the shell. |
-| `oracle-design` and `oracle-solve` agents | Use `oracle` and move any `opencode.settings.agents` overrides to that ID; the module rejects retired IDs. Update custom instructions and remove stale agent files in manual installations. Finish active consultations before applying. To continue an existing consultation, pass `agent: "oracle"` with its existing `sessionID` from the parent. Oracle no longer delegates to Research. Limitless now defaults to Opus xhigh; existing sessions retain their selected model. |
+| `oracle-design` and `oracle-solve` agents | Use `oracle` and move any `opencode.settings.agents` overrides to that ID; the module rejects retired IDs. Update custom instructions and remove stale agent files in manual installations. Finish active consultations before applying. To continue an existing consultation, pass `agent: "oracle"` with its existing `sessionID` from the parent. Oracle no longer delegates to Research. Limitless defaults to Fable 5.2 high; existing sessions retain their selected model. |
 | `lead` and `unit` agents, automatic Unit worktree placement | Finish active Lead/Unit runs before upgrading, then select `limitless` to continue existing sessions. Use separate Limitless sessions for independent changes and native subagents for Research, Oracle, and Worker. Existing sessions and worktrees remain available. |
 | `slack.*`, Gary, Slack tools | Remove Slack configuration and retire its bot credentials when no longer used. |
 | `desktop.enable` | Use `programs.limitless.opencode.desktop.enable`. The `opencode-desktop` package is available again as the upstream V2 client; it does not restore the old patched launcher. |

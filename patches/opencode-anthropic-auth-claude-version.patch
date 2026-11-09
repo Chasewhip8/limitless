@@ -1,0 +1,7 @@
+diff --git a/src/constants.ts b/src/constants.ts
+--- a/src/constants.ts
++++ b/src/constants.ts
+@@ -45,2 +45,2 @@
+-export const CLAUDE_CODE_VERSION = '2.1.280'
++export const CLAUDE_CODE_VERSION = '2.1.321'
+ export const CLAUDE_CODE_ENTRYPOINT = 'sdk-cli'

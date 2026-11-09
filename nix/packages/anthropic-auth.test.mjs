@@ -70,6 +70,27 @@ test('scopes both HTTP hooks to Anthropic so OpenAI can use WebSockets', async (
 	}
 })
 
+test('reports the bundled Claude Code version consistently in headers and billing metadata', async () => {
+	const { requestHook, cleanup } = await createOAuthPlugin()
+	try {
+		const event = {
+			model: { providerID: 'anthropic', modelID: 'claude-opus-5-5' },
+			request: new Request('https://api.anthropic.com/v1/messages', {
+				method: 'POST',
+				body: JSON.stringify({ messages: [{ role: 'user', content: 'hello world test message' }] }),
+			}),
+		}
+		await requestHook(event)
+		expect(event.request.headers.get('user-agent')).toBe('claude-cli/2.1.321 (external, cli)')
+		const rewritten = await event.request.json()
+		expect(rewritten.system[0].text).toMatch(
+			/^x-anthropic-billing-header: cc_version=2\.1\.321\.[a-f0-9]{3};/,
+		)
+	} finally {
+		await cleanup?.()
+	}
+})
+
 test('rewrites streamed request bodies larger than the former 10 MiB limit', async () => {
 	const { requestHook, cleanup } = await createOAuthPlugin()
 	try {
