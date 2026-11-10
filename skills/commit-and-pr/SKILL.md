@@ -74,7 +74,11 @@ What the change does, in a sentence or two.
 
 ## Why
 
-The problem it solves, and any meaningful departure from the agreed design.
+The problem it solves and the outcome intended.
+
+## Decisions
+
+- Material decisions accepted with the user, departures from the agreed design, and non-goals.
 
 ## Changes
 
@@ -90,5 +94,6 @@ The problem it solves, and any meaningful departure from the agreed design.
 ```
 
 - Write in brief, factual language, describe the latest revision only, and omit secrets.
-- Include **Tickets** and **Related PRs** only when they exist. Link every ticket key, and link PRs by verified full URL, not `owner/repo#N`.
+- Write **Why** and **Decisions** for a reviewer who has not seen the conversation; the change is judged against them.
+- Include **Decisions**, **Tickets**, and **Related PRs** only when they exist. Link every ticket key, and link PRs by verified full URL, not `owner/repo#N`.
 - Add no mandatory risk or test-evidence sections. Include context such as a small diagram, validation, or deploy notes when it helps review.

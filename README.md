@@ -33,8 +33,10 @@ avoid conflicts with T3 Code's browser tools. Use them for browser access.
 
 ## Included capabilities
 
-- **Agents:** `limitless`, Research for source discovery, Oracle for technical and
-  design judgment, and Worker for delegated execution. Only Limitless delegates.
+- **Agents:** `limitless` for design and implementation, with Research for source
+  discovery, Oracle for technical and design judgment, and Worker for delegated
+  execution; and `review`, which takes a pull request to an approved or failed
+  verdict on the judgment of its design and verification reviewers.
 - **Clients:** an optional supervised [T3 Code](#t3-code) environment served by
   the managed OpenCode service, plus opt-in [desktop apps](#desktop-clients) for
   OpenCode and T3 Code.
@@ -135,13 +137,17 @@ Tool access follows the agent's role:
 | Agents | Access |
 | --- | --- |
 | `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection |
+| `review` | The same access as `limitless`. Its instructions limit external actions to the pull request it is given: commits, pushes, labels, the description, comments, and draft status |
 | `oracle` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell and edits; no T3 tools or subagents; deny artifact creation and session changes |
 | `worker` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and edits for task execution; no T3 tools or subagents; deny questions, artifact creation, and session changes |
+| `review-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell for inspection, with edits excluded by instructions; no T3 tools; Research is its only subagent; deny questions, artifact creation, and session changes |
+| `review-verifier` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and edits for tests and verification; no T3 tools; Research is its only subagent; deny questions, artifact creation, and session changes |
 | `research` | Executor's read-only connection, or audited reads in direct-MCP mode; local tools for source discovery, with code changes and diagnostic experiments excluded by instructions; no T3 tools; deny external mutations, artifact creation and session changes |
 
+Every agent except Research is a read/write agent.
 With Executor enabled, Research can use only `executor-read`; Executor's
 connection policy owns read-only enforcement. Direct MCPs are denied to Research,
-even while retained for Limitless, Oracle, and Worker. Without Executor, direct-MCP mode uses
+even while retained for the read/write agents. Without Executor, direct-MCP mode uses
 deny rules plus exact audited read exceptions for Research. Read tools such as
 web fetch and artifact listing inherit the global allow rule.
 
@@ -251,7 +257,7 @@ agent-controlled browser.
 
 For least privilege, create two scoped connections, excluding Executor's administrative apps:
 
-- **Read/write:** Limitless, Oracle, and Worker use the intended accounts and tools, with model-handled elicitation.
+- **Read/write:** the read/write agents use the intended accounts and tools, with model-handled elicitation.
 - **Read:** Research uses a connection configured for read-only access inside
   Executor. Browser elicitation is a fail-safe, not the read-only boundary.
 
@@ -275,7 +281,7 @@ programs.limitless.mcp.executor = {
 };
 ```
 
-Alternatively, explicitly opt Limitless, Oracle, and Worker into the broad endpoint:
+Alternatively, explicitly opt the read/write agents into the broad endpoint:
 
 ```nix
 programs.limitless.mcp.executor = {
@@ -285,7 +291,7 @@ programs.limitless.mcp.executor = {
 };
 ```
 
-This grants Limitless, Oracle, and Worker the full consented interface, including Executor
+This grants the read/write agents the full consented interface, including Executor
 administration and all authorized apps. Do not also set `connection`. Research
 remains denied the broad connection; an optional `readConnection` still
 requires a separate read-only scope. One endpoint or scoped connection can be
@@ -316,7 +322,7 @@ parameter, and `elicitation_mode` only when it is not the default `model`. Any c
 to that URL, including the switch to canonical URLs, needs a new sign-in. With `readConnection = null`
 (the default), Research has no MCP tools in Executor mode. When supplied, Executor
 must enforce the read-only scope on every `call` and `execute`; Nix cannot verify
-the dashboard's mutable policy. Limitless, Oracle, and Worker see only `executor`, and
+the dashboard's mutable policy. The read/write agents see only `executor`, and
 Research sees only tools from `executor-read`, including future wrappers whose
 authorization remains Executor's responsibility.
 
@@ -345,9 +351,9 @@ Keep direct MCP connections until all of these are verified:
 1. ARM64 startup, private routing, owner creation, and closed signup afterward.
 2. Both Notion identities, the intended Atlassian site, and Sentry scope through
    the exact callback origin.
-3. Main/Oracle/Worker reads and separately authorized writes; Research mutation denial
+3. Read/write agent reads and separately authorized writes; Research mutation denial
    for both direct calls and programs. Scoped connections exclude administration;
-   an explicitly chosen `fullAccess` read/write connection for Limitless, Oracle, and Worker intentionally includes it.
+   an explicitly chosen `fullAccess` read/write connection for the read/write agents intentionally includes it.
 4. Device revocation, reconnect, upstream refresh after expiry, and restart.
 5. Persistence/restore, inaccessible state for the agent user, and resource use.
 
@@ -403,15 +409,16 @@ Use the procedures the investigation needs; they contribute to the same model.
 ## Agents and models
 
 `limitless` is the primary user-facing agent and defaults to
-`anthropic/claude-fable-5-2#high`. Connect Anthropic through `/connect` to make
-Fable available; OpenCode falls back to its default model when the agent's model
+`anthropic/claude-opus-5-5#high`. Connect Anthropic through `/connect` to make
+Opus available; OpenCode falls back to its default model when the agent's model
 is unavailable. Existing sessions retain their selected model. Select a model in
 OpenCode, or supply custom agent definitions through `programs.limitless.agents.package`.
 Agent Markdown model fields take precedence over settings in the same configuration
 directory, so `opencode.settings.agents.limitless.model` does not override the packaged default.
 
-Research uses `openai/gpt-6.1-sol-fast#high`; Oracle uses `openai/gpt-6-astra#xhigh`;
-Worker uses `openai/gpt-6.1-sol#xhigh`. Subagents keep the processing tier of their
+`review` is a second primary agent and uses `openai/gpt-6.1-sol#xhigh`, as does
+Worker. Research uses `openai/gpt-6.1-sol#high`; Oracle and `review-verifier`
+use `openai/gpt-6-astra#xhigh`; `review-design` uses `anthropic/claude-fable-5-2#high`. Subagents keep the processing tier of their
 configured model.
 
 Limitless owns delivery, integration, and final validation, and can delegate
@@ -436,7 +443,7 @@ Limitless delegates through natural, outcome-focused requests, passing through e
 requirements and leaving the approach to the helper. Any added restriction or required
 step must be essential to the task, with a concrete reason for its necessity.
 Oracle investigates directly and may recommend a separate investigation
-to Limitless; no helper starts subagents. Substantive completed changes receive
+to Limitless; none of its helpers starts subagents. Substantive completed changes receive
 one fresh Oracle review, followed by same-session checks of fixes and open findings.
 
 Oracle can run tests and make focused diagnostic edits directly in the
@@ -465,17 +472,73 @@ by default. Configure `providers.openai.settings.compaction.type` through
 `providers.disabled` defaults to
 `[ "google-vertex" "google-vertex-anthropic" ]` to avoid ambient Vertex selection.
 
+### Pull request review
+
+`review` takes one pull request from draft to a verdict, so that merging needs
+only a read of the description. Dispatch it by hand from a checkout of the
+repository that the review can have to itself:
+
+```console
+opencode run --agent review https://github.com/<owner>/<repo>/pull/<number>
+```
+
+Use an ordinary checkout, one review at a time. A new session uses the agent's
+model; an existing session keeps the model it already selected.
+
+The review starts without the authoring conversation, so the draft's description
+is its input: the `commit-and-pr` template states the intent and the accepted
+decisions the change is judged against.
+
+`review` runs the process, makes every source change, and publishes the verdict
+on the least expensive of the three models. The two stronger models judge, each
+in one session that is reused for follow-ups, and `review` does not overrule
+them. `review-design` only reads; `review-verifier` also writes the tests:
+
+1. **Design.** `review-design` judges whether the change achieves its intent in a
+   way that fits the system, and whether a simpler shape would do. `review` makes
+   corrections it requires, and returns to it whenever a later change alters
+   the design. Optional improvements do not block approval. A wrong design fails
+   the review early.
+2. **Verification.** `review-verifier` derives what the change must guarantee,
+   looks for defects, and settles the tests that prove what holds: it keeps
+   existing tests that earn their place, adds what is missing, and removes a test
+   only when its guarantee is covered elsewhere or deliberately retired.
+3. **Fixes.** `review` fixes confirmed defects in the source and the verifier
+   rechecks them, for about three rounds.
+
+The verifier owns the tests and `review` owns the source. `review` does not weaken
+a test to pass it; a disputed test goes back to the verifier. A finding carries
+evidence, preferably a failing test.
+
+| Label | Meaning | What the review leaves |
+| --- | --- | --- |
+| `review:approved` | The design is sound, the verifier assessed the final diff, nothing blocking is open, and local checks and CI pass | Fix commits, a ready-for-review PR, and a rewritten description ending in the reviewed head and base commits |
+| `review:failed` | The design is wrong, defects remain, or verification could not finish | A draft PR and a comment with the reason and open findings. Tests and fixes are pushed, except after a design failure |
+
+Review adds commits and never rewrites the branch or merges. An approval covers
+only the head commit recorded in the description. Nothing removes the label when
+the branch changes afterwards, so compare that commit with the PR's head before merging.
+
+These are instruction-level policies. The checkout is not a sandbox: a pull
+request's tests and scripts run with the host's access, so dispatch reviews only
+for pull requests you trust.
+
 ### Native delegation
 
-Limitless uses OpenCode's native `subagent` tool for Research, Oracle, and Worker. Follow-ups
-pass the same `sessionID`. The depth limit is one, and all helpers deny subagent calls:
+The primary agents use OpenCode's native `subagent` tool for their helpers. Follow-ups
+pass the same `sessionID`. The depth limit is two, so that the review helpers can
+start Research. Every other helper denies subagent calls:
 
 ```text
-Limitless (Fable 5.2 high)
-├── Research (Sol Fast high)
-├── Oracle (Astra xhigh)
-└── Worker (Sol xhigh)
+Limitless (Opus 5.5 high)         Review (Sol xhigh)
+├── Research (Sol high)           ├── Research (Sol high)
+├── Oracle (Astra xhigh)          ├── Review Design (Fable 5.2 high)
+└── Worker (Sol xhigh)            │   └── Research
+                                  └── Review Verifier (Astra xhigh)
+                                      └── Research
 ```
+
+Any other subagent call from a primary agent asks for approval.
 
 Independent changes can use separate Limitless sessions in native worktrees;
 the `repository-setup` skill covers checkout setup and teardown.
@@ -682,9 +745,9 @@ changed units when service switching is enabled.
 
 Use the packaged `opencode-t3` launcher to connect T3 to the existing managed
 OpenCode service. It starts only a loopback proxy, never another OpenCode server.
-OpenCode's native `subagent` tool owns Research, Oracle, and Worker delegation and preserves
-native child sessions and events. Only Limitless delegates; helpers cannot
-delegate further. Resume related work with its `sessionID`.
+OpenCode's native `subagent` tool owns delegation to the helpers and preserves
+native child sessions and events. Primary agents delegate, and the two review
+helpers can start Research; no other helper delegates. Resume related work with its `sessionID`.
 
 ### Setup
 
@@ -767,10 +830,10 @@ no password needs copying into T3 settings. Other CLI use still goes through `op
 ### Behavior
 
 All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`, plus the
-broken HTML visual tools `html_preview` and `html_render`. The primary agent
-(`limitless`) retains T3's other tools, including top-level thread
+broken HTML visual tools `html_preview` and `html_render`. The primary agents
+(`limitless` and `review`) retain T3's other tools, including top-level thread
 creation and management.
-Research, Oracle, and Worker receive no T3 tools, including browser tools and
+Helpers receive no T3 tools, including browser tools and
 future additions. They are hidden from Code Mode and `search`; there is no
 execution-only deny hook. Subagents return findings and blockers through their
 native results. By default, unbound TUI/CLI sessions do not receive thread-bound tools.
@@ -788,7 +851,7 @@ to normal mode restores the default agent.
 
 Only T3's named `t3-code` instruction entry is replaced, with a neutral marker before
 persistence. The plugin expands that marker into T3 guidance for primary agents
-when preparing model requests. Research, Oracle, and Worker receive no T3
+when preparing model requests. Helpers receive no T3
 guidance, and any inherited marker is removed from their outgoing requests.
 The primary template lives in `packages/limitless/t3/prompts/`; the base agent
 Markdown files are unchanged. Ordinary sessions receive no T3 guidance.
@@ -889,7 +952,7 @@ This release removes these options and packages:
 | --- | --- |
 | `paseo.*`, `paseo.desktop.enable`, `opencode-paseo`, `paseo_*` tools, `packages.paseo` and `packages.paseo-desktop` | Remove `programs.limitless.paseo` settings and any Paseo hostname or proxy configuration. Use T3 Code or the OpenCode TUI with the managed service. The Paseo daemon's data in `~/.paseo` is left in place. |
 | `lsp.*`, bundled language servers, `ast_grep_*` and `lsp_*` tools | Remove `programs.limitless.lsp` settings. Install any language servers or TypeScript needed on PATH through `home.packages`. Use project tooling or an independently installed `ast-grep` CLI through the shell. |
-| `oracle-design` and `oracle-solve` agents | Use `oracle` and move any `opencode.settings.agents` overrides to that ID; the module rejects retired IDs. Update custom instructions and remove stale agent files in manual installations. Finish active consultations before applying. To continue an existing consultation, pass `agent: "oracle"` with its existing `sessionID` from the parent. Oracle no longer delegates to Research. Limitless defaults to Fable 5.2 high; existing sessions retain their selected model. |
+| `oracle-design` and `oracle-solve` agents | Use `oracle` and move any `opencode.settings.agents` overrides to that ID; the module rejects retired IDs. Update custom instructions and remove stale agent files in manual installations. Finish active consultations before applying. To continue an existing consultation, pass `agent: "oracle"` with its existing `sessionID` from the parent. Oracle no longer delegates to Research. Limitless defaults to Opus 5.5 high; existing sessions retain their selected model. |
 | `lead` and `unit` agents, automatic Unit worktree placement | Finish active Lead/Unit runs before upgrading, then select `limitless` to continue existing sessions. Use separate Limitless sessions for independent changes and native subagents for Research, Oracle, and Worker. Existing sessions and worktrees remain available. |
 | `slack.*`, Gary, Slack tools | Remove Slack configuration and retire its bot credentials when no longer used. |
 | `desktop.enable` | Use `programs.limitless.opencode.desktop.enable`. The `opencode-desktop` package is available again as the upstream V2 client; it does not restore the old patched launcher. |

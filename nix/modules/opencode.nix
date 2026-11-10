@@ -116,7 +116,7 @@ let
     };
     agents =
       (mergedConfig.agents or { })
-      // lib.genAttrs [ "limitless" "oracle" "worker" ] (
+      // lib.genAttrs [ "limitless" "review" "oracle" "review-design" "review-verifier" "worker" ] (
         name:
         (mergedConfig.agents.${name} or { })
         // {
@@ -171,7 +171,7 @@ in
         default = [
           (permissionRule "*" "*" "allow")
         ];
-        description = "Ordered native permissions after the default edit allowance. Defaults to automatic approval for all tools. Managed-repository edit and T3 namespace denials are appended; Research receives read-only MCP rules, while Limitless, Oracle, and Worker retain read/write MCP access.";
+        description = "Ordered native permissions after the default edit allowance. Defaults to automatic approval for all tools. Managed-repository edit and T3 namespace denials are appended; Research receives read-only MCP rules, while every other packaged agent retains read/write MCP access.";
       };
     };
 

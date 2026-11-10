@@ -9,7 +9,7 @@ export function createRuntimeFixture(bundleDirectory, catalogFile) {
 	const names = JSON.parse(readFileSync(catalogFile, 'utf8'))
 	// https://github.com/pingdotgg/t3code/tree/2359643cffa6ba9ee84d6f2694b935de54a8013e/apps/server/src/mcp/toolkits
 	assert.equal(names.length, 69, 'Review the runtime expectations when T3 changes its catalog')
-	const support = ['research', 'oracle', 'worker']
+	const support = ['research', 'oracle', 'worker', 'review-verifier']
 	const prohibited = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
 	const sourceOwn = 't3-code-thread_with_underscores'
 	const sourceSibling = 't3-code-thread_with_underscores_child'
@@ -224,7 +224,7 @@ return {tag:${JSON.stringify(tag)},agent:${JSON.stringify(agent)},own,sibling,at
 	const configuration = {
 		default_agent: 'limitless',
 		model: 'fixture/fixture',
-		experimental: { subagent_depth: 1 },
+		experimental: { subagent_depth: 2 },
 		permissions: [rule('*', 'allow'), rule('t3-code-*', 'deny'), rule('t3-code_*', 'deny')],
 		plugins: ['-opencode.browser', resolve(bundleDirectory), join(directory, 'identity')],
 		providers: {
@@ -258,6 +258,7 @@ return {tag:${JSON.stringify(tag)},agent:${JSON.stringify(agent)},own,sibling,at
 									...(id === 'research'
 										? [rule('notion-work_*', 'deny'), rule('notion-work_notion_fetch', 'allow')]
 										: []),
+									...(id === 'review-verifier' ? [rule('subagent', 'allow', 'research')] : []),
 								],
 				},
 			]),

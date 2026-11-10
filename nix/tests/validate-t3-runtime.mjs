@@ -191,6 +191,14 @@ async function verify() {
 		{ providerID: 'fixture', id: 'fixture', variant: 'high' },
 		'Worker must use its configured model and reasoning variant',
 	)
+	await prompt(
+		parent.id,
+		invoke('review-verifier', 'nested', { child: invoke('research', 'nestedResearch') }),
+	)
+	const nestedResearch = await get((await snapshot('nestedResearch')).sessionID)
+	const reviewVerifier = await get(nestedResearch.parentID)
+	assert.equal(reviewVerifier.agent, 'review-verifier')
+	assert.equal(reviewVerifier.parentID, parent.id, 'A review helper must start Research itself')
 	for (const id of [parent.id, research.id]) {
 		await api('POST', `/api/session/${id}/generate`, {
 			prompt: 'DIAG:{"kind":"bootstrap","tag":"generate"}',
@@ -310,6 +318,7 @@ async function verify() {
 		'research',
 		'oracle',
 		'worker',
+		'nestedResearch',
 		'resumedResearch',
 		'oracleResume',
 		'background',
@@ -348,6 +357,9 @@ async function verify() {
 	assert.equal(await effect(research.id, 'subagent', 'research'), 'deny')
 	assert.equal(await effect(oracle.id, 'subagent', 'research'), 'deny')
 	assert.equal(await effect(worker.id, 'subagent', 'research'), 'deny')
+	assert.equal(await effect(reviewVerifier.id, 'subagent', 'research'), 'allow')
+	assert.equal(await effect(reviewVerifier.id, 'subagent', 'oracle'), 'deny')
+	assert.equal(await effect(nestedResearch.id, 'subagent', 'research'), 'deny')
 	assert.equal(await effect(mid.sessionID, 'edit', 'other/file'), 'deny')
 	assert.equal(await effect(mid.sessionID, 'edit', 'plan/file'), 'allow')
 	assert.equal(await effect(mid.sessionID, 'shell', 'rm fixture'), 'ask')

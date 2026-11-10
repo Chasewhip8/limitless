@@ -83,7 +83,7 @@ in
   options.programs.limitless = {
     mcp.executor = {
       enable = lib.mkEnableOption "Executor MCP connections";
-      fullAccess = lib.mkEnableOption "unscoped main/Oracle/Worker access, including Executor administration and all authorized apps";
+      fullAccess = lib.mkEnableOption "unscoped access for every agent except Research, including Executor administration and all authorized apps";
       url = lib.mkOption {
         type = lib.types.strMatching "https://[A-Za-z0-9.-]+(:[0-9]+)?/mcp";
         default = "https://mcp.executor.sh/mcp";
@@ -92,7 +92,7 @@ in
       connection = lib.mkOption {
         type = lib.types.strMatching "[A-Za-z0-9_-]{0,64}";
         default = "";
-        description = "Scoped read/write connection ID shared by Limitless, Oracle, and Worker. Required unless fullAccess is explicitly enabled; leave empty with fullAccess.";
+        description = "Scoped read/write connection ID shared by every agent except Research. Required unless fullAccess is explicitly enabled; leave empty with fullAccess.";
       };
       readConnection = lib.mkOption {
         type = lib.types.nullOr (lib.types.strMatching "[A-Za-z0-9_-]{1,64}");

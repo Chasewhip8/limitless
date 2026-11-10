@@ -20,14 +20,23 @@ for (const file of await readdir(agentsDirectory)) {
 	agents[basename(file, '.md')] = YAML.parse(frontmatter[1])
 }
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
-assert.equal(agents.limitless?.model, 'anthropic/claude-fable-5-2#high')
+assert.equal(agents.limitless?.model, 'anthropic/claude-opus-5-5#high')
+assert.equal(agents.review?.model, 'openai/gpt-6.1-sol#xhigh')
+assert.equal(agents['review-design']?.model, 'anthropic/claude-fable-5-2#high')
+assert.equal(agents['review-verifier']?.model, 'openai/gpt-6-astra#xhigh')
 assert.equal(agents.oracle?.model, 'openai/gpt-6-astra#xhigh')
-assert.equal(agents.research?.model, 'openai/gpt-6.1-sol-fast#high')
+assert.equal(agents.research?.model, 'openai/gpt-6.1-sol#high')
 assert.equal(agents.worker?.model, 'openai/gpt-6.1-sol#xhigh')
-assert.equal(agents.limitless?.mode, 'primary', 'Limitless must be a selectable primary agent')
-assert.notEqual(agents.limitless?.hidden, true, 'Limitless must be visible')
 const enabledAgents = Object.keys(agents).filter((name) => !agents[name].disabled)
-assert.deepEqual(enabledAgents.sort(), ['limitless', 'oracle', 'research', 'worker'])
+assert.deepEqual(enabledAgents.sort(), [
+	'limitless',
+	'oracle',
+	'research',
+	'review',
+	'review-design',
+	'review-verifier',
+	'worker',
+])
 
 function matches(pattern, value) {
 	const expression = pattern
@@ -45,8 +54,18 @@ function effectFor(rules, action, resource) {
 	return effect
 }
 
-const primaryAgents = ['limitless']
-const supportAgents = ['research', 'oracle', 'worker']
+const delegatesByAgent = {
+	limitless: ['research', 'oracle', 'worker'],
+	review: ['research', 'review-design', 'review-verifier'],
+	'review-design': ['research'],
+	'review-verifier': ['research'],
+}
+const primaryAgents = ['limitless', 'review']
+const supportAgents = ['research', 'oracle', 'review-design', 'review-verifier', 'worker']
+for (const name of primaryAgents) {
+	assert.equal(agents[name]?.mode, 'primary', `${name} must be a selectable primary agent`)
+	assert.notEqual(agents[name]?.hidden, true, `${name} must be visible`)
+}
 for (const name of supportAgents) assert.equal(agents[name].mode, 'subagent')
 const sharedActions = [
 	'shell',
@@ -69,7 +88,11 @@ for (const file of files) {
 	const input = JSON.parse(await readFile(file, 'utf8'))
 	Schema.decodeUnknownSync(Config.Info)(input, { onExcessProperty: 'error' })
 	assert.deepEqual(Object.keys(input.agents).sort(), enabledAgents)
-	assert.equal(input.experimental.subagent_depth, 1, 'Only Limitless delegates')
+	assert.equal(
+		input.experimental.subagent_depth,
+		2,
+		'Review helpers must be able to start Research, and nothing may nest deeper',
+	)
 	const browserRemoval = input.plugins.lastIndexOf('-opencode.browser')
 	assert(browserRemoval >= 0, `${file}: the native browser plugin must be disabled`)
 	assert(
@@ -121,15 +144,12 @@ for (const file of files) {
 				}
 			}
 		}
-		if (name === 'limitless') {
-			for (const agent of supportAgents) expectEffect('subagent', agent, 'allow')
+		const delegates = delegatesByAgent[name] ?? []
+		const undelegatedEffect = supportAgents.includes(name) ? 'deny' : 'ask'
+		for (const target of [...primaryAgents, ...supportAgents, 'custom-agent']) {
+			expectEffect('subagent', target, delegates.includes(target) ? 'allow' : undelegatedEffect)
 		}
-		if (supportAgents.includes(name)) {
-			expectEffect('question', '*', 'deny')
-			for (const target of [...primaryAgents, ...supportAgents, 'custom-agent']) {
-				expectEffect('subagent', target, 'deny')
-			}
-		}
+		if (supportAgents.includes(name)) expectEffect('question', '*', 'deny')
 		expectEffect('edit', '.limitless/repos/example/file.ts', 'deny')
 	}
 	console.log(`Validated ${file} and packaged agent permissions against the pinned OpenCode schema`)

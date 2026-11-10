@@ -1,7 +1,7 @@
 ---
 description: Research subagent that finds relevant code, documentation, and external sources to answer focused questions.
 mode: subagent
-model: openai/gpt-6.1-sol-fast#high
+model: openai/gpt-6.1-sol#high
 permissions:
     - action: question
       resource: "*"

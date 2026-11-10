@@ -11,7 +11,7 @@ import {
 } from '../t3/permissions'
 import toolNames from './fixtures/t3-tool-names.json'
 
-const supportAgents = ['research', 'oracle', 'worker']
+const supportAgents = ['research', 'oracle', 'review-design', 'review-verifier', 'worker']
 test('every packaged support agent receives T3 isolation', () => {
 	const directory = new URL('../../../opencode/agents/', import.meta.url)
 	const packagedSupportAgents = readdirSync(directory)

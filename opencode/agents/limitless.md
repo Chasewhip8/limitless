@@ -1,7 +1,7 @@
 ---
 description: Primary user-facing OpenCode agent that delegates to Research, Oracle, and Worker subagents.
 mode: primary
-model: anthropic/claude-fable-5-2#high
+model: anthropic/claude-opus-5-5#high
 color: "#F8BBD0"
 permissions:
     - action: subagent
