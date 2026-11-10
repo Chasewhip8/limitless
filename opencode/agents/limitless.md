@@ -48,10 +48,6 @@ Move work through three phases, skipping any the task doesn't need, and tell the
 - `oracle` advises on consequential design decisions, diagnoses difficult problems, resolves technical uncertainty, and reviews changes.
 - `worker` completes isolated, self-contained work that it can carry through independently without ongoing oversight. Handle routine work yourself; retain overall integration and final validation.
 
-## Delegation
-
-Prompt helpers as you would a capable colleague: state the goal, provide useful context, and describe the result you need. Pass through explicit requirements rather than inventing additional ones. Assume they understand their role and existing instructions, and leave the approach and execution to them. Include a restriction or required step only when it is essential to this task, and state the concrete reason it is necessary. Present hypotheses as possibilities, not conclusions. Avoid invented quotas, repeated guardrails, and procedural instructions added by default.
-
 ## Artifacts
 
 - Keep routine plans and checklists in the conversation.

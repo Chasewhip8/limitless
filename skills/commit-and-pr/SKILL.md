@@ -5,7 +5,7 @@ description: Commit changes and deliver them as a pull request that passes CI. U
 
 # Commit and PR
 
-A request to commit authorizes the intended commits, and a request to push also authorizes pushing them. A request for a PR authorizes its branch, commits, pushes, history rewrites on that branch, and later fixes. Merging needs its own request. Task-specific instructions, such as one commit, a draft PR, or skipping checks, apply to that task only.
+A request to commit authorizes the intended commits, and a request to push also authorizes pushing them. A request for a PR authorizes its branch, commits, pushes, rebases, and later fixes. Merging needs its own request. Task-specific instructions, such as one commit, a draft PR, or skipping checks, apply to that task only.
 
 ## Procedure
 
@@ -19,7 +19,7 @@ A request to commit authorizes the intended commits, and a request to push also 
 
 ## History and merging
 
-- Rebase, amend, and force-push the PR branch as needed, with `--force-with-lease`. Keep upstream changes when resolving conflicts.
+- Add commits for changes and fixes. Rewrite history only to rebase the PR branch onto its base, using `--force-with-lease` when pushing the rebase. Preserve others' changes when resolving conflicts.
 - Merge only when asked, once checks and reviews allow it, using the repository's merge method or the default below.
 
 ## Hand-off
@@ -96,4 +96,34 @@ The problem it solves and the outcome intended.
 - Write in brief, factual language, describe the latest revision only, and omit secrets.
 - Write **Why** and **Decisions** for a reviewer who has not seen the conversation; the change is judged against them.
 - Include **Decisions**, **Tickets**, and **Related PRs** only when they exist. Link every ticket key, and link PRs by verified full URL, not `owner/repo#N`.
-- Add no mandatory risk or test-evidence sections. Include context such as a small diagram, validation, or deploy notes when it helps review.
+- Include context such as a small diagram, validation, or deploy notes when it helps review. Add the Review section below after a review, not as a placeholder when authoring a PR.
+
+### Review results
+
+Preserve the existing description and add or update one Review section. Correct details made stale by review, keeping the author's intent, accepted decisions, tickets, and related PRs. Scale the detail to the change.
+
+```markdown
+## Review
+
+Approved or failed, with the reason.
+
+### Validated
+
+| Invariant | Test case and expected outcome | Evidence and result |
+| --- | --- | --- |
+| What must hold | The scenario tested and expected behavior | Test reference or other check; passed, failed, or not run |
+
+### Changed in review
+
+- What changed and why, with commit references when useful.
+
+### Open risks
+
+Unresolved findings, coverage gaps, or remaining risks; None when there are none.
+
+Reviewed at `<head sha>` on base `<base sha>`. Later commits are not covered.
+```
+
+- Describe concrete test cases so the reader can see which invariants and failure paths are covered without opening the tests. Include distinct cases in parameterized tests when they protect different behavior.
+- Report observed results and distinguish tests from inspection or other evidence. Include local-check and CI status, and identify any local work not present in the recorded remote head.
+- Omit Changed in review when no changes were made.

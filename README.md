@@ -138,10 +138,10 @@ Tool access follows the agent's role:
 | --- | --- |
 | `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection |
 | `review` | The same access as `limitless`. Its instructions limit external actions to the pull request it is given: commits, pushes, labels, the description, comments, and draft status |
-| `oracle` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Investigative shell and edits; no T3 tools or subagents; deny artifact creation and session changes |
+| `oracle` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and task-scoped edits; no T3 tools or subagents; deny artifact creation and session changes |
 | `worker` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and edits for task execution; no T3 tools or subagents; deny questions, artifact creation, and session changes |
-| `review-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell for inspection, with edits excluded by instructions; no T3 tools; Research is its only subagent; deny questions, artifact creation, and session changes |
-| `review-verifier` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and edits for tests and verification; no T3 tools; Research is its only subagent; deny questions, artifact creation, and session changes |
+| `review-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and task-scoped edits; no T3 tools; Research is its only subagent; deny questions, artifact creation, and session changes |
+| `review-verifier` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and task-scoped edits; no T3 tools; Research is its only subagent; deny questions, artifact creation, and session changes |
 | `research` | Executor's read-only connection, or audited reads in direct-MCP mode; local tools for source discovery, with code changes and diagnostic experiments excluded by instructions; no T3 tools; deny external mutations, artifact creation and session changes |
 
 Every agent except Research is a read/write agent.
@@ -446,15 +446,10 @@ Oracle investigates directly and may recommend a separate investigation
 to Limitless; none of its helpers starts subagents. Substantive completed changes receive
 one fresh Oracle review, followed by same-session checks of fixes and open findings.
 
-Oracle can run tests and make focused diagnostic edits directly in the
-shared workspace, including reproduction tests, fixtures, and temporary instrumentation.
-It reports changed files, their purpose, commands, results, and material interference.
-Limitless reviews the diagnostic changes and decides what to retain or remove;
-automatic cleanup is not required. Limitless waits when work could conflict or an
-investigation gates the next change, and otherwise works on independent tasks.
-Oracle and Worker account for shared files, services, and test resources and preserve
-concurrent work. Diagnostic scope and implementation ownership are instruction-level
-policies; edit permissions cannot distinguish those purposes.
+Oracle and the review helpers may make the changes needed for their assigned
+tasks, including source fixes. The caller owns integration and final validation.
+The packaged global `opencode/AGENTS.md` tells agents to preserve others' changes
+and unrelated work and coordinate when work overlaps. Research remains read-only.
 
 Astra and its Fast mode use conservative client budgets of 872,000
 context tokens and 828,400 input tokens, overriding OpenCode's 400K subscription
@@ -476,7 +471,7 @@ by default. Configure `providers.openai.settings.compaction.type` through
 
 `review` takes one pull request from draft to a verdict, so that merging needs
 only a read of the description. Dispatch it by hand from a checkout of the
-repository that the review can have to itself:
+repository:
 
 ```console
 opencode run --agent review https://github.com/<owner>/<repo>/pull/<number>
@@ -489,34 +484,39 @@ The review starts without the authoring conversation, so the draft's description
 is its input: the `commit-and-pr` template states the intent and the accepted
 decisions the change is judged against.
 
-`review` runs the process, makes every source change, and publishes the verdict
+`review` runs the process, integrates changes, and publishes the verdict
 on the least expensive of the three models. The two stronger models judge, each
 in one session that is reused for follow-ups, and `review` does not overrule
-them. `review-design` only reads; `review-verifier` also writes the tests:
+them. Both reviewers may edit code within their assignments:
 
 1. **Design.** `review-design` judges whether the change achieves its intent in a
-   way that fits the system, and whether a simpler shape would do. `review` makes
-   corrections it requires, and returns to it whenever a later change alters
-   the design. Optional improvements do not block approval. A wrong design fails
-   the review early.
+   way that fits the system, and whether a simpler shape would do. It or `review`
+   makes the required corrections. Later design changes return to it for review.
+   Optional improvements do not block approval. A wrong design fails the review early.
 2. **Verification.** `review-verifier` derives what the change must guarantee,
-   looks for defects, and settles the tests that prove what holds: it keeps
-   existing tests that earn their place, adds what is missing, and removes a test
-   only when its guarantee is covered elsewhere or deliberately retired.
-3. **Fixes.** `review` fixes confirmed defects in the source and the verifier
-   rechecks them, for about three rounds.
+   looks for defects, and shapes a small, sufficient suite around the relevant
+   invariants and failure paths. It keeps useful tests, consolidates or rewrites
+   redundant coverage, and fills gaps. Tests are removed only when their guarantees
+   remain covered or are deliberately retired.
+3. **Fixes.** `review` or its reviewers fix confirmed defects, and the verifier
+   assesses the resulting changes, for about three rounds.
 
-The verifier owns the tests and `review` owns the source. `review` does not weaken
-a test to pass it; a disputed test goes back to the verifier. A finding carries
-evidence, preferably a failing test.
+The verifier owns acceptance evidence; `review` owns integration and publication.
+Neither `review` nor the design reviewer weakens a test to pass it; disputed tests
+go back to the verifier. A finding carries evidence, preferably a failing test.
 
 | Label | Meaning | What the review leaves |
 | --- | --- | --- |
-| `review:approved` | The design is sound, the verifier assessed the final diff, nothing blocking is open, and local checks and CI pass | Fix commits, a ready-for-review PR, and a rewritten description ending in the reviewed head and base commits |
-| `review:failed` | The design is wrong, defects remain, or verification could not finish | A draft PR and a comment with the reason and open findings. Tests and fixes are pushed, except after a design failure |
+| `review:approved` | The design is sound, the verifier assessed the final diff, nothing blocking is open, and local checks and CI pass | Fix commits, a ready-for-review PR, and a Review section recording the evidence and reviewed commits |
+| `review:failed` | The design is wrong, defects remain, or verification could not finish | A draft PR with the reason and open findings in its Review section. Tests and fixes are pushed, except after a design failure |
 
-Review adds commits and never rewrites the branch or merges. An approval covers
-only the head commit recorded in the description. Nothing removes the label when
+Review uses the `commit-and-pr` skill for commits, branch history, and description
+formatting. Changes and fixes add commits; history is rewritten only for a rebase.
+Merging requires a separate request. Review preserves the author's description and
+adds a Review section with the invariants, concrete test cases and expected outcomes,
+observed results, changes made in review, and remaining risks.
+
+An approval covers only the head commit recorded in that section. Nothing removes the label when
 the branch changes afterwards, so compare that commit with the PR's head before merging.
 
 These are instruction-level policies. The checkout is not a sandbox: a pull
