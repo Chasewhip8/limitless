@@ -116,7 +116,7 @@ let
     };
     agents =
       (mergedConfig.agents or { })
-      // lib.genAttrs [ "limitless" "review" "oracle" "review-design" "review-verifier" "worker" ] (
+      // lib.genAttrs [ "limitless" "review" "oracle" "worker" ] (
         name:
         (mergedConfig.agents.${name} or { })
         // {

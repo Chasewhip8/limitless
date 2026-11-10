@@ -11,7 +11,8 @@ import {
 } from '../t3/permissions'
 import toolNames from './fixtures/t3-tool-names.json'
 
-const supportAgents = ['research', 'oracle', 'review-design', 'review-verifier', 'worker']
+const supportAgents = ['research', 'oracle', 'worker']
+const isolatedAgents = [...supportAgents, 'review-design', 'review-verifier']
 test('every packaged support agent receives T3 isolation', () => {
 	const directory = new URL('../../../opencode/agents/', import.meta.url)
 	const packagedSupportAgents = readdirSync(directory)
@@ -25,6 +26,7 @@ test('every packaged support agent receives T3 isolation', () => {
 	expect(packagedSupportAgents.sort()).toEqual([...supportAgents].sort())
 	for (const agent of packagedSupportAgents) expect(isT3SupportAgent(agent)).toBe(true)
 	expect(isT3SupportAgent('limitless')).toBe(false)
+	expect(isT3SupportAgent('review')).toBe(false)
 })
 const namespaces = [
 	't3-code-35ce915b-46a3-4496-9544-eaf1261c948d',
@@ -75,7 +77,8 @@ describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 
 	test.each([
 		'limitless',
-		...supportAgents,
+		'review',
+		...isolatedAgents,
 	])('denies HTML visuals despite explicit grants for %s', (agent) => {
 		const rules = [
 			...nativeDefaults,
@@ -100,7 +103,7 @@ describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 		}
 	})
 
-	test.each(supportAgents)('exposes no T3 tools to %s', (agent) => {
+	test.each(isolatedAgents)('exposes no T3 tools to %s', (agent) => {
 		const rules = [...nativeDefaults, ...normalizeT3Permissions(t3Rules(sourceNamespace), agent)]
 		expect(
 			toolNames.filter((name) => effectFor(rules, `${namespace}_${name}`) === 'allow'),
@@ -115,7 +118,7 @@ describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 	})
 
 	test.each(
-		supportAgents,
+		isolatedAgents,
 	)('overrides persisted browser grants for %s and stays idempotent', (agent) => {
 		const legacy: Permission.Ruleset = [
 			...t3Rules(sourceNamespace),
@@ -141,7 +144,7 @@ describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 	test('replaces an inherited primary or support policy without accumulating rules', () => {
 		const primary = normalizeT3Permissions(t3Rules(sourceNamespace), 'limitless')
 		const child = normalizeT3Permissions(primary, 'research')
-		for (const agent of supportAgents) expect(normalizeT3Permissions(child, agent)).toEqual(child)
+		for (const agent of isolatedAgents) expect(normalizeT3Permissions(child, agent)).toEqual(child)
 		expect(normalizeT3Permissions(child, 'limitless')).toEqual(primary)
 		expect(ownT3Namespace(child)).toBe(namespace)
 		expect(hasT3Permissions(child)).toBe(true)

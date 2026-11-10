@@ -152,15 +152,11 @@ let
     "limitless"
     "review"
     "oracle"
-    "review-design"
-    "review-verifier"
     "worker"
   ];
   supportAgents = [
     "research"
     "oracle"
-    "review-design"
-    "review-verifier"
     "worker"
   ];
   connectedEffect =

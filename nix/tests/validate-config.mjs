@@ -21,22 +21,12 @@ for (const file of await readdir(agentsDirectory)) {
 }
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
 assert.equal(agents.limitless?.model, 'anthropic/claude-opus-5-5#high')
-assert.equal(agents.review?.model, 'openai/gpt-6.1-sol#xhigh')
-assert.equal(agents['review-design']?.model, 'anthropic/claude-fable-5-2#high')
-assert.equal(agents['review-verifier']?.model, 'openai/gpt-6-astra#xhigh')
+assert.equal(agents.review?.model, 'openai/gpt-6-astra#xhigh')
 assert.equal(agents.oracle?.model, 'openai/gpt-6-astra#xhigh')
 assert.equal(agents.research?.model, 'openai/gpt-6.1-sol#high')
 assert.equal(agents.worker?.model, 'openai/gpt-6.1-sol#xhigh')
 const enabledAgents = Object.keys(agents).filter((name) => !agents[name].disabled)
-assert.deepEqual(enabledAgents.sort(), [
-	'limitless',
-	'oracle',
-	'research',
-	'review',
-	'review-design',
-	'review-verifier',
-	'worker',
-])
+assert.deepEqual(enabledAgents.sort(), ['limitless', 'oracle', 'research', 'review', 'worker'])
 
 function matches(pattern, value) {
 	const expression = pattern
@@ -56,12 +46,10 @@ function effectFor(rules, action, resource) {
 
 const delegatesByAgent = {
 	limitless: ['research', 'oracle', 'worker'],
-	review: ['research', 'review-design', 'review-verifier'],
-	'review-design': ['research'],
-	'review-verifier': ['research'],
+	review: ['research'],
 }
 const primaryAgents = ['limitless', 'review']
-const supportAgents = ['research', 'oracle', 'review-design', 'review-verifier', 'worker']
+const supportAgents = ['research', 'oracle', 'worker']
 for (const name of primaryAgents) {
 	assert.equal(agents[name]?.mode, 'primary', `${name} must be a selectable primary agent`)
 	assert.notEqual(agents[name]?.hidden, true, `${name} must be visible`)
@@ -91,7 +79,7 @@ for (const file of files) {
 	assert.equal(
 		input.experimental.subagent_depth,
 		2,
-		'Review helpers must be able to start Research, and nothing may nest deeper',
+		'Native delegation must retain its configured depth bound',
 	)
 	const browserRemoval = input.plugins.lastIndexOf('-opencode.browser')
 	assert(browserRemoval >= 0, `${file}: the native browser plugin must be disabled`)
@@ -145,8 +133,14 @@ for (const file of files) {
 			}
 		}
 		const delegates = delegatesByAgent[name] ?? []
-		const undelegatedEffect = supportAgents.includes(name) ? 'deny' : 'ask'
-		for (const target of [...primaryAgents, ...supportAgents, 'custom-agent']) {
+		const undelegatedEffect = name === 'limitless' ? 'ask' : 'deny'
+		for (const target of [
+			...primaryAgents,
+			...supportAgents,
+			'review-design',
+			'review-verifier',
+			'custom-agent',
+		]) {
 			expectEffect('subagent', target, delegates.includes(target) ? 'allow' : undelegatedEffect)
 		}
 		if (supportAgents.includes(name)) expectEffect('question', '*', 'deny')
