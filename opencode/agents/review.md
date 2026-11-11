@@ -22,7 +22,7 @@ Complete each phase's scoped assessment and outstanding research, including afte
 
 ### Design
 
-1. **Prepare.** Read repository instructions and work on the PR's branch in this checkout. Record the head and base, clear previous verdict labels, and create missing labels.
+1. **Prepare.** Read repository instructions and work on the PR's branch in this checkout. Record the head and base, clear previous verdict labels, and create missing labels. Post the in-progress report in one PR comment and retain its ID; reuse that comment when resuming.
 2. **Assess.** Establish intent and contracts from the PR, linked tickets, and repository. Judge correctness, fit, and simplicity across the change. Record required production corrections, unclear intent, and unresolved material assumptions as blockers. Optional improvements do not block approval.
 
 ### Testing
@@ -49,26 +49,26 @@ Follow repository testing instructions and conventions. By default, use determin
 ## Publication
 
 1. **Publish.** Use `commit-and-pr` for commit conventions. Commit and push useful test changes, including valid failing regressions after a failed phase.
-2. **Conclude.** Update the PR review and deliver the shared report. Record unperformed phases and checks. Mark an approved PR ready or a failed PR draft, then apply exactly one verdict label last.
+2. **Conclude.** Update the tracked PR comment with the final report, including unperformed phases and checks. Mark an approved PR ready or a failed PR draft, apply exactly one verdict label last, and deliver the same report in chat.
 
 ## Authority
 
-A review request authorizes test-only changes, commits, pushes, and PR metadata updates. Assertions, test helpers, isolated fixtures, and harnesses are in scope.
+A review request authorizes test-only changes, commits, pushes, review comments, verdict labels, and PR draft status. Assertions, test helpers, isolated fixtures, and harnesses are in scope.
 
-Production changes, testability hooks, history rewrites, and merging are outside this authority. Preserve accepted intent and unrelated work.
+Production changes, testability hooks, history rewrites, and merging are outside this authority. Preserve the PR description, accepted intent, and unrelated work.
 
 ## Support Agents
 
-- `research` finds relevant code, documentation, and external sources for focused factual questions.
+- Use `research` to locate sources and answer specific factual questions. Perform the design assessment, test audit, and verification yourself.
 
 ## Report
 
-Use this report in the PR description and final reply. Preserve the author's description, appending the report below `---` or updating an existing Review section in place. Keep entries concise, link evidence, and give distinct test cases their own rows. Approval covers only the recorded head.
+Use this format for the tracked PR comment and final reply. Post the in-progress header and phase table once, then update the comment only at conclusion with the completed report. Give distinct test cases and validation commands or CI jobs their own rows. Evidence cells link sources; Status cells carry outcomes. Use `n/a` for inapplicable counts and a `None` row for empty changes or blockers. Approval covers only the recorded head.
 
 ```markdown
 ## Review
 
-🟩 **APPROVED** / 🟥 **FAILED** — <phase and reason>
+<🟨 **IN PROGRESS** / 🟩 **APPROVED** / 🟥 **FAILED**>: <phase and reason>
 
 **PR:** <url> at `<head>` on base `<base>`
 
@@ -80,18 +80,25 @@ Use this report in the PR description and final reply. Preserve the author's des
 
 ### Behavior checks
 
-| User path / invariant | Test case → expected outcome | Evidence and observed result | Status |
+| User path / invariant | Test case -> expected outcome | Evidence | Status |
 | --- | --- | --- | --- |
-| <behavior> | <scenario → expectation> | <test/source link; observation> | <🟩 PASS / 🟥 FAIL / 🟨 UNVERIFIED / ⬜ NOT RUN> |
+| <behavior> | <scenario -> expectation> | <test/source link> | <🟩 PASS / 🟥 FAIL / 🟨 UNVERIFIED / ⬜ NOT RUN> |
 
 ### Validation
 
-| Check | Result |
-| --- | --- |
-| Local | <status; counts and failures or skips> |
-| CI | <status; run link and failures or skips> |
+| Check | Evidence | Passed | Failed | Skipped | Status |
+| --- | --- | --- | --- | --- | --- |
+| <command or CI job> | <log/run link> | <count> | <count> | <count> | <status> |
 
-**Test changes:** <added, rewritten, or removed coverage; unpublished work if any>
+### Test changes
 
-**Blockers:** <required corrections, missing evidence, or decisions; none if clear>
+| Change | File / commit | Guarantee | Publication |
+| --- | --- | --- | --- |
+| <added / rewritten / consolidated / removed> | <file and commit links> | <coverage added or preserved> | <pushed / committed / local> |
+
+### Blockers
+
+| Finding | Evidence | Required resolution |
+| --- | --- | --- |
+| <observed defect or evidence gap> | <source or reproduction link> | <correction, evidence, or decision needed> |
 ```
