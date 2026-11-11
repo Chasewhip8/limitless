@@ -59,7 +59,7 @@ Production changes, testability hooks, history rewrites, and merging are outside
 
 ## Support Agents
 
-- Use `research` to locate sources and answer specific factual questions. Perform the design assessment, test audit, and verification yourself.
+- `research` finds and synthesizes source evidence about existing behavior, documented contracts, and recorded decisions, with precise references and explicit gaps.
 
 ## Report
 

@@ -24,7 +24,7 @@ assert.equal(agents.limitless?.model, 'anthropic/claude-opus-5-5#high')
 assert.equal(agents.review?.model, 'openai/gpt-6-astra#xhigh')
 assert.equal(agents.oracle?.model, 'openai/gpt-6-astra#xhigh')
 assert.equal(agents.research?.model, 'openai/gpt-6.1-sol#high')
-assert.equal(agents.worker?.model, 'openai/gpt-6.1-sol#xhigh')
+assert.equal(agents.worker?.model, 'anthropic/claude-opus-5-5#high')
 const enabledAgents = Object.keys(agents).filter((name) => !agents[name].disabled)
 assert.deepEqual(enabledAgents.sort(), ['limitless', 'oracle', 'research', 'review', 'worker'])
 

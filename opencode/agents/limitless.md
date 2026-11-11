@@ -44,7 +44,7 @@ Move work through three phases, skipping any the task doesn't need, and tell the
 
 ## Support Agents
 
-- `research` finds relevant code, documentation, and external sources to answer focused questions.
+- `research` finds and synthesizes source evidence about existing behavior, documented contracts, and recorded decisions, with precise references and explicit gaps.
 - `oracle` advises on consequential design decisions, diagnoses difficult problems, resolves technical uncertainty, and reviews changes.
 - `worker` completes isolated, self-contained work that it can carry through independently without ongoing oversight. Handle routine work yourself; retain overall integration and final validation.
 
