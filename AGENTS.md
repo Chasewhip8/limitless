@@ -13,6 +13,11 @@ A Nix flake and Home Manager module for OpenCode, with an Effect 4 TypeScript pl
 
 ## Code style
 
+`CODE_STYLE.md` is the verbatim copy of onboarding's code-pattern guide. Apply its
+general Effect, service, boundary, and testing patterns; its onboarding-specific
+paths and domain rules describe the source repository. The conventions below
+remain the local guide for this repository.
+
 Make operations read as a sequence of meaningful steps. Keep each step's mechanics cohesive and use native facilities when they directly express the work.
 
 These preferences are defaults with exceptions, not mechanical bans. A concrete readability or technical reason can favor another form; an explicitly permitted alternative needs no justification merely for being different.

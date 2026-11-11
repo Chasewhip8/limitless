@@ -42,6 +42,7 @@
           opencode = import ./nix/packages/opencode.nix { inherit pkgs; };
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          pipeline = import ./nix/packages/pipeline.nix { inherit pkgs self; };
           t3 = pkgs.callPackage ./nix/packages/t3.nix { };
         }
         // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
@@ -66,6 +67,7 @@
             t3-desktop = self.packages.${system}.t3-desktop;
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            pipeline = import ./nix/tests/pipeline.nix { inherit pkgs self; };
             opencode-password = import ./nix/tests/opencode-password.nix {
               inherit pkgs;
               opencode = self.packages.${system}.opencode;
@@ -97,6 +99,7 @@
     )
     // {
       homeModules.default = import ./nix/modules/home.nix { inherit self; };
+      homeModules.pipeline = import ./nix/modules/pipeline.nix { inherit self; };
       darwinModules.default = ./nix/modules/darwin.nix;
       nixosModules.executor = ./nix/modules/executor-service.nix;
       overlays.default = final: _prev: {

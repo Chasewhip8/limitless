@@ -80,6 +80,12 @@ let
     }
     // lib.optionalAttrs (cfg.github.tokenFile != null) { inherit (cfg.github) tokenFile; };
     providers = { inherit (cfg.providers) disabled; };
+    pipeline = {
+      enabled = cfg.pipeline.client.enable;
+    }
+    // lib.optionalAttrs cfg.pipeline.client.enable {
+      inherit (cfg.pipeline.client) url tokenFile;
+    };
   };
   # T3 launches this as its OpenCode binary; it serves the managed service.
   t3Launcher = pkgs.writeShellScriptBin "opencode-t3" ''

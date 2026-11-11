@@ -15,6 +15,7 @@ import {
 	makeGitHubCloneRuntime,
 	normalizeGitHubPluginConfig,
 } from './tools/github/index'
+import { normalizePipelinePluginConfig, registerPipeline } from './tools/pipeline/index'
 
 export const resolveGitHubConfig = normalizeGitHubPluginConfig
 
@@ -22,10 +23,12 @@ export const resolvePluginConfigs = Effect.fn('resolvePluginConfigs')(function* 
 	const githubConfig = yield* normalizeGitHubPluginConfig(options)
 	const githubCloneRuntime = yield* makeGitHubCloneRuntime()
 	const providerPolicy = yield* normalizeProviderPolicyConfig(options)
+	const pipelineConfig = yield* normalizePipelinePluginConfig(options)
 	return {
 		githubConfig,
 		githubCloneRuntime,
 		providerPolicy,
+		pipelineConfig,
 	}
 })
 
@@ -77,6 +80,7 @@ export default Plugin.define({
 		const tools = limitlessTools(executeTool, configs.githubConfig, configs.githubCloneRuntime)
 
 		yield* registerT3Policy(ctx)
+		yield* registerPipeline(ctx, configs.pipelineConfig).pipe(Effect.orDie)
 		yield* ctx.tool.transform((draft) => {
 			registerLimitlessTools(draft, tools)
 		})

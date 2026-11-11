@@ -467,6 +467,28 @@ by default. Configure `providers.openai.settings.compaction.type` through
 `providers.disabled` defaults to
 `[ "google-vertex" "google-vertex-anthropic" ]` to avoid ambient Vertex selection.
 
+### Pipeline
+
+Pipeline is a thin Effect dispatcher for the fleet's existing OpenCode servers.
+Athena keeps routing, a durable command outbox, idempotency receipts and an
+advisory scheduling budget. OpenCode owns input, execution, history and outputs;
+Pipeline has no run/result ledger or verdict parser.
+
+A standalone helper prepares retained Git checkouts. Resume appends to the same
+ordinary directory session without resetting its files. Limitless tools dispatch,
+observe, resume, request native interruption, and logically close submissions.
+Waiters use event streams; idle and interrupt acknowledgments do not promise OS
+process drainage. Unconfirmed writes are never automatically replayed, and close
+does not delete the checkout or native history.
+
+Build `.#pipeline` on Linux and enable `programs.limitless.pipeline` through the
+Home Manager module. See [Pipeline setup and operation](docs/pipeline.md) for
+authentication, fleet configuration, the API, and retention behavior.
+
+The separately approved native event journal supports positive admission
+recovery. Its storage cost and operational limitations are documented under
+[credentials, storage and operations](docs/pipeline.md#credentials-storage-and-operations).
+
 ### Pull request review
 
 `review` takes one pull request from draft to a verdict, so that merging needs
@@ -1048,7 +1070,8 @@ rendering, using temporary profiles and no live T3 state or external websites.
 
 Runtime, Limitless plugin SDK, and schema are pinned to `2.2.7`. The workspace
 uses `effect@4.1.3` and matching platform packages. Hosted plugins still use
-OpenCode's shared Effect and plugin runtime; the standalone T3 bridge bundles its own dependencies. Validate hosted compatibility against
+OpenCode's shared Effect and plugin runtime; the standalone T3 bridge and
+Pipeline bundle their own dependencies. Validate hosted compatibility against
 the pinned OpenCode release when updating Effect.
 The cache-status plugin's type-only dev dependencies (`@opencode/theme`,
 `@opentui/*`, `solid-js`) follow the same OpenCode release: `2.2.7`, `0.8.1`,

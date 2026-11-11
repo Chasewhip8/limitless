@@ -28,6 +28,7 @@
 		"packages/limitless/bridge/**/*.ts",
 		"packages/limitless/t3/**/*.ts",
 		"packages/limitless/tools/**/*.ts",
+		"packages/pipeline/**/*.ts",
 		"packages/*/test/**/*"
 	],
 	"exclude": ["node_modules"]
