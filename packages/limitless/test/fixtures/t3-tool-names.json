@@ -9,6 +9,7 @@
 	"html_preview",
 	"html_render",
 	"link_pull_request",
+	"link_pull_requests",
 	"list_scheduled_tasks",
 	"list_thread_pull_requests",
 	"orchestrator_capabilities",
@@ -65,6 +66,7 @@
 	"task_cancel",
 	"task_status",
 	"unlink_pull_request",
+	"unlink_pull_requests",
 	"unwatch_pull_request",
 	"watch_pull_request",
 	"write_pull_request_guides"

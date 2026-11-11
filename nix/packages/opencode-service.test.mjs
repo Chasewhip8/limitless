@@ -32,7 +32,9 @@ if (args[0] === 'serve') {
     : String(state.config[args[2]] ?? '')
   process.stdout.write(value + '\\n')
 } else if (args[0] === 'service' && args[1] === 'set') {
-  state.config[args[2]] = args[2] === 'port' ? Number(args[3]) : args[3]
+  state.config[args[2]] = args[2] === 'password' && args[3] === '--file'
+    ? fs.readFileSync(args[4], 'utf8').replace(/\\r?\\n$/, '')
+    : args[2] === 'port' ? Number(args[3]) : args[3]
   state.running = false
   fs.writeFileSync(file, JSON.stringify(state))
 } else if (args[0] === 'service' && args[1] === 'stop') {
@@ -57,6 +59,7 @@ async function fixture(config = {}, overrides = {}) {
 	await writeFile(opencode, fakeCLI, { mode: 0o755 })
 	await writeFile(stateFile, JSON.stringify({ config, calls: [], running: true, ...overrides }))
 	return {
+		directory,
 		opencode,
 		environment: {
 			SERVICE_FIXTURE: directory,
@@ -171,4 +174,105 @@ test('does not launch a server after preparation fails', async () => {
 		(await instance.state()).calls.some((args) => args[0] === 'serve'),
 		false,
 	)
+})
+
+test('imports only a password path before changing bindings and keeps the value out of argv and environment', async () => {
+	const config = {
+		hostname: '0.0.0.0',
+		port: 49374,
+		password: 'old-fixture',
+		cors: ['https://fixture.test'],
+	}
+	const instance = await fixture(config)
+	const passwordFile = join(instance.directory, 'fleet password')
+	const password = 'new-fixture-secret-only-in-private-files'
+	await writeFile(passwordFile, `${password}\n`, { mode: 0o600 })
+	const environment = prepareService(
+		instance.opencode,
+		'127.0.0.1',
+		4096,
+		instance.environment,
+		passwordFile,
+	)
+	const state = await instance.state()
+	assert.deepEqual(state.calls.slice(0, 3), [
+		['service', 'get', 'env'],
+		['service', 'set', 'password', '--file', passwordFile],
+		['service', 'get', 'hostname'],
+	])
+	assert.deepEqual(state.config, { ...config, hostname: '127.0.0.1', port: 4096, password })
+	assert.equal(JSON.stringify(state.calls).includes(password), false)
+	assert.equal(JSON.stringify(environment).includes(password), false)
+})
+
+test('a failed password import leaves bindings and incumbent untouched and never launches serve', async () => {
+	const passwordFile = '/fixture/unavailable-secret'
+	const config = { hostname: '0.0.0.0', port: 49374, password: 'old-fixture' }
+	const instance = await fixture(config, { fail: `service set password --file ${passwordFile}` })
+	const result = spawnSync(
+		process.execPath,
+		[launcher, instance.opencode, '127.0.0.1', '4096', passwordFile],
+		{
+			env: instance.environment,
+			encoding: 'utf8',
+		},
+	)
+	assert.notEqual(result.status, 0)
+	assert.equal(result.stdout, '')
+	const state = await instance.state()
+	assert.deepEqual(state.config, config)
+	assert.equal(state.running, true)
+	assert.deepEqual(state.calls, [
+		['service', 'get', 'env'],
+		['service', 'set', 'password', '--file', passwordFile],
+	])
+})
+
+for (const key of ['HOME', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG_DIR', 'XDG_STATE_HOME']) {
+	test(`rejects a saved ${key} identity redirect before importing or mutating settings`, async () => {
+		const redirected = '/fixture/private-redirect-value'
+		const config = { env: { [key]: redirected }, password: 'old-fixture' }
+		const instance = await fixture(config)
+		assert.throws(
+			() =>
+				prepareService(
+					instance.opencode,
+					'127.0.0.1',
+					4096,
+					instance.environment,
+					'/fixture/password',
+				),
+			(error) => {
+				assert.equal(error.message.includes(key), true)
+				assert.equal(error.message.includes(redirected), false)
+				return true
+			},
+		)
+		const state = await instance.state()
+		assert.equal(state.running, true)
+		assert.deepEqual(state.config, config)
+		assert.deepEqual(state.calls, [['service', 'get', 'env']])
+	})
+}
+
+test('matching identity settings and ordinary private environment values survive password management', async () => {
+	const roots = {
+		HOME: '/fixture/home',
+		XDG_CONFIG_HOME: '/fixture/config',
+		XDG_STATE_HOME: '/fixture/state',
+		OPENCODE_CONFIG_DIR: '/fixture/config/opencode',
+	}
+	const instance = await fixture({ env: { ...roots, TEST_TOKEN: 'fixture-private-token' } })
+	const passwordFile = join(instance.directory, 'password')
+	await writeFile(passwordFile, 'fixture-password\r\n', { mode: 0o600 })
+	const environment = prepareService(
+		instance.opencode,
+		'127.0.0.1',
+		4096,
+		{ ...instance.environment, ...roots },
+		passwordFile,
+	)
+	assert.equal(environment.TEST_TOKEN, 'fixture-private-token')
+	assert.equal(environment.OPENCODE_PASSWORD, undefined)
+	assert.equal((await instance.state()).config.password, 'fixture-password')
 })

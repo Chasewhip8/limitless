@@ -12,7 +12,7 @@ let
     # A versioned name prevents a stale hash from reusing an older release.
     name = "${pname}-${version}-x86_64.AppImage";
     url = "https://opencode.ai/files/bin/${version}/opencode-desktop-linux-x86_64.AppImage";
-    hash = "sha256-MmuKHjkM0RdXIZQV8Thhmha5zO99Egq0EVlp3i3gZuw=";
+    hash = "sha256-ilRwn95uWWSXBZ+rYWK1Ix7fJu1hL/HSPQsdUXgo/tA=";
   };
   contents = appimageTools.extract { inherit pname version src; };
 in

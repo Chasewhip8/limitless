@@ -7,8 +7,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 // All simulated services and model responses live here; production policy is never copied.
 export function createRuntimeFixture(bundleDirectory, catalogFile) {
 	const names = JSON.parse(readFileSync(catalogFile, 'utf8'))
-	// https://github.com/pingdotgg/t3code/tree/2359643cffa6ba9ee84d6f2694b935de54a8013e/apps/server/src/mcp/toolkits
-	assert.equal(names.length, 69, 'Review the runtime expectations when T3 changes its catalog')
+	// https://github.com/pingdotgg/t3code/tree/bf469bb19669671d0df2efda74ed73867a7137c0/apps/server/src/mcp/toolkits
+	assert.equal(names.length, 71, 'Review the runtime expectations when T3 changes its catalog')
+	// The retired role exercises isolation and nested delegation for legacy sessions.
 	const support = ['research', 'oracle', 'worker', 'review-verifier']
 	const prohibited = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
 	const sourceOwn = 't3-code-thread_with_underscores'

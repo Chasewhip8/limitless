@@ -9,7 +9,8 @@ export class T3PermissionError extends Schema.TaggedError<T3PermissionError>()(
 	},
 ) {}
 
-const supportAgents = new Set(['research', 'oracle', 'review-design', 'review-verifier', 'worker'])
+// Retired review helpers still need isolation when their persisted sessions are loaded.
+const supportAgents = new Set(['research', 'oracle', 'worker', 'review-design', 'review-verifier'])
 export const isT3SupportAgent = (agent: string | undefined) =>
 	agent !== undefined && supportAgents.has(agent)
 const disabledTools = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']

@@ -13,11 +13,14 @@ let
     name = "limitless-opencode-service";
     text = ''
       exec ${pkgs.nodejs}/bin/node ${../packages/opencode-service.mjs} ${
-        lib.escapeShellArgs [
-          "${cfg._generated.opencodePackage}/bin/opencode"
-          service.hostname
-          (toString service.port)
-        ]
+        lib.escapeShellArgs (
+          [
+            "${cfg._generated.opencodePackage}/bin/opencode"
+            service.hostname
+            (toString service.port)
+          ]
+          ++ lib.optional (service.passwordFile != null) service.passwordFile
+        )
       }
     '';
   };
@@ -57,6 +60,29 @@ in
       default = 49374;
       example = 4096;
       description = "Native service port, persisted before the supervised server starts.";
+    };
+    passwordFile = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.addCheck lib.types.str (
+          path:
+          lib.hasPrefix "/" path
+          && path != "/"
+          && path != builtins.storeDir
+          && !lib.hasPrefix "${builtins.storeDir}/" path
+          && lib.strings.trim path == path
+        )
+      );
+      default = null;
+      example = "/run/agenix/opencode-password";
+      description = ''
+        Absolute runtime string path to a nonempty, single-line UTF-8 password file.
+        The native CLI imports it into its private service configuration before
+        each supervised start. Only the path enters generated configuration;
+        never supply a Nix path literal or a store file. Missing or invalid files
+        stop startup. Rotation takes effect on the next managed start and revokes
+        existing pairings. Null preserves the current native password, including
+        a previously imported value; it does not erase credentials.
+      '';
     };
   };
 

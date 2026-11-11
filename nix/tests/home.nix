@@ -220,6 +220,22 @@ let
     };
   };
   serviceUnit = supervised.config.systemd.user.services.opencode;
+  supervisedWithPassword = evaluate {
+    opencode.service = {
+      enable = true;
+      port = 4096;
+      passwordFile = "/run/credentials/shared opencode password";
+    };
+  };
+  passwordServiceUnit = supervisedWithPassword.config.systemd.user.services.opencode;
+  acceptsPasswordFile =
+    value:
+    (builtins.tryEval (
+      builtins.deepSeq
+        (evaluate { opencode.service.passwordFile = value; })
+        .config.programs.limitless.opencode.service.passwordFile
+        true
+    )).success;
   supervisedWithoutSkills = evaluate {
     opencode.service.enable = true;
     skills.enable = false;
@@ -840,6 +856,21 @@ in
       !pkgs.stdenv.hostPlatform.isLinux
       || lib.any (lib.hasPrefix "PATH=/run/wrappers/bin:") serviceUnit.Service.Environment
     ) "Agent shells must find NixOS setuid wrappers such as sudo before unwrapped binaries";
+    assert lib.assertMsg
+      (
+        supervised.config.programs.limitless.opencode.service.passwordFile == null
+        && acceptsPasswordFile null
+        && acceptsPasswordFile "/run/credentials/shared opencode password"
+        && !acceptsPasswordFile "relative/password"
+        && !acceptsPasswordFile "/"
+        && !acceptsPasswordFile "/nix/store"
+        && !acceptsPasswordFile "${pkgs.emptyDirectory}/password"
+        && !acceptsPasswordFile ../packages/opencode-service.mjs
+        && !lib.hasInfix "/run/credentials/shared opencode password" (
+          builtins.toJSON (rendered supervisedWithPassword)
+        )
+      )
+      "Service passwords must be optional runtime string paths, never store paths, Nix path literals, or native project configuration";
     pkgs.runCommand "limitless-service-check" { nativeBuildInputs = [ pkgs.nodejs ]; } ''
       cp ${../packages/opencode-service.mjs} opencode-service.mjs
       cp ${../packages/opencode-service.test.mjs} opencode-service.test.mjs
@@ -848,6 +879,7 @@ in
         test -x ${serviceUnit.Service.ExecStart}
         grep -F ${lib.escapeShellArg (launcherOf supervised)} ${serviceUnit.Service.ExecStart}
         grep -F '127.0.0.1 4096' ${serviceUnit.Service.ExecStart}
+        grep -F "'/run/credentials/shared opencode password'" ${passwordServiceUnit.Service.ExecStart}
         test -x ${executorServiceUnit.Service.ExecStartPre}
         grep -F 'https://athena.example.ts.net:9443/mcp' ${executorServiceUnit.Service.ExecStartPre}
       ''}

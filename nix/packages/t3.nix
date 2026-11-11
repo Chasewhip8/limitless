@@ -23,21 +23,22 @@
   stdenv,
   udev,
   versionCheckHook,
+  vulkan-loader,
 }:
 let
-  version = "0.1.6";
+  version = "0.1.8";
   sources = {
     aarch64-linux = {
       arch = "arm64";
-      hash = "sha256-twjwWSAHdvUGI6dmhUhB5A7aC7Z2FCEc+LaQkpXOINo=";
+      hash = "sha256-K/+/YI7vc2xcNeNDGn5SYdDJCeM9io/rg+8mo3R8+PQ=";
     };
     x86_64-linux = {
       arch = "x64";
-      hash = "sha256-fPMdqQ3uQfUk3VtnnrttQEY3yl2dxv2LwBlRHVe7d+Y=";
+      hash = "sha256-ucSdwAwj+7xZYb2v8tiOVW2WyNvWOMRQHik3xwZQqeU=";
     };
   };
   source = sources.${stdenv.hostPlatform.system};
-  # T3 downloads chrome-headless-shell 156.0.8078.70 at runtime. Recheck its
+  # T3 downloads chrome-headless-shell 157.0.8103.38 at runtime. Recheck its
   # ELF dependencies and the browser smoke fixture whenever the T3 pin changes.
   browserLibraries = [
     alsa-lib
@@ -92,7 +93,10 @@ stdenv.mkDerivation {
     autoPatchelfHook
     makeWrapper
   ];
-  buildInputs = [ stdenv.cc.cc.lib ];
+  buildInputs = [
+    stdenv.cc.cc.lib
+    vulkan-loader
+  ];
   dontBuild = true;
   dontStrip = true;
 
@@ -100,8 +104,13 @@ stdenv.mkDerivation {
     runHook preInstall
     mkdir -p "$out/lib/t3" "$out/bin"
     cp -r . "$out/lib/t3/"
-    # NixOS uses glibc; do not patch the bundled musl alternative against it.
-    rm -r "$out/lib/t3/node_modules/@ff-labs/fff-bin-linux-${source.arch}-musl"
+    # NixOS uses glibc; do not patch the bundled musl alternatives against it.
+    rm -r \
+      "$out/lib/t3/node_modules/@ff-labs/fff-bin-linux-${source.arch}-musl" \
+      "$out/lib/t3/node_modules/@koromix/koffi-linux-${source.arch}/musl_${source.arch}"
+    ${lib.optionalString stdenv.hostPlatform.isx86_64 ''
+      rm -r "$out/lib/t3/node_modules/@yuuang/ffi-rs-linux-x64-musl"
+    ''}
     # Leave the host's loader alone; pinning it could downgrade their glibc.
     makeWrapper "$out/lib/t3/t3" "$out/bin/t3" \
       --run ${lib.escapeShellArg exportBrowserLibraries}

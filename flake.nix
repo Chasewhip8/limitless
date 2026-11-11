@@ -66,6 +66,10 @@
             t3-desktop = self.packages.${system}.t3-desktop;
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            opencode-password = import ./nix/tests/opencode-password.nix {
+              inherit pkgs;
+              opencode = self.packages.${system}.opencode;
+            };
             executor-service = import ./nix/tests/executor-service.nix {
               inherit pkgs nixpkgs;
               module = self.nixosModules.executor;

@@ -87,6 +87,24 @@ async function update(id, permissions) {
 const get = async (id) => (await api('GET', `/api/session/${id}`)).data
 const allowsEverything = (rules) =>
 	rules.some((entry) => entry.action === '*' && entry.resource === '*' && entry.effect === 'allow')
+
+async function waitForPlugins() {
+	const required = ['limitless', 'runtime-fixture-identity', 'opencode.config.agent']
+	const deadline = Date.now() + 10000
+	for (;;) {
+		const { data } = await api('GET', '/api/plugin')
+		const plugins = required.map((id) => ({
+			id,
+			state: data.find((plugin) => plugin.id === id)?.state,
+		}))
+		const failed = plugins.find((plugin) => plugin.state?.status === 'failed')
+		assert(!failed, `Required plugin failed to activate: ${JSON.stringify(failed)}`)
+		if (plugins.every((plugin) => plugin.state?.status === 'active')) return
+		assert(Date.now() < deadline, `Required plugins did not activate: ${JSON.stringify(plugins)}`)
+		await new Promise((resolve) => setTimeout(resolve, 25))
+	}
+}
+
 // The bridge forwards T3's permission writes unchanged; the plugin repairs them
 // from OpenCode's own session events. Wait for that repair, then return the rules.
 async function repaired(id, expected) {
@@ -141,6 +159,8 @@ async function verify() {
 	const connectedNames = (await api('GET', '/api/mcp')).data.map((server) => server.name)
 	assert(connectedNames.includes(own) && connectedNames.includes(sibling))
 	assert(!connectedNames.includes(sourceOwn) && !connectedNames.includes(sourceSibling))
+	// Plugin loading is asynchronous and session event subscriptions do not replay.
+	await waitForPlugins()
 	const parent = (
 		await api('POST', '/api/session', {
 			id: null,
@@ -198,7 +218,7 @@ async function verify() {
 	const nestedResearch = await get((await snapshot('nestedResearch')).sessionID)
 	const reviewVerifier = await get(nestedResearch.parentID)
 	assert.equal(reviewVerifier.agent, 'review-verifier')
-	assert.equal(reviewVerifier.parentID, parent.id, 'A review helper must start Research itself')
+	assert.equal(reviewVerifier.parentID, parent.id, 'Legacy nested sessions must retain isolation')
 	for (const id of [parent.id, research.id]) {
 		await api('POST', `/api/session/${id}/generate`, {
 			prompt: 'DIAG:{"kind":"bootstrap","tag":"generate"}',

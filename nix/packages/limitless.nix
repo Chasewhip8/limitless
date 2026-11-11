@@ -33,7 +33,7 @@ let
       find "$out" -type d -path '*/node_modules/.bin' -prune -exec rm -rf {} +
     '';
 
-    outputHash = "sha256-pwJZ1o880qlxuKTlm6zFJAPmy6W0ZgUYgbEyxD45tV8=";
+    outputHash = "sha256-bO9lRuUzdq7qDt6pwpQyLYpnUUOmweu/fjAGUsIL00U=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };

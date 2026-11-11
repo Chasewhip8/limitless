@@ -3,16 +3,16 @@ let
   inherit (pkgs) lib;
   system = pkgs.stdenv.hostPlatform.system;
   # These archives must match apps/server/src/preview/PreviewBrowser.ts in T3.
-  version = "156.0.8078.70";
+  version = "157.0.8103.38";
   source =
     {
       x86_64-linux = {
         platform = "linux64";
-        sha256 = "a313da592261ff1e342c1e507d315f25b1809006c0508f77ce86151d464d4ccb";
+        sha256 = "deafffa74660b34853a4119c361fd427ac8c9fcb62db51ddb8a797cd83a4ba2d";
       };
       aarch64-linux = {
         platform = "linux-arm64";
-        sha256 = "dca11213d2e0b1db52141edd9f92ec423fd52ca25715846790d84fa1d5d16e8a";
+        sha256 = "b9b910a57b2a15eb3e55000a2339f93a973934a413ebfc6e585a50ec6c42fd6c";
       };
     }
     .${system};

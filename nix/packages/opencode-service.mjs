@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export function prepareService(opencode, hostname, port, environment = process.env) {
+export function prepareService(opencode, hostname, port, environment = process.env, passwordFile) {
 	function service(...args) {
 		const result = spawnSync(opencode, ['service', ...args], {
 			env: environment,
@@ -18,6 +18,10 @@ export function prepareService(opencode, hostname, port, environment = process.e
 
 	// Native client startup applies this private environment; foreground serve does not.
 	const configuredEnvironment = parseEnvironment(service('get', 'env'))
+	if (passwordFile !== undefined) {
+		validateServiceIdentity(environment, configuredEnvironment)
+		service('set', 'password', '--file', passwordFile)
+	}
 	for (const [key, value] of [
 		['hostname', hostname],
 		['port', String(port)],
@@ -27,6 +31,20 @@ export function prepareService(opencode, hostname, port, environment = process.e
 	// A compatible incumbent makes serve exit successfully instead of being supervised.
 	service('stop')
 	return { ...environment, ...configuredEnvironment }
+}
+
+function validateServiceIdentity(environment, configuredEnvironment) {
+	// Password import and native discovery must address the same private configuration and registration.
+	for (const key of ['HOME', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG_DIR', 'XDG_STATE_HOME']) {
+		if (
+			Object.hasOwn(configuredEnvironment, key) &&
+			configuredEnvironment[key] !== environment[key]
+		) {
+			throw new Error(
+				`OpenCode service environment cannot override ${key} with a managed password file`,
+			)
+		}
+	}
 }
 
 function parseEnvironment(text) {
@@ -56,11 +74,11 @@ function parseEnvironment(text) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-	const [opencode, hostname, port] = process.argv.slice(2)
+	const [opencode, hostname, port, passwordFile] = process.argv.slice(2)
 	if (!opencode || !hostname || !port) {
-		throw new Error('Usage: opencode-service.mjs <opencode> <hostname> <port>')
+		throw new Error('Usage: opencode-service.mjs <opencode> <hostname> <port> [password-file]')
 	}
-	const environment = prepareService(opencode, hostname, port)
+	const environment = prepareService(opencode, hostname, port, process.env, passwordFile)
 	process.execve(
 		opencode,
 		[opencode, 'serve', '--service', '--hostname', hostname, '--port', port],

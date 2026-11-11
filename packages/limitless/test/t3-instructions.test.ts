@@ -21,16 +21,26 @@ test('replaces the marker in initial and chronological instructions without edit
 			{ role: 'system', content: [{ type: 'text', text: `Updated context: ${T3_CONTEXT}` }] },
 			{ role: 'user', content: [{ type: 'text', text: T3_CONTEXT }] },
 			{ role: 'assistant', content: [{ type: 'text', text: T3_CONTEXT }] },
-			{ role: 'tool', content: [{ type: 'text', text: T3_CONTEXT }] },
+			{
+				role: 'tool',
+				content: [
+					{
+						type: 'tool-result',
+						name: 'fixture',
+						id: 'call_fixture',
+						result: { type: 'text', value: T3_CONTEXT },
+					},
+				],
+			},
 		],
 	}
+	const conversation = structuredClone(request.messages.slice(1))
 	expect(hasT3Context(request)).toBe(true)
 	injectT3Guidance(request, '')
 	expect(request.system[0]?.text).toBe('Unchanged agent instructions')
 	expect(request.system[1]?.text).toBe('<context key="t3-code">\n\n</context>\nOther context')
 	expect(request.messages[0]?.content).toEqual([{ type: 'text', text: 'Updated context: ' }])
-	for (const message of request.messages.slice(1))
-		expect(message.content).toEqual([{ type: 'text', text: T3_CONTEXT }])
+	expect(request.messages.slice(1)).toEqual(conversation)
 	expect(hasT3Context(request)).toBe(false)
 })
 

@@ -2,7 +2,7 @@
 
 > A Home Manager module for a ready-to-use OpenCode 2 workspace.
 
-Limitless pins OpenCode `2.2.5`, supplies coding agents, artifact and source-research
+Limitless pins OpenCode `2.2.7`, supplies coding agents, artifact and source-research
 tools, and configures optional first-party MCP connections. OpenCode owns its
 service discovery, OAuth credentials, Code Mode, and native
 notification delivery. Home Manager owns packages and non-secret configuration, with
@@ -35,8 +35,8 @@ avoid conflicts with T3 Code's browser tools. Use them for browser access.
 
 - **Agents:** `limitless` for design and implementation, with Research for source
   discovery, Oracle for technical and design judgment, and Worker for delegated
-  execution; and `review`, which takes a pull request to an approved or failed
-  verdict on the judgment of its design and verification reviewers.
+  execution; and `review`, which owns design review and test-suite verification
+  in one session and delivers an approved or failed verdict.
 - **Clients:** an optional supervised [T3 Code](#t3-code) environment served by
   the managed OpenCode service, plus opt-in [desktop apps](#desktop-clients) for
   OpenCode and T3 Code.
@@ -137,11 +137,9 @@ Tool access follows the agent's role:
 | Agents | Access |
 | --- | --- |
 | `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection |
-| `review` | The same access as `limitless`. Its instructions limit external actions to the pull request it is given: commits, pushes, labels, the description, comments, and draft status |
+| `review` | The same local and MCP access as `limitless`, with only Research delegation allowed. Its instructions permit test-only changes and PR-scoped commits, pushes, labels, description, comments, and draft status; production changes are excluded |
 | `oracle` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and task-scoped edits; no T3 tools or subagents; deny artifact creation and session changes |
 | `worker` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and edits for task execution; no T3 tools or subagents; deny questions, artifact creation, and session changes |
-| `review-design` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and task-scoped edits; no T3 tools; Research is its only subagent; deny questions, artifact creation, and session changes |
-| `review-verifier` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and task-scoped edits; no T3 tools; Research is its only subagent; deny questions, artifact creation, and session changes |
 | `research` | Executor's read-only connection, or audited reads in direct-MCP mode; local tools for source discovery, with code changes and diagnostic experiments excluded by instructions; no T3 tools; deny external mutations, artifact creation and session changes |
 
 Every agent except Research is a read/write agent.
@@ -298,11 +296,13 @@ requires a separate read-only scope. One endpoint or scoped connection can be
 shared across the fleet, but every OpenCode server authorizes its own grant.
 Do not synchronize OAuth token files between machines.
 
-For a remote OpenCode host, set `callbackPort = 19876` (and optionally
-`readCallbackPort = 19877`). The browser must reach that **OpenCode host's**
-loopback listener; OpenCode 2.1.4 does not relay callbacks through its frontend.
-Open an SSH forward from the browser computer before running `/mcps` against
-the remote backend:
+For a remote OpenCode host, finish authorization in the browser, then paste the
+failed loopback redirect URL into OpenCode's waiting sign-in prompt, not into chat.
+OpenCode 2.2.7 supports this flow without an SSH tunnel.
+
+Alternatively, set `callbackPort = 19876` (and optionally `readCallbackPort = 19877`)
+and forward the **OpenCode host's** loopback listener from the browser computer
+before running `/mcps` against the remote backend:
 
 ```sh
 ssh -N -o ExitOnForwardFailure=yes \
@@ -416,10 +416,9 @@ OpenCode, or supply custom agent definitions through `programs.limitless.agents.
 Agent Markdown model fields take precedence over settings in the same configuration
 directory, so `opencode.settings.agents.limitless.model` does not override the packaged default.
 
-`review` is a second primary agent and uses `openai/gpt-6.1-sol#xhigh`, as does
-Worker. Research uses `openai/gpt-6.1-sol#high`; Oracle and `review-verifier`
-use `openai/gpt-6-astra#xhigh`; `review-design` uses `anthropic/claude-fable-5-2#high`. Subagents keep the processing tier of their
-configured model.
+`review` is a second primary agent and uses `openai/gpt-6-astra#xhigh`, as does
+Oracle. Worker uses `anthropic/claude-opus-5-5#high`; Research uses
+`openai/gpt-6.1-sol#high`. Subagents keep the processing tier of their configured model.
 
 Limitless owns delivery, integration, and final validation, and can delegate
 implementation tasks to Worker.
@@ -430,8 +429,8 @@ consultation. Meaningful departures are explained in the PR. The `commit-and-pr`
 skill commits by repository convention, runs local checks, opens the PR, and
 watches CI and review comments, fixing failures until the PR is green.
 
-Research finds relevant code, documentation, and external sources to answer focused
-questions. It returns findings and citations; Limitless owns decisions and implementation.
+Research finds and synthesizes source evidence about existing behavior, documented
+contracts, and recorded decisions, with precise references and explicit gaps.
 Worker owns isolated, self-contained work that it can complete independently without
 ongoing oversight; routine work stays with Limitless. It implements changes, validates
 the result, and reports completed work, changed files or external actions, checks,
@@ -446,8 +445,9 @@ Oracle investigates directly and may recommend a separate investigation
 to Limitless; none of its helpers starts subagents. Substantive completed changes receive
 one fresh Oracle review, followed by same-session checks of fixes and open findings.
 
-Oracle and the review helpers may make the changes needed for their assigned
-tasks, including source fixes. The caller owns integration and final validation.
+Oracle may make the changes needed for its assigned task, including source fixes.
+The caller owns integration and final validation. Review changes tests only and
+fails when a production correction is required.
 The packaged global `opencode/AGENTS.md` tells agents to preserve others' changes
 and unrelated work and coordinate when work overlaps. Research remains read-only.
 
@@ -484,37 +484,44 @@ The review starts without the authoring conversation, so the draft's description
 is its input: the `commit-and-pr` template states the intent and the accepted
 decisions the change is judged against.
 
-`review` runs the process, integrates changes, and publishes the verdict
-on the least expensive of the three models. The two stronger models judge, each
-in one session that is reused for follow-ups, and `review` does not overrule
-them. Both reviewers may edit code within their assignments:
+One Astra xhigh session owns all three phases, the test changes, and the verdict.
+Research supplies code, documentation, and citations for focused factual questions.
+Review completes each phase's scoped assessment and outstanding research even after
+finding a blocker, consolidates the findings, and records pass or fail. Only a pass
+advances to the next phase; a failure proceeds to publication and the final report.
 
-1. **Design.** `review-design` judges whether the change achieves its intent in a
-   way that fits the system, and whether a simpler shape would do. It or `review`
-   makes the required corrections. Later design changes return to it for review.
-   Optional improvements do not block approval. A wrong design fails the review early.
-2. **Verification.** `review-verifier` derives what the change must guarantee,
-   looks for defects, and shapes a small, sufficient suite around the relevant
-   invariants and failure paths. It keeps useful tests, consolidates or rewrites
-   redundant coverage, and fills gaps. Tests are removed only when their guarantees
-   remain covered or are deliberately retired.
-3. **Fixes.** `review` or its reviewers fix confirmed defects, and the verifier
-   assesses the resulting changes, for about three rounds.
+1. **Design.** Review judges whether the submitted implementation achieves its
+   intent, fits the system, and has a clearly simpler shape that does the same job.
+   Required production changes mean design failure, not permission to implement a
+   repair. Optional improvements do not block approval. Missing material evidence
+   blocks approval without establishing that the design is wrong.
+2. **Testing.** Review audits the affected user paths, invariants, boundaries, and
+   failure cases against existing coverage, then rewrites the smallest sufficient
+   suite. It follows repository testing conventions, preserves distinct guarantees
+   and useful integration coverage, removes redundancy, and fills consequential
+   gaps. Removed tests' guarantees must remain covered or be deliberately retired
+   by accepted intent.
+3. **Verification.** Review assesses the final diff, runs the suite and required
+   checks, publishes useful test changes, watches CI, and concludes with a verdict.
 
-The verifier owns acceptance evidence; `review` owns integration and publication.
-Neither `review` nor the design reviewer weakens a test to pass it; disputed tests
-go back to the verifier. A finding carries evidence, preferably a failing test.
+Review may change assertions, test-only helpers, isolated fixtures, and harnesses,
+but not shipped behavior, production configuration or dependencies, production
+exports, or testability hooks. An invalid test is corrected against the contract;
+a valid regression that needs a production fix fails design, even when found
+during verification. There is no production-fix stage or fixed round budget.
 
 | Label | Meaning | What the review leaves |
 | --- | --- | --- |
-| `review:approved` | The design is sound, the verifier assessed the final diff, nothing blocking is open, and local checks and CI pass | Fix commits, a ready-for-review PR, and a Review section recording the evidence and reviewed commits |
-| `review:failed` | The design is wrong, defects remain, or verification could not finish | A draft PR with the reason and open findings in its Review section. Tests and fixes are pushed, except after a design failure |
+| `review:approved` | No production correction is required, the final test-only diff preserves relevant guarantees, nothing blocking is open, and local checks and CI pass | Test-only commits, a ready-for-review PR, and a Review section recording the evidence and reviewed commits |
+| `review:failed` | Production corrections or intent decisions are required, or verification is incomplete | A draft PR with the reason and open findings in its Review section. Useful test-only changes are pushed, including valid failing regressions |
 
-Review uses the `commit-and-pr` skill for commits, branch history, and description
-formatting. Changes and fixes add commits; history is rewritten only for a rebase.
-Merging requires a separate request. Review preserves the author's description and
-adds a Review section with the invariants, concrete test cases and expected outcomes,
-observed results, changes made in review, and remaining risks.
+Review uses the `commit-and-pr` skill for commit conventions. A review request
+authorizes test-only commits and pushes, including
+useful tests on failure, plus PR metadata updates. It does not authorize production
+changes, history rewrites, or merging. Review preserves the author's description and
+appends a concise Review section below a horizontal rule, updating it in place on
+later reviews. Its fixed format records the verdict, reviewed head and base,
+coverage evidence, test changes, checks, and blockers.
 
 An approval covers only the head commit recorded in that section. Nothing removes the label when
 the branch changes afterwards, so compare that commit with the PR's head before merging.
@@ -526,19 +533,18 @@ for pull requests you trust.
 ### Native delegation
 
 The primary agents use OpenCode's native `subagent` tool for their helpers. Follow-ups
-pass the same `sessionID`. The depth limit is two, so that the review helpers can
-start Research. Every other helper denies subagent calls:
+pass the same `sessionID`. The configured depth limit is two; all packaged helpers
+deny subagent calls:
 
 ```text
-Limitless (Opus 5.5 high)         Review (Sol xhigh)
-├── Research (Sol high)           ├── Research (Sol high)
-├── Oracle (Astra xhigh)          ├── Review Design (Fable 5.2 high)
-└── Worker (Sol xhigh)            │   └── Research
-                                  └── Review Verifier (Astra xhigh)
-                                      └── Research
+Limitless (Opus 5.5 high)         Review (Astra xhigh)
+├── Research (Sol high)           └── Research (Sol high)
+├── Oracle (Astra xhigh)
+└── Worker (Opus 5.5 high)
 ```
 
-Any other subagent call from a primary agent asks for approval.
+Other subagent calls from Limitless ask for approval. Review denies delegation
+to any agent except Research.
 
 Independent changes can use separate Limitless sessions in native worktrees;
 the `repository-setup` skill covers checkout setup and teardown.
@@ -648,9 +654,45 @@ loopback, and OpenCode's native authentication still applies through the proxy.
 
 The service persists hostname and port through native `opencode service` commands
 when they differ, stops any existing native daemon, then runs `serve --service`
-in the foreground. It preserves the private password, CORS configuration, and
-configured service environment. Private service files remain writable and outside
+in the foreground. By default it preserves the private password, CORS configuration,
+and configured service environment. Private service files remain writable and outside
 the Nix store. Disabling supervision leaves the last persisted binding in place.
+
+### Managed fleet password
+
+To give several trusted servers the same credential, provision the same encrypted
+secret to each host and configure its decrypted runtime path:
+
+```nix
+programs.limitless.opencode.service.passwordFile = "/run/agenix/opencode-password";
+```
+
+Use an absolute **string**, not a Nix path literal or a store file. The launcher
+calls the packaged native `opencode service set password --file <path>` command
+before changing bindings or starting the service. The native owner reads the file
+and preserves the rest of its private configuration. No password value is passed
+in argv, an environment variable, or generated Nix configuration. An unchanged
+import is a no-op; normal supervised startup still reclaims the native daemon.
+
+The file must be nonempty, single-line UTF-8, with at most one trailing LF or CRLF.
+Spaces are part of the password. Missing, unreadable, malformed, or oversized files
+fail startup rather than falling back to another credential. With password-file
+management enabled, saved service environment values cannot override `HOME`,
+`XDG_CONFIG_HOME`, `OPENCODE_CONFIG_DIR`, or `XDG_STATE_HOME` to a different value:
+preparation, native discovery, and execution must use the same private identity.
+
+Changing file contents takes effect at the next managed start, including automatic
+recovery starts; it does not immediately change a running server. Coordinate rotation
+with active clients and Pipeline, then verify the listener's authentication.
+Native clients that start the daemon independently use the last imported password.
+Removing `passwordFile` or its source file does not erase the native private copy.
+
+Sharing a password also shares authority: in OpenCode 2.2.7, pairing tokens are
+signed with that password without a host-specific audience. A token issued by one
+instance can authenticate to another using the same password. Rotation invalidates
+existing pairings. Keep Pipeline's API bearer token separate from this fleet secret.
+
+### Supervision lifecycle
 
 With `mcp.executor` enabled, the unit first waits up to about 60 seconds for the
 Executor endpoint to answer HTTP (any status below 500, normally 401). Tailnet DNS
@@ -885,7 +927,7 @@ independent T3 OAuth connections. Underscore-containing thread namespaces, such 
 a fork's `<thread>_fork`, receive stable `t3-code-<32 hex>` aliases so
 prefix-related names cannot grant sibling tools.
 
-This adapter targets OpenCode `2.2.5` and upstream stable T3 `0.1.6` on both
+This adapter targets OpenCode `2.2.7` and upstream stable T3 `0.1.8` on both
 x86_64 and ARM Linux. T3's OpenCode 2 provider still selects `build` for normal
 mode, which the bridge maps to the configured default agent. The per-thread
 agent picker is not available on this V2 path.
@@ -1004,14 +1046,15 @@ nix run .#checks.x86_64-linux.t3-browser
 It exercises isolated shared and persistent browser contexts plus direct HTML
 rendering, using temporary profiles and no live T3 state or external websites.
 
-Runtime, Limitless plugin SDK, and schema are pinned to `2.2.5`, with
-`effect@4.0.6`; update them together. Hosted plugins use OpenCode's shared Effect
-and plugin runtime; the standalone T3 bridge bundles its own dependencies.
+Runtime, Limitless plugin SDK, and schema are pinned to `2.2.7`. The workspace
+uses `effect@4.1.3` and matching platform packages. Hosted plugins still use
+OpenCode's shared Effect and plugin runtime; the standalone T3 bridge bundles its own dependencies. Validate hosted compatibility against
+the pinned OpenCode release when updating Effect.
 The cache-status plugin's type-only dev dependencies (`@opencode/theme`,
-`@opentui/*`, `solid-js`) follow the same OpenCode release: `2.2.5`, `0.8.0`,
-and `1.9.17`, respectively. The `@effect/platform-node-shared` override keeps
-the standalone bridge on Effect's matching `4.0.6` platform runtime instead of
-resolving a newer, incompatible peer requirement. Re-audit native
+`@opentui/*`, `solid-js`) follow the same OpenCode release: `2.2.7`, `0.8.1`,
+and `1.9.17`, respectively. The Effect and platform overrides keep SDK
+dependencies on one `4.1.3` runtime in standalone builds and local tests.
+Re-audit native
 capabilities and MCP read exceptions when upgrading. Vendor references for the
 current allowlists are linked in the integration table above.
 

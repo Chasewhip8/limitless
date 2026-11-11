@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import { NodeHttpClient, NodeHttpServer, NodeStream } from '@effect/platform-node'
-import { Effect, Layer, ManagedRuntime, Schema, Stream } from 'effect'
+import { Effect, Layer, ManagedRuntime, Option, Schema, Stream } from 'effect'
 import {
 	Headers,
 	HttpBody,
@@ -11,6 +11,7 @@ import {
 	HttpServer,
 	HttpServerRequest,
 	HttpServerResponse,
+	UrlParams,
 } from 'effect/http'
 import { type Backend, BridgeError, backendURL, ServiceBackend } from './backend'
 import type { BridgeRouter } from './requests'
@@ -122,9 +123,14 @@ const forward = Effect.fn('Bridge.forward')(function* (
 	])
 	const contentType = forwardedHeaders['content-type']
 	const body = yield* requestBody(request, contentType, replacementBody)
-	let forwarded = HttpClientRequest.make(request.method)(target, {
-		headers: Headers.merge(forwardedHeaders, Headers.fromInput(backend.headers)),
-	}).pipe(HttpClientRequest.setBody(body))
+	let forwarded = HttpClientRequest.makeWith(
+		request.method,
+		target.href,
+		UrlParams.empty,
+		Option.none(),
+		Headers.merge(forwardedHeaders, Headers.fromInput(backend.headers)),
+		HttpBody.empty,
+	).pipe(HttpClientRequest.setBody(body))
 	if (contentType === undefined)
 		forwarded = HttpClientRequest.removeHeader(forwarded, 'content-type')
 	const response = yield* HttpClient.execute(forwarded).pipe(

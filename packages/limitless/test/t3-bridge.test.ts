@@ -88,7 +88,7 @@ test('authenticates the caller and preserves upstream errors without leaking eit
 	expect(calls).toBe(1)
 })
 
-test('forwards session creation and permission writes byte for byte', async () => {
+test('forwards request methods, paths, and bodies byte for byte', async () => {
 	const received: Array<{
 		method: string | undefined
 		url: string | undefined
@@ -113,6 +113,7 @@ test('forwards session creation and permission writes byte for byte', async () =
 	for (const [method, path] of [
 		['POST', '/api/session?directory=%2Fproject'],
 		['PATCH', '/api/session/ses_test'],
+		['PROPFIND', '/extension?directory=%2Fproject'],
 	] as const) {
 		const response = await fetch(`${bridge.url}${path}`, {
 			method,
@@ -129,6 +130,12 @@ test('forwards session creation and permission writes byte for byte', async () =
 			body: permissions,
 		},
 		{ method: 'PATCH', url: '/api/session/ses_test', type: 'application/json', body: permissions },
+		{
+			method: 'PROPFIND',
+			url: '/extension?directory=%2Fproject',
+			type: 'application/json',
+			body: permissions,
+		},
 	])
 })
 
