@@ -43,6 +43,7 @@
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pipeline = import ./nix/packages/pipeline.nix { inherit pkgs self; };
+          capsule = import ./nix/packages/capsule.nix { inherit pkgs self; };
           t3 = pkgs.callPackage ./nix/packages/t3.nix { };
         }
         // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
@@ -68,6 +69,10 @@
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             pipeline = import ./nix/tests/pipeline.nix { inherit pkgs self; };
+            capsule = import ./nix/tests/capsule.nix {
+              inherit pkgs;
+              package = self.packages.${system}.capsule;
+            };
             opencode-password = import ./nix/tests/opencode-password.nix {
               inherit pkgs;
               opencode = self.packages.${system}.opencode;
@@ -81,20 +86,28 @@
               package = self.packages.${system}.t3;
             };
           };
-        devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            actionlint
-            bun
-            deadnix
-            markdownlint-cli2
-            nodejs_22
-            node-gyp
-            nixfmt
-            python3
-            pkg-config
-            statix
-          ];
-        };
+        devShells.default = pkgs.mkShell (
+          {
+            packages = with pkgs; [
+              actionlint
+              bun
+              deadnix
+              markdownlint-cli2
+              nodejs_22
+              node-gyp
+              nixfmt
+              python3
+              pkg-config
+              statix
+            ];
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            CAPSULE_TEST_RUNTIME = self.packages.${system}.capsule.runtimeConfig;
+            CAPSULE_TEST_BWRAP = self.packages.${system}.capsule.runtime.bwrap;
+            CAPSULE_TEST_SHELL = self.packages.${system}.capsule.runtime.shell;
+            CAPSULE_TEST_COREUTILS = "${pkgs.coreutils}/bin";
+          }
+        );
       }
     )
     // {

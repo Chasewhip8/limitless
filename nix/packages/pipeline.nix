@@ -21,11 +21,12 @@ let
       );
   };
   manifests = pkgs.runCommand "pipeline-dependency-manifests" { } ''
-    mkdir -p "$out/packages/limitless" "$out/packages/pipeline"
+    mkdir -p "$out/packages/limitless" "$out/packages/pipeline" "$out/packages/capsule"
     cp ${root + "/package.json"} "$out/package.json"
     cp ${root + "/bun.lock"} "$out/bun.lock"
     cp ${root + "/packages/limitless/package.json"} "$out/packages/limitless/package.json"
     cp ${root + "/packages/pipeline/package.json"} "$out/packages/pipeline/package.json"
+    cp ${root + "/packages/capsule/package.json"} "$out/packages/capsule/package.json"
   '';
   dependencies = pkgs.stdenvNoCC.mkDerivation {
     name = "pipeline-bun-deps";

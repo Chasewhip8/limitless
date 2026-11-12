@@ -489,6 +489,22 @@ The separately approved native event journal supports positive admission
 recovery. Its storage cost and operational limitations are documented under
 [credentials, storage and operations](docs/pipeline.md#credentials-storage-and-operations).
 
+### Capsule
+
+Capsule is a small Effect library and `capsule` CLI, independent of Pipeline, that
+runs commands for a retained checkout inside its Nix development shell through
+Bubblewrap. It keeps private home and temporary state in a separate state root
+(`--root` or `CAPSULE_ROOT`) so work can stop and resume. It can expose an existing
+host Docker socket; repository hooks in an optional `capsule.json` manage
+services. Purge removes Capsule state and tombstones the ID but keeps the checkout.
+
+It is hygiene for trusted code, not a security boundary: commands share the host
+network and the Nix and Docker daemons, and native OpenCode host features still
+act on the checkout directly. `@limitless/capsule/opencode` provides an OpenCode
+SDK workspace provider for embedding hosts. Native host registration, Pipeline
+integration and previews are not implemented. Build `.#capsule` on Linux; see the
+[Capsule guide](docs/capsule.md) for the CLI, lifecycle and limitations.
+
 ### Pull request review
 
 `review` takes one pull request from draft to a verdict, so that merging needs
@@ -1067,6 +1083,10 @@ nix run .#checks.x86_64-linux.t3-browser
 
 It exercises isolated shared and persistent browser contexts plus direct HTML
 rendering, using temporary profiles and no live T3 state or external websites.
+
+The Linux `capsule` flake check validates the package without namespaces. Run
+`nix run .#checks.<system>.capsule` on the host to exercise real Bubblewrap and
+Nix development shells against temporary fixtures.
 
 Runtime, Limitless plugin SDK, and schema are pinned to `2.2.7`. The workspace
 uses `effect@4.1.3` and matching platform packages. Hosted plugins still use
