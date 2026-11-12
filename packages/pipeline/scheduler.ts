@@ -1,8 +1,21 @@
-import { Clock, Context, Effect, Layer, Option, Queue, Schema, Semaphore, Stream } from 'effect'
+import type { SessionPlacement } from '@limitless/capsule/rpc'
+import {
+	Clock,
+	Context,
+	Effect,
+	FiberSet,
+	Layer,
+	Option,
+	Queue,
+	Schema,
+	Semaphore,
+	Stream,
+} from 'effect'
 import { PipelineConfig } from './config'
+import type { CommandEvent, StoredCommand } from './tasks/command'
 import { deliveryTerminal } from './tasks/machine'
 import { newAssignment, pinnedWorker, sessionIdentity } from './tasks/placement'
-import type { Assignment, CommandEvent, Rejection, StoredCommand, Task } from './tasks/schema'
+import type { Assignment, Rejection, Task } from './tasks/schema'
 import { TaskStore } from './tasks/store'
 import { type Worker, WorkerError } from './worker/schema'
 import { OpenCodeWorker } from './worker/service'
@@ -17,10 +30,16 @@ type CommandIn<Tag extends StoredCommand['delivery']['_tag']> = Omit<StoredComma
 }
 type PendingCommand = CommandIn<'Pending'>
 type UnconfirmedCommand = CommandIn<'Unconfirmed'>
+type Pass = { again: boolean }
+
+/** Messages need a running Capsule; interrupts only need the proven identity, so they reach a stopped one. */
+function acceptsMessages(placement: SessionPlacement): boolean {
+	return placement.capsulePhase === 'ready' && placement.workspaceState === 'bound'
+}
 
 function rejection(error: WorkerError, step: PendingCommand['delivery']['step']): Rejection {
 	if (error.code === 'incompatible') return { code: 'worker_incompatible', message: error.message }
-	if (step === 'checkout') return { code: 'preparation_failed', message: error.message }
+	if (step === 'session') return { code: 'preparation_failed', message: error.message }
 	return { code: 'session_unavailable', message: error.message }
 }
 
@@ -28,7 +47,8 @@ const make = Effect.gen(function* () {
 	const config = yield* PipelineConfig
 	const store = yield* TaskStore
 	const remote = yield* OpenCodeWorker
-	const lock = yield* Semaphore.make(1)
+	const placementLock = yield* Semaphore.make(1)
+	const reconciling = new Map<string, Pass>()
 
 	const apply = (command: StoredCommand, event: CommandEvent) =>
 		store.apply(command.taskId, command.id, command.version, event)
@@ -54,16 +74,16 @@ const make = Effect.gen(function* () {
 		for (const worker of config.workers) {
 			if (task.request.system !== undefined && task.request.system !== worker.system) continue
 			if (!(yield* store.hasCapacity(worker))) continue
-			const ready = yield* remote.ready(worker).pipe(Effect.option)
-			if (Option.isNone(ready)) continue
-			const assignment = newAssignment(worker, task.id)
+			const host = yield* remote.ready(worker).pipe(Effect.option)
+			if (Option.isNone(host)) continue
+			const assignment = newAssignment(worker, host.value, task.id)
 			const claimed = yield* store
 				.claim(task.id, command.id, command.version, worker, assignment)
 				.pipe(Effect.option)
 			if (Option.isSome(claimed)) return { task: claimed.value.task, worker, assignment }
 		}
 		return undefined
-	})
+	}, placementLock.withPermit)
 
 	const place = Effect.fn('Scheduler.place')(function* (task: Task, command: PendingCommand) {
 		if (task.placement._tag === 'Unassigned') return yield* claimNewPlacement(task, command)
@@ -73,38 +93,18 @@ const make = Effect.gen(function* () {
 		return { task: claimed.task, worker, assignment } satisfies Placed
 	})
 
-	const prepareCheckout = Effect.fn('Scheduler.prepareCheckout')(function* (
+	// IDs and source intent are durable before this idempotent call, so a lost reply only repeats it.
+	const prepareSession = Effect.fn('Scheduler.prepareSession')(function* (
 		placed: Placed,
 		command: PendingCommand,
 	) {
 		const { payload } = command.delivery
 		if (payload._tag !== 'Review')
 			return yield* Effect.die(DispatchDefect.make({ reason: 'payload_mismatch' }))
-		const { pr } = payload
-		const status = yield* remote.prepare(placed.worker, placed.assignment, {
-			taskId: placed.task.id,
-			repository: pr.repository,
-			sourceRepository: pr.sourceRepository,
-			prNumber: pr.number,
-			headRef: pr.headRef,
-			headSha: pr.headSha,
-			baseSha: pr.baseSha,
+		yield* remote.prepareSession(placed.worker, sessionIdentity(placed.task, placed.assignment), {
+			source: payload.source,
+			pr: payload.pr.url,
 		})
-		if (status.taskId !== placed.task.id || status.directory !== placed.assignment.directory)
-			return yield* WorkerError.make({
-				code: 'workspace',
-				message: 'Helper reported a checkout for a different task placement',
-			})
-		if (status._tag === 'Ready') yield* apply(command, { _tag: 'CheckoutPrepared' })
-	})
-
-	const prepareSession = Effect.fn('Scheduler.prepareSession')(function* (
-		placed: Placed,
-		command: PendingCommand,
-	) {
-		const identity = sessionIdentity(placed.task, placed.assignment)
-		if (command.kind === 'review') yield* remote.createSession(placed.worker, identity)
-		else yield* remote.requireSession(placed.worker, identity)
 		yield* apply(command, { _tag: 'SessionPrepared' })
 	})
 
@@ -122,6 +122,15 @@ const make = Effect.gen(function* () {
 
 	// The Unconfirmed commit precedes the native write so a crash or lost reply can never replay it.
 	const send = Effect.fn('Scheduler.send')(function* (placed: Placed, command: PendingCommand) {
+		const placement = yield* remote.requirePlacement(
+			placed.worker,
+			sessionIdentity(placed.task, placed.assignment),
+		)
+		if (command.kind !== 'interrupt' && !acceptsMessages(placement))
+			return yield* WorkerError.make({
+				code: 'unavailable',
+				message: 'The Capsule must be ready with a bound workspace before a message is sent',
+			})
 		const { command: started } = yield* apply(command, { _tag: 'DeliveryStarted' })
 		if (started.delivery._tag !== 'Unconfirmed') return
 		const nativeRef = yield* deliver(placed, { ...started, delivery: started.delivery })
@@ -148,8 +157,6 @@ const make = Effect.gen(function* () {
 		const placed = yield* place(task, command)
 		if (placed === undefined) return
 		switch (command.delivery.step) {
-			case 'checkout':
-				return yield* prepareCheckout(placed, command)
 			case 'session':
 				return yield* prepareSession(placed, command)
 			case 'send':
@@ -247,16 +254,52 @@ const make = Effect.gen(function* () {
 		if (current.command.version !== command.version) return yield* reconcile(taskId)
 	})
 
+	const claimPass = (taskId: string) =>
+		Effect.sync(() => {
+			const running = reconciling.get(taskId)
+			if (running !== undefined) {
+				running.again = true
+				return undefined
+			}
+			const pass: Pass = { again: true }
+			reconciling.set(taskId, pass)
+			return pass
+		})
+
+	const runPasses = Effect.fn('Scheduler.runPasses')(function* (
+		taskId: string,
+		pass: Pass | undefined,
+	) {
+		if (pass === undefined) return
+		while (pass.again) {
+			pass.again = false
+			yield* reconcile(taskId)
+		}
+	})
+
+	const releasePass = (taskId: string, pass: Pass | undefined) =>
+		Effect.sync(() => {
+			if (pass !== undefined) reconciling.delete(taskId)
+		})
+
+	/** One reconcile per task at a time; a request during a pass schedules one more pass after it. */
+	const reconcileExclusive = (taskId: string) =>
+		Effect.acquireUseRelease(
+			claimPass(taskId),
+			(pass) => runPasses(taskId, pass),
+			(pass) => releasePass(taskId, pass),
+		)
+
+	const notifyWorkers = Effect.forEach(config.workers, (worker) => store.notifyWorker(worker.id), {
+		discard: true,
+	})
+
+	/** Deterministic test seam: reconciles outstanding tasks in order and waits for each pass. */
 	const tick = Effect.fn('Scheduler.tick')(function* () {
 		const tasks = yield* store.work()
-		yield* Effect.forEach(tasks, reconcile, {
-			concurrency: Math.max(1, config.workers.length),
-			discard: true,
-		})
-		yield* Effect.forEach(config.workers, (worker) => store.notifyWorker(worker.id), {
-			discard: true,
-		})
-	}, lock.withPermit)
+		yield* Effect.forEach(tasks, reconcileExclusive, { discard: true })
+		yield* notifyWorkers
+	})
 
 	const watchWorker = Effect.fn('Scheduler.watchWorker')(function* (
 		worker: Worker,
@@ -274,6 +317,7 @@ const make = Effect.gen(function* () {
 		yield* Effect.sleep(config.pollIntervalMs)
 	})
 
+	/** Each task's passes run in their own scoped fiber, so a long preparation never delays other tasks. */
 	const run = Effect.gen(function* () {
 		const wake = yield* Queue.sliding<void>(1)
 		const changes = yield* store.subscribeChanges
@@ -286,10 +330,16 @@ const make = Effect.gen(function* () {
 			(worker) => watchWorker(worker, wake).pipe(Effect.forever, Effect.forkScoped),
 			{ discard: true },
 		)
-		return yield* Effect.gen(function* () {
-			yield* tick()
+		const passes = yield* FiberSet.make<void, never>()
+		const schedule = Effect.gen(function* () {
+			const tasks = yield* store.work()
+			yield* Effect.forEach(tasks, (taskId) => FiberSet.run(passes, reconcileExclusive(taskId)), {
+				discard: true,
+			})
+			yield* notifyWorkers
 			yield* Effect.raceFirst(Queue.take(wake), Effect.sleep(config.pollIntervalMs))
-		}).pipe(Effect.forever)
+		})
+		return yield* Effect.raceFirst(schedule.pipe(Effect.forever), FiberSet.join(passes))
 	}).pipe(Effect.scoped)
 
 	return { tick, run }

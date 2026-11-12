@@ -23,6 +23,18 @@ let
       "OPENCODE_CLI_CONFIG_CONTENT"
       (builtins.toJSON cfg.opencode.cliSettings)
     ]
+    ++ lib.optionals (cfg._generated.capsuleHostConfig != null) [
+      "--set"
+      "OPENCODE_CAPSULE_CONFIG"
+      (toString cfg._generated.capsuleHostConfig)
+      "--set"
+      "SHELL"
+      cfg.capsule.package.runtime.shell
+      "--prefix"
+      "PATH"
+      ":"
+      cfg.capsule.package.runtime.basePath
+    ]
     ++
       lib.optionals
         (cfg.plugins.anthropicAuth.enable && cfg.plugins.anthropicAuth.claudeCodeVersion != null)

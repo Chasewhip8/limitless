@@ -5,9 +5,9 @@ import { Scheduler } from '../scheduler'
 import { Tasks } from '../tasks/service'
 import { TaskStore } from '../tasks/store'
 import { WorkerError } from '../worker/schema'
-import { coordinator, review, settings, worker } from './fixtures'
+import { coordinator, host, review, settings, worker } from './fixtures'
 
-test('occupied capacity does not probe readiness or feed helper events back into scheduling', async () => {
+test('occupied capacity does not probe readiness or feed readiness events back into scheduling', async () => {
 	const { runtime, control, changes } = coordinator()
 	try {
 		await runtime.runPromise(
@@ -45,7 +45,7 @@ test('occupied capacity does not probe readiness or feed helper events back into
 	}
 })
 
-test('resume routes a new message to the pinned worker, directory and existing session', async () => {
+test('resume routes a new message to the pinned worker, Capsule placement and existing session', async () => {
 	const { runtime, calls } = coordinator()
 	try {
 		await runtime.runPromise(
@@ -62,11 +62,17 @@ test('resume routes a new message to the pinned worker, directory and existing s
 						messageId: initial.command.messageId,
 					},
 				})
-				expect(reviewed.task.placement).toMatchObject({
+				const id = initial.task.id.replaceAll('-', '')
+				expect(reviewed.task.placement).toEqual({
 					_tag: 'Assigned',
 					assignment: {
 						workerId: worker.id,
-						directory: `${worker.workspaceRoot}/${initial.task.id}/checkout`,
+						workerUrl: worker.url,
+						controlDirectory: worker.controlDirectory,
+						storageId: host.storageId,
+						workspaceId: `wrk_pipeline${id}`,
+						sessionId: `ses_pipeline${id}`,
+						directory: `${host.checkoutRoot}/wrk_pipeline${id}/checkout`,
 					},
 				})
 
@@ -81,10 +87,10 @@ test('resume routes a new message to the pinned worker, directory and existing s
 			}),
 		)
 		expect(calls.map((call) => call.operation).filter((op) => op !== 'observe')).toEqual([
-			'prepare',
-			'createSession',
+			'prepareSession',
+			'requirePlacement',
 			'admit',
-			'requireSession',
+			'requirePlacement',
 			'admit',
 		])
 		const admits = calls.filter((call) => call.operation === 'admit')
@@ -117,7 +123,7 @@ test('resume never replaces a missing native session', async () => {
 				})
 			}),
 		)
-		expect(calls.filter((call) => call.operation === 'createSession')).toHaveLength(1)
+		expect(calls.filter((call) => call.operation === 'prepareSession')).toHaveLength(1)
 		expect(calls.filter((call) => call.operation === 'admit')).toHaveLength(1)
 	} finally {
 		await runtime.dispose()
@@ -164,7 +170,7 @@ test('idle native history neither clears an unconfirmed delivery nor releases it
 				const uncertain = yield* tasks.getCommand(first.task.id, first.command.id)
 				expect(uncertain.command.delivery).toEqual({ _tag: 'Unconfirmed' })
 				const queued = yield* tasks.getCommand(second.task.id, second.command.id)
-				expect(queued.command.delivery).toEqual({ _tag: 'Pending', step: 'checkout' })
+				expect(queued.command.delivery).toEqual({ _tag: 'Pending', step: 'session' })
 				expect(queued.task.placement._tag).toBe('Unassigned')
 			}),
 		)
@@ -273,13 +279,13 @@ test('preparation failures reject the command; transient outages leave it pendin
 				yield* scheduler.tick()
 				expect((yield* tasks.getCommand(task.id, command.id)).command.delivery).toEqual({
 					_tag: 'Pending',
-					step: 'checkout',
+					step: 'session',
 				})
-				control.prepareError = WorkerError.make({ code: 'workspace', message: 'Clone failed' })
+				control.prepareError = WorkerError.make({ code: 'protocol', message: 'Invalid source' })
 				yield* scheduler.tick()
 				expect((yield* tasks.getCommand(task.id, command.id)).command.delivery).toMatchObject({
 					_tag: 'Rejected',
-					reason: { code: 'preparation_failed', message: 'Clone failed' },
+					reason: { code: 'preparation_failed', message: 'Invalid source' },
 				})
 			}),
 		)
@@ -325,6 +331,195 @@ test('command events follow delivery to a settled native observation; cancelling
 			}),
 		)
 		expect(calls.some((call) => call.operation === 'interrupt')).toBe(false)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('a lost preparation reply repeats only the idempotent preparation before one prompt', async () => {
+	const { runtime, calls, control } = coordinator()
+	control.losePrepareReply = true
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const scheduler = yield* Scheduler
+				const { task, command } = yield* tasks.submit('review', review())
+				yield* scheduler.tick()
+				expect((yield* tasks.getCommand(task.id, command.id)).command.delivery).toEqual({
+					_tag: 'Pending',
+					step: 'session',
+				})
+				control.losePrepareReply = false
+				yield* scheduler.tick()
+				expect((yield* tasks.getCommand(task.id, command.id)).command.delivery._tag).toBe(
+					'Acknowledged',
+				)
+			}),
+		)
+		const prepares = calls.filter((call) => call.operation === 'prepareSession')
+		expect(prepares).toHaveLength(2)
+		expect(prepares[1]?.session).toEqual(prepares[0]?.session)
+		expect(calls.filter((call) => call.operation === 'admit')).toHaveLength(1)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('a long Capsule preparation neither starves another task’s interrupt nor survives scheduler shutdown', async () => {
+	const { runtime, calls, control } = coordinator({ workers: [{ ...worker, capacity: 2 }] })
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const scheduler = yield* Scheduler
+				const running = yield* tasks.submit('running', review(1))
+				yield* scheduler.tick()
+				yield* TestClock.adjust(1)
+
+				control.prepareGate = yield* Deferred.make<void>()
+				const provisioning = yield* tasks.submit('provisioning', review(2))
+				control.prepareStarted = yield* Deferred.make<void>()
+				const loop = yield* scheduler.run.pipe(Effect.forkChild)
+				yield* Deferred.await(control.prepareStarted)
+
+				const interrupt = yield* tasks.interrupt(running.task.id, 'stop', {
+					afterCommandId: running.command.id,
+				})
+				const delivered = yield* (yield* tasks.events(running.task.id, interrupt.command.id)).pipe(
+					Stream.filter((view) => view.command.delivery._tag === 'Acknowledged'),
+					Stream.runHead,
+				)
+				expect(delivered._tag).toBe('Some')
+				const waiting = yield* tasks.getCommand(provisioning.task.id, provisioning.command.id)
+				expect(waiting.command.delivery).toEqual({ _tag: 'Pending', step: 'session' })
+
+				yield* Fiber.interrupt(loop)
+				expect(control.preparesInterrupted).toBe(1)
+			}),
+		)
+		expect(calls.filter((call) => call.operation === 'interrupt')).toHaveLength(1)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('interrupts reach a stopped, purged, or workspace-absent Capsule after identity proof alone', async () => {
+	const { runtime, calls, control } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const scheduler = yield* Scheduler
+				const { task, command } = yield* tasks.submit('review', review())
+				yield* scheduler.tick()
+				let anchor = command.id
+				for (const placement of [
+					{ capsulePhase: 'stopped', workspaceState: 'bound' },
+					{ capsulePhase: 'purged', workspaceState: 'absent' },
+					{ capsulePhase: 'ready', workspaceState: 'absent' },
+				] as const) {
+					control.placement = placement
+					const stop = yield* tasks.interrupt(task.id, `stop-${placement.capsulePhase}`, {
+						afterCommandId: anchor,
+					})
+					yield* scheduler.tick()
+					const view = yield* tasks.getCommand(task.id, stop.command.id)
+					expect(view.command.delivery._tag).toBe('Acknowledged')
+					anchor = stop.command.id
+				}
+			}),
+		)
+		expect(calls.filter((call) => call.operation === 'interrupt')).toHaveLength(3)
+		expect(calls.filter((call) => call.operation === 'prepareSession')).toHaveLength(1)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('a resume waits unsent for a ready, bound Capsule without preparing or reviving it', async () => {
+	const { runtime, calls, control } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const scheduler = yield* Scheduler
+				const { task, command } = yield* tasks.submit('review', review())
+				yield* scheduler.tick()
+
+				control.placement = { capsulePhase: 'stopped', workspaceState: 'bound' }
+				const expired = yield* tasks.resume(task.id, 'expired', {
+					afterCommandId: command.id,
+					message: 'Never sent.',
+				})
+				yield* scheduler.tick()
+				yield* scheduler.tick()
+				expect((yield* tasks.getCommand(task.id, expired.command.id)).command.delivery).toEqual({
+					_tag: 'Pending',
+					step: 'send',
+				})
+				yield* TestClock.adjust(settings.queueTimeoutMs)
+				yield* scheduler.tick()
+				expect(
+					(yield* tasks.getCommand(task.id, expired.command.id)).command.delivery,
+				).toMatchObject({ _tag: 'Rejected', reason: { code: 'queue_timeout' } })
+
+				control.placement = { capsulePhase: 'ready', workspaceState: 'unprovisioned' }
+				const held = yield* tasks.resume(task.id, 'held', {
+					afterCommandId: command.id,
+					message: 'Sent once ready.',
+				})
+				yield* scheduler.tick()
+				expect((yield* tasks.getCommand(task.id, held.command.id)).command.delivery._tag).toBe(
+					'Pending',
+				)
+				control.placement = { capsulePhase: 'ready', workspaceState: 'bound' }
+				yield* scheduler.tick()
+				expect((yield* tasks.getCommand(task.id, held.command.id)).command.delivery._tag).toBe(
+					'Acknowledged',
+				)
+			}),
+		)
+		expect(calls.filter((call) => call.operation === 'admit')).toHaveLength(2)
+		expect(calls.filter((call) => call.operation === 'prepareSession')).toHaveLength(1)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('an unconfirmed message is still reconciled exactly after its Capsule stops or is purged', async () => {
+	const { runtime, calls, control } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const scheduler = yield* Scheduler
+				const { task, command } = yield* tasks.submit('review', review())
+				yield* scheduler.tick()
+				control.loseAdmitReply = true
+				control.historyUnavailable = true
+				const resumed = yield* tasks.resume(task.id, 'resume', {
+					afterCommandId: command.id,
+					message: 'Possibly delivered.',
+				})
+				yield* scheduler.tick()
+				expect((yield* tasks.getCommand(task.id, resumed.command.id)).command.delivery._tag).toBe(
+					'Unconfirmed',
+				)
+
+				control.placement = { capsulePhase: 'purged', workspaceState: 'absent' }
+				control.historyUnavailable = false
+				yield* scheduler.tick()
+				expect((yield* tasks.getCommand(task.id, resumed.command.id)).command.delivery).toEqual({
+					_tag: 'Acknowledged',
+					nativeRef: {
+						sessionId: `ses_pipeline${task.id.replaceAll('-', '')}`,
+						messageId: resumed.command.messageId,
+					},
+				})
+			}),
+		)
+		expect(calls.filter((call) => call.operation === 'admit')).toHaveLength(2)
 	} finally {
 		await runtime.dispose()
 	}

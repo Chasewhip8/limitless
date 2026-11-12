@@ -1,12 +1,12 @@
-import { Agent, Session, SessionMessage } from '@opencode/client/effect'
+import { CapsuleHostRpc, type PreparedSession, type PrepareSession } from '@limitless/capsule/rpc'
+import { type OpenCodeClient, Session, SessionMessage } from '@opencode/client/effect'
 import { Context, Effect, Layer, Option, Stream } from 'effect'
-import { failure, makeConnection, nativeRequest, translateError } from './client'
+import { failure, makeConnection, nativeRequest, RequestDeadline, translateError } from './client'
 import {
 	admissionInJournal,
 	deliveredMessage,
 	location,
 	matchesPrompt,
-	validateSession,
 	wasCancelled,
 } from './evidence'
 import type {
@@ -16,50 +16,98 @@ import type {
 	Worker,
 	WorkerError,
 } from './schema'
-import { makeWorkspaces } from './workspace'
+import type { SourceSpec } from './source'
+
+const prepareDeadline = '15 minutes'
+
+const owner = (identity: SessionIdentity) => ({ namespace: 'pipeline', id: identity.taskId })
+
+const sessionReference = (identity: SessionIdentity) => ({
+	storageId: identity.storageId,
+	workspaceId: identity.workspaceId,
+	sessionId: identity.sessionId,
+	owner: owner(identity),
+})
+
+const requirePlaced = Effect.fn('OpenCodeWorker.requirePlaced')(function* (
+	placed: PreparedSession,
+	identity: SessionIdentity,
+) {
+	if (
+		placed.workspaceId !== identity.workspaceId ||
+		placed.sessionId !== identity.sessionId ||
+		placed.directory !== identity.directory
+	) {
+		return yield* failure(
+			'ownership',
+			'The Capsule host placed the session outside the retained task assignment',
+		)
+	}
+})
 
 const make = Effect.gen(function* () {
 	const connect = yield* makeConnection
-	const workspaces = yield* makeWorkspaces
+	const capsule = (client: OpenCodeClient, worker: Worker) => {
+		const host = client.rpc(CapsuleHostRpc)
+		const options = { location: location(worker.controlDirectory) }
+		return {
+			info: () => host.info({}, options).pipe(nativeRequest),
+			prepareSession: (input: typeof PrepareSession.Encoded) =>
+				host
+					.prepareSession(input, options)
+					.pipe(nativeRequest, Effect.provideService(RequestDeadline, prepareDeadline)),
+			getSession: (identity: SessionIdentity) =>
+				host.getSession(sessionReference(identity), options).pipe(nativeRequest),
+		}
+	}
+
+	/** Proves the retained identity without mutating it, whatever the Capsule's phase; it never prepares again. */
+	const provePlacement = Effect.fn('OpenCodeWorker.provePlacement')(function* (
+		client: OpenCodeClient,
+		worker: Worker,
+		identity: SessionIdentity,
+	) {
+		const placement = yield* capsule(client, worker).getSession(identity)
+		yield* requirePlaced(placement, identity)
+		return placement
+	})
+
 	const ready = Effect.fn('OpenCodeWorker.ready')(function* (worker: Worker) {
 		const client = yield* connect(worker)
 		const info = yield* client.server.info().pipe(nativeRequest)
 		if (info.version !== worker.openCodeVersion)
 			return yield* failure('incompatible', 'OpenCode version does not match worker enrollment')
-		const { data: agents } = yield* client.agent.list().pipe(nativeRequest)
+		const { data: agents } = yield* client.agent
+			.list({ location: location(worker.controlDirectory) })
+			.pipe(nativeRequest)
 		if (!agents.some((agent) => agent.id === 'review' && agent.mode !== 'subagent')) {
 			return yield* failure('incompatible', 'The worker must provide a primary review agent')
 		}
-		yield* workspaces.check(worker)
+		return yield* capsule(client, worker).info()
 	}, Effect.mapError(translateError))
 
-	const createSession = Effect.fn('OpenCodeWorker.createSession')(function* (
+	/** Idempotently creates the Capsule, workspace and session; retrying an identical request is safe. */
+	const prepareSession = Effect.fn('OpenCodeWorker.prepareSession')(function* (
+		worker: Worker,
+		identity: SessionIdentity,
+		request: { readonly source: SourceSpec; readonly pr: string },
+	) {
+		const client = yield* connect(worker)
+		const placed = yield* capsule(client, worker).prepareSession({
+			...sessionReference(identity),
+			source: request.source,
+			agent: 'review',
+			metadata: { pipeline: { taskId: identity.taskId, pr: request.pr } },
+		})
+		yield* requirePlaced(placed, identity)
+	}, Effect.mapError(translateError))
+
+	const requirePlacement = Effect.fn('OpenCodeWorker.requirePlacement')(function* (
 		worker: Worker,
 		identity: SessionIdentity,
 	) {
 		const client = yield* connect(worker)
-		const session = yield* client.session
-			.create({
-				id: Session.ID.make(identity.sessionId),
-				location: location(identity.directory),
-				agent: Agent.ID.make('review'),
-				metadata: { pipeline: { taskId: identity.taskId, pr: identity.pr } },
-			})
-			.pipe(nativeRequest)
-		yield* validateSession(session, identity)
-		if (session.agent !== 'review')
-			return yield* failure('ownership', 'Initial review session has a different agent')
-	}, Effect.mapError(translateError))
-
-	const requireSession = Effect.fn('OpenCodeWorker.requireSession')(function* (
-		worker: Worker,
-		identity: SessionIdentity,
-	) {
-		const client = yield* connect(worker)
-		const session = yield* client.session
-			.get({ sessionID: Session.ID.make(identity.sessionId) })
-			.pipe(nativeRequest)
-		yield* validateSession(session, identity)
+		return yield* provePlacement(client, worker, identity)
 	}, Effect.mapError(translateError))
 
 	const findAdmission = Effect.fn('OpenCodeWorker.findAdmission')(function* (
@@ -69,9 +117,8 @@ const make = Effect.gen(function* () {
 		prompt: string,
 	) {
 		const client = yield* connect(worker)
+		yield* provePlacement(client, worker, identity)
 		const sessionID = Session.ID.make(identity.sessionId)
-		const session = yield* client.session.get({ sessionID }).pipe(nativeRequest)
-		yield* validateSession(session, identity)
 		const reference: NativeReference = { sessionId: identity.sessionId, messageId }
 		const inbox = yield* client.session.inbox.list({ sessionID }).pipe(nativeRequest)
 		const pending = inbox.find((item) => item.id === messageId)
@@ -119,7 +166,7 @@ const make = Effect.gen(function* () {
 		return reference
 	}, Effect.mapError(translateError))
 
-	/** Persist Unconfirmed before calling. An unconfirmed response must be reconciled, never automatically reposted. */
+	/** Prove placement and persist Unconfirmed before calling. An unconfirmed response must be reconciled, never automatically reposted. */
 	const admit = Effect.fn('OpenCodeWorker.admit')(function* (
 		worker: Worker,
 		identity: SessionIdentity,
@@ -167,9 +214,8 @@ const make = Effect.gen(function* () {
 		messageId?: string,
 	): Effect.fn.Return<NativeObservation, WorkerError> {
 		const client = yield* connect(worker)
+		yield* provePlacement(client, worker, identity)
 		const sessionID = Session.ID.make(identity.sessionId)
-		const session = yield* client.session.get({ sessionID }).pipe(nativeRequest)
-		yield* validateSession(session, identity)
 		const permissions = yield* client.permission.list({ sessionID }).pipe(nativeRequest)
 		const forms = yield* client.session.form.list({ sessionID }).pipe(nativeRequest)
 		const pendingForms = forms.filter((form) => form.sessionID === sessionID)
@@ -195,7 +241,6 @@ const make = Effect.gen(function* () {
 		return { _tag: 'NotObserved' }
 	}, Effect.mapError(translateError))
 
-	// Helper probes emit shell.exited themselves; session events avoid rescheduling those probes.
 	const watch = (worker: Worker) =>
 		Stream.unwrap(
 			Effect.gen(function* () {
@@ -229,9 +274,8 @@ const make = Effect.gen(function* () {
 
 	return {
 		ready,
-		prepare: workspaces.prepare,
-		createSession,
-		requireSession,
+		prepareSession,
+		requirePlacement,
 		admit,
 		findAdmission,
 		interrupt,

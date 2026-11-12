@@ -1,10 +1,6 @@
 import { Effect } from 'effect'
-import {
-	type CommandEvent,
-	type CommandReceipt,
-	InvalidTransition,
-	type StoredCommand,
-} from './schema'
+import { type CommandEvent, InvalidTransition, type StoredCommand } from './command'
+import type { CommandReceipt } from './schema'
 
 export function receipt(command: StoredCommand): CommandReceipt {
 	switch (command.delivery._tag) {
@@ -34,12 +30,8 @@ export const transition = Effect.fn('Command.transition')(function* (
 	const { delivery } = command
 	const next = { ...command, version: command.version + 1 }
 	switch (event._tag) {
-		case 'CheckoutPrepared':
-			if (delivery._tag === 'Pending' && delivery.step === 'checkout' && command.kind === 'review')
-				return { ...next, delivery: { ...delivery, step: 'session' } } satisfies StoredCommand
-			break
 		case 'SessionPrepared':
-			if (delivery._tag === 'Pending' && delivery.step === 'session')
+			if (delivery._tag === 'Pending' && delivery.step === 'session' && command.kind === 'review')
 				return { ...next, delivery: { ...delivery, step: 'send' } } satisfies StoredCommand
 			break
 		case 'DeliveryStarted':

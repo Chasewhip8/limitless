@@ -2,9 +2,9 @@ import { NodeServices } from '@effect/platform-node'
 import { Effect, FileSystem, Path, Schema, type Scope, Stream } from 'effect'
 import { ChildProcess, ChildProcessSpawner } from 'effect/process'
 import { describe, expect, it } from 'vitest'
-import { makeGit } from '../git'
-import { RuntimeSettings } from '../schema'
-import { make } from '../service'
+import { makeGit } from '../src/runtime/git-mounts'
+import { RuntimeSettings } from '../src/schema'
+import { make } from '../src/service'
 
 const runtimeConfig = process.env.CAPSULE_TEST_RUNTIME
 const hostPath = process.env.PATH ?? ''

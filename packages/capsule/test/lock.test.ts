@@ -4,7 +4,7 @@ import { delimiter, join } from 'node:path'
 import { NodeServices } from '@effect/platform-node'
 import { Deferred, Effect, Fiber } from 'effect'
 import { afterEach, beforeEach, expect, test } from 'vitest'
-import { acquireLock, type LockMode, type LockOptions, withLock } from '../lock'
+import { acquireLock, type LockMode, type LockOptions, withLock } from '../src/runtime/lock'
 
 const executable = (name: string) => {
 	for (const directory of (process.env.PATH ?? '').split(delimiter)) {

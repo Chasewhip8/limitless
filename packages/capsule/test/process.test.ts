@@ -13,7 +13,7 @@ import {
 } from 'effect'
 import { ChildProcess, ChildProcessSpawner } from 'effect/process'
 import { describe, expect, it } from 'vitest'
-import { makeSandboxSpawner, type SandboxConfig } from '../process'
+import { makeSandboxSpawner, type SandboxConfig } from '../src/runtime/sandbox'
 
 const config: SandboxConfig = {
 	bwrap: '/pinned/bwrap',

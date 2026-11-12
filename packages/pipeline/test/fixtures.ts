@@ -1,4 +1,5 @@
-import { Effect, Layer, ManagedRuntime, Queue, Stream } from 'effect'
+import type { HostInfo, SessionPlacement } from '@limitless/capsule/rpc'
+import { Deferred, Effect, Layer, ManagedRuntime, Queue, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { PipelineConfig, type PipelineSettings } from '../config'
 import { GitHub } from '../github/service'
@@ -13,13 +14,13 @@ import {
 	WorkerError,
 } from '../worker/schema'
 import { OpenCodeWorker } from '../worker/service'
+import { pullRequestSource, type SourceSpec } from '../worker/source'
 
 export const worker: Worker = {
 	id: 'pc',
 	url: 'https://pc.example.test',
 	credentialFile: '/tmp/opencode/test-password',
-	workspaceRoot: '/tmp/opencode/pipeline-test-tasks',
-	helperExecutable: '/tmp/opencode/pipeline-helper',
+	controlDirectory: '/tmp/opencode/pipeline-test-control',
 	system: 'x86_64-linux',
 	capacity: 1,
 	openCodeVersion: '2.2.7',
@@ -45,6 +46,12 @@ export const pullRequest: PullRequest = {
 	headSha: 'a'.repeat(40),
 	baseSha: 'b'.repeat(40),
 }
+export const source: SourceSpec = Effect.runSync(pullRequestSource(pullRequest))
+export const host: HostInfo = {
+	version: 1,
+	storageId: 'storage-pc',
+	checkoutRoot: '/tmp/opencode/pipeline-test-checkouts',
+}
 export const review = (pr = 1): ReviewRequest => ({
 	kind: 'review',
 	pr: `https://github.com/test/repo/pull/${pr}`,
@@ -69,6 +76,16 @@ export function fakeWorker() {
 		loseInterruptReply: false,
 		historyUnavailable: false,
 		prepareError: null as WorkerError | null,
+		/** Holds every preparation until the gate opens, like a slow Capsule environment build. */
+		prepareGate: null as Deferred.Deferred<void> | null,
+		prepareStarted: Effect.runSync(Deferred.make<void>()),
+		preparesInterrupted: 0,
+		/** The Capsule session is prepared, but the reply is lost. */
+		losePrepareReply: false,
+		placement: { capsulePhase: 'ready', workspaceState: 'bound' } as Pick<
+			SessionPlacement,
+			'capsulePhase' | 'workspaceState'
+		>,
 	}
 	const reachable = Effect.fn('FakeWorker.reachable')(function* () {
 		if (control.unreachable) return yield* unavailable('Synthetic partition')
@@ -79,32 +96,40 @@ export function fakeWorker() {
 				control.readinessCalls++
 				yield* reachable()
 				if (control.readinessNotifies) yield* Queue.offer(changes, undefined)
-				return undefined
+				return host
 			}),
-		prepare: (_worker, assignment, input) =>
+		prepareSession: (_worker, session) =>
 			Effect.gen(function* () {
-				calls.push({ operation: 'prepare' })
+				calls.push({ operation: 'prepareSession', session })
 				yield* reachable()
+				yield* Deferred.succeed(control.prepareStarted, undefined)
+				if (control.prepareGate !== null)
+					yield* Deferred.await(control.prepareGate).pipe(
+						Effect.onInterrupt(() =>
+							Effect.sync(() => {
+								control.preparesInterrupted++
+							}),
+						),
+					)
 				if (control.prepareError !== null) return yield* control.prepareError
-				return { _tag: 'Ready' as const, taskId: input.taskId, directory: assignment.directory }
-			}),
-		createSession: (_worker, session) =>
-			Effect.gen(function* () {
-				calls.push({ operation: 'createSession', session })
-				yield* reachable()
 				sessions.add(session.sessionId)
-				return undefined
+				if (control.losePrepareReply) return yield* unavailable('Synthetic lost reply')
 			}),
-		requireSession: (_worker, session) =>
+		requirePlacement: (_worker, session) =>
 			Effect.gen(function* () {
-				calls.push({ operation: 'requireSession', session })
+				calls.push({ operation: 'requirePlacement', session })
 				yield* reachable()
 				if (!sessions.has(session.sessionId))
 					return yield* WorkerError.make({
 						code: 'ownership',
 						message: 'Retained native session is missing',
 					})
-				return undefined
+				return {
+					workspaceId: session.workspaceId,
+					sessionId: session.sessionId,
+					directory: session.directory,
+					...control.placement,
+				}
 			}),
 		admit: (_worker, session, messageId, prompt) =>
 			Effect.gen(function* () {

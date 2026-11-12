@@ -16,8 +16,12 @@ let
         builtins.elem relative [
           "packages"
           "packages/pipeline"
+          "packages/capsule"
+          "packages/capsule/package.json"
+          "packages/capsule/src"
         ]
         || lib.hasPrefix "packages/pipeline/" relative
+        || lib.hasPrefix "packages/capsule/src/" relative
       );
   };
   manifests = pkgs.runCommand "pipeline-dependency-manifests" { } ''
@@ -34,18 +38,21 @@ let
     nativeBuildInputs = [ pkgs.bun ];
     dontConfigure = true;
     dontFixup = true;
+    # Omitting peers keeps Capsule's optional OpenCode SDK and plugin out of the dispatcher.
     buildPhase = ''
       export HOME="$TMPDIR"
-      bun install --filter @limitless/pipeline --no-progress --frozen-lockfile --ignore-scripts --production --omit optional
+      bun install --filter @limitless/pipeline --no-progress --frozen-lockfile --ignore-scripts \
+        --production --omit optional --omit peer
     '';
     installPhase = ''
-      mkdir -p "$out/node_modules" "$out/packages/pipeline"
+      mkdir -p "$out/node_modules" "$out/packages/pipeline" "$out/packages/capsule"
       cp -r node_modules/.bun "$out/node_modules/.bun"
       cp -r packages/pipeline/node_modules "$out/packages/pipeline/node_modules"
+      cp -r packages/capsule/node_modules "$out/packages/capsule/node_modules"
       # Bun's executable-link race must not affect the fixed-output tree.
       find "$out" -type d -path '*/node_modules/.bin' -prune -exec rm -rf {} +
     '';
-    outputHash = "sha256-GWIgjKX5RS789mkGd9Nxrr8hFtIXhyNDkBL6aGRPcck=";
+    outputHash = "sha256-IQCfJNQTQN7yMIYHlz1piEDP5Qcss0TBkFKuazueIWE=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -65,6 +72,7 @@ pkgs.stdenvNoCC.mkDerivation {
     mkdir -p node_modules dist
     cp -r ${dependencies}/node_modules/.bun node_modules/.bun
     cp -r ${dependencies}/packages/pipeline/node_modules packages/pipeline/node_modules
+    cp -r ${dependencies}/packages/capsule/node_modules packages/capsule/node_modules
     bun build packages/pipeline/cli.ts \
       --target=node --format=esm --packages=bundle \
       --metafile=dist/pipeline.meta.json --outfile=dist/pipeline.mjs
@@ -80,53 +88,52 @@ pkgs.stdenvNoCC.mkDerivation {
     statement.setReturnArrays(true);
     assert.deepEqual(statement.get(), [42]);
     db.close();
-    const { inputs } = JSON.parse(readFileSync("dist/pipeline.meta.json", "utf8"));
-    for (const name of ["effect", "@effect/platform-node", "@effect/sql-sqlite-node", "@opencode/client"]) {
-      assert(Object.keys(inputs).some(path => path.includes(`/node_modules/''${name}/`)),
+    const inputs = Object.keys(JSON.parse(readFileSync("dist/pipeline.meta.json", "utf8")).inputs);
+    for (const name of ["effect", "@effect/platform-node", "@effect/sql-sqlite-node", "@opencode/client", "@opencode/schema"]) {
+      assert(inputs.some(path => path.includes(`/node_modules/''${name}/`)),
         `Standalone Pipeline must bundle ''${name}`);
     }
+    // Pipeline speaks only Capsule's RPC contract; the native OpenCode host runs Capsule itself.
+    const capsule = inputs.filter(path => path.startsWith("packages/capsule/"));
+    const contract = ["host/contract.ts", "identity.ts", "schema.ts", "source/schema.ts"].map(file => `packages/capsule/src/''${file}`);
+    assert(capsule.includes(contract[0]), "Pipeline must use the Capsule RPC contract");
+    assert(capsule.every(path => contract.includes(path)), `Pipeline bundles Capsule internals: ''${capsule}`);
+    for (const name of ["sdk", "plugin", "core", "server"]) {
+      assert(!inputs.some(path => path.includes(`/node_modules/@opencode/''${name}/`)),
+        `Pipeline must not bundle @opencode/''${name}`);
+    }
+    // One Effect instance keeps Capsule's schemas and errors shared with Pipeline.
+    const effects = new Set(inputs.flatMap(path => path.match(/^.*\/node_modules\/effect\//) ?? []));
+    assert.equal(effects.size, 1, `Pipeline bundles several Effect copies: ''${[...effects]}`);
     EOF
   '';
   installPhase = ''
     mkdir -p "$out/lib/pipeline" "$out/bin"
     cp dist/pipeline.mjs "$out/lib/pipeline/"
     makeWrapper ${lib.getExe node} "$out/bin/pipeline" \
-      --prefix PATH : ${
-        lib.makeBinPath [
-          node
-          pkgs.git
-          pkgs.gnutar
-          pkgs.util-linux
-          pkgs.coreutils
-        ]
-      } \
       --add-flags "--disable-warning=ExperimentalWarning $out/lib/pipeline/pipeline.mjs"
   '';
   doInstallCheck = true;
   installCheckPhase = ''
     runHook preInstallCheck
-    test "$("$out/bin/pipeline" protocol)" = '{"protocolVersion":2}'
-    request=$(${lib.getExe node} --input-type=module -e 'process.stdout.write(Buffer.from(JSON.stringify({operation:"inspect",taskId:"a4ea0530-d3eb-4e0d-afc5-dda8e9e50b00"})).toString("base64url"))')
-    "$out/bin/pipeline" workspace --root "$TMPDIR/workspaces" --request "$request" > status.json
-    if "$out/bin/pipeline" workspace --root "$TMPDIR/workspaces" --request e30 > invalid.json; then
-      echo "An invalid workspace request must fail" >&2
+    "$out/bin/pipeline" --help > help.txt
+    grep -qE '^ +serve +' help.txt
+    # Workspaces belong to the native OpenCode host; the retired helper protocol stays gone.
+    for command in protocol workspace; do
+      if "$out/bin/pipeline" "$command" > /dev/null 2>&1; then
+        echo "pipeline $command must not exist" >&2
+        exit 1
+      fi
+    done
+    if "$out/bin/pipeline" serve --config "$TMPDIR/missing.json" > /dev/null 2>&1; then
+      echo "pipeline serve must refuse a missing configuration" >&2
       exit 1
     fi
-    ${lib.getExe node} --input-type=module <<'EOF'
-    import assert from "node:assert/strict";
-    import { readFileSync } from "node:fs";
-    import { join } from "node:path";
-    const taskId = "a4ea0530-d3eb-4e0d-afc5-dda8e9e50b00";
-    assert.deepEqual(JSON.parse(readFileSync("status.json", "utf8")), {
-      _tag: "Absent", taskId, directory: join(process.env.TMPDIR, "workspaces", taskId, "checkout")
-    });
-    assert.equal(JSON.parse(readFileSync("invalid.json", "utf8")).code, "invalid_input");
-    EOF
     runHook postInstallCheck
   '';
   passthru = { inherit dependencies node; };
   meta = {
-    description = "Thin OpenCode task dispatcher and retained workspace helper";
+    description = "Thin OpenCode task dispatcher for native Capsule sessions";
     mainProgram = "pipeline";
     platforms = lib.platforms.linux;
   };

@@ -33,7 +33,7 @@ let
       find "$out" -type d -path '*/node_modules/.bin' -prune -exec rm -rf {} +
     '';
 
-    outputHash = "sha256-yF+ECE10/Y6hWiCs4Ft5crcyGrg+es2HbiW+NHs6M+Q=";
+    outputHash = "sha256-A2sf0Y4IcZ1N27BUDGh8MtTP3QkF8Cj8Pn0659pJSxc=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -89,6 +89,8 @@ pkgs.stdenvNoCC.mkDerivation {
         for (const path of bundled) {
           assert(!/(^|\/)node_modules\/(effect|@opencode\/plugin)\//.test(path),
             `Hosted plugin ''${name} bundles host runtime: ''${path}`);
+          assert(!path.includes("packages/capsule/"),
+            `Hosted Pipeline caller ''${name} imports worker-side Capsule code: ''${path}`);
         }
       }
     '

@@ -1,17 +1,42 @@
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { NodeServices } from '@effect/platform-node'
-import { Effect, FileSystem, Path, Schema, Stream } from 'effect'
-import { ChildProcess, ChildProcessSpawner } from 'effect/process'
+import { Effect, FileSystem, Path, Schema, type Scope } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { RuntimeSettings } from '../schema'
+import { Manifest, RuntimeSettings } from '../src/schema'
+import { runBunFixture } from './fixtures/bun'
+import { makeHostGit, serveGit } from './fixtures/git-daemon'
 
 const fixture = fileURLToPath(new URL('./fixtures/opencode-host.ts', import.meta.url))
+const runtimeConfig = process.env.CAPSULE_TEST_RUNTIME
+// Each owner stops before the one enclosing it, so the innermost reports its own failure and its
+// scope still has time to stop the host and remove the fixture before Vitest abandons the test.
+const testTimeout = 120_000
+const fixtureDeadline = 100_000
+const hostDeadline = 90_000
+const names = ['alpha', 'bravo'] as const
+const repository = (name: string) => `fixture/${name}`
+// Synthetic: the embedding host holds it, and no workspace may see it.
+const hostToken = 'ghp_syntheticEmbeddedHostToken'
+const identity = 'Capsule Agent <agent@example.invalid>'
+
+type Placement =
+	| { readonly name: string; readonly checkout: string }
+	| {
+			readonly name: string
+			readonly source: {
+				readonly repository: string
+				readonly ref: string
+				readonly branch: string
+				readonly commit: string
+			}
+	  }
 
 const Report = Schema.Struct({
 	workspaces: Schema.Array(
 		Schema.Struct({
 			id: Schema.String,
+			name: Schema.String,
 			directory: Schema.String,
 			sessionWorkspaceID: Schema.String,
 			binding: Schema.Unknown,
@@ -23,11 +48,23 @@ const Report = Schema.Struct({
 	destroyed: Schema.Unknown,
 	unprovisionedID: Schema.String,
 	operations: Schema.Array(Schema.String),
-	phases: Schema.Record(Schema.String, Schema.NullOr(Schema.String)),
+	manifests: Schema.Record(Schema.String, Schema.NullOr(Manifest)),
 	spawned: Schema.Array(
 		Schema.Struct({ capsule: Schema.String, words: Schema.Array(Schema.String) }),
 	),
 	toolResults: Schema.Array(Schema.String),
+})
+type Report = typeof Report.Type
+
+const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope | NodeServices.NodeServices>) =>
+	Effect.runPromise(
+		effect.pipe(Effect.timeout(fixtureDeadline), Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
+const loadRuntime = Effect.gen(function* () {
+	const fs = yield* FileSystem.FileSystem
+	const json = yield* fs.readFileString(runtimeConfig ?? '')
+	return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(RuntimeSettings))(json)
 })
 
 // A dev shell without flake inputs: Nix evaluates a bare derivation whose builder is the pinned
@@ -49,36 +86,28 @@ const fixtureFlake = (shell: string) => {
 `
 }
 
-const runEmbeddedHost = Effect.fn('runEmbeddedHost')(function* (
-	runtime: RuntimeSettings | undefined,
-) {
+const makeHost = Effect.fn('makeHost')(function* (runtime: RuntimeSettings | undefined) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
-	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
 	yield* fs.makeDirectory('/tmp/opencode', { recursive: true })
 	const root = yield* fs.realPath(
 		yield* fs.makeTempDirectoryScoped({ directory: '/tmp/opencode', prefix: 'capsule-opencode-' }),
 	)
 	const at = (...segments: ReadonlyArray<string>) => path.join(root, ...segments)
-	const checkouts = [at('alpha'), at('bravo')]
 	const hostOnly = at('outside', 'host-only')
 	const secret = randomUUID()
-	for (const directory of [at('home'), at('tmp'), at('config'), at('outside'), ...checkouts]) {
+	for (const directory of [at('home'), at('tmp'), at('config'), at('outside')]) {
 		yield* fs.makeDirectory(directory)
 	}
 	yield* fs.writeFileString(hostOnly, secret)
-	for (const directory of checkouts) {
-		yield* fs.writeFileString(
-			path.join(directory, 'source.txt'),
-			`${path.basename(directory)} source\n`,
-		)
+
+	const writeSource = Effect.fn('writeSource')(function* (directory: string, name: string) {
+		yield* fs.makeDirectory(directory, { recursive: true })
+		yield* fs.writeFileString(path.join(directory, 'source.txt'), `${name} source\n`)
 		yield* fs.symlink(hostOnly, path.join(directory, 'escape'))
-		yield* fs.writeFileString(
-			path.join(directory, 'needle.txt'),
-			`GREP_NEEDLE ${path.basename(directory)}\n`,
-		)
-		yield* fs.writeFileString(path.join(directory, `${path.basename(directory)}.needle`), '')
+		yield* fs.writeFileString(path.join(directory, 'needle.txt'), `GREP_NEEDLE ${name}\n`)
+		yield* fs.writeFileString(path.join(directory, `${name}.needle`), '')
 		if (runtime) {
 			yield* fs.writeFileString(path.join(directory, 'flake.nix'), fixtureFlake(runtime.shell))
 			yield* fs.writeFileString(
@@ -86,19 +115,30 @@ const runEmbeddedHost = Effect.fn('runEmbeddedHost')(function* (
 				'{"nodes":{"root":{}},"root":"root","version":7}\n',
 			)
 		}
-	}
+	})
 
-	const input = {
-		checkouts,
-		config: at('config'),
-		hostOnly,
-		search: runtime !== undefined,
-		...(runtime ? { runtime: { settings: runtime, root: at('state') } } : {}),
-	}
-	const handle = yield* spawner.spawn(
-		// OpenCode's published packages need a newer runtime than the repository's Node; the
-		// development shell pins Bun, which also runs the fixture's TypeScript directly.
-		ChildProcess.make('bun', [fixture, JSON.stringify(input)], {
+	const embed = Effect.fn('runEmbeddedHost')(function* (
+		workspaces: ReadonlyArray<Placement>,
+		remotes: Readonly<Record<string, string>> = {},
+	) {
+		const input = {
+			workspaces,
+			config: at('config'),
+			hostOnly,
+			timeout: hostDeadline - 15_000,
+			...(runtime
+				? {
+						runtime: {
+							settings: runtime,
+							root: at('state'),
+							checkoutRoot: at('sources'),
+							remotes,
+						},
+					}
+				: {}),
+		}
+		// OpenCode's published packages need a newer runtime than the repository's Node.
+		const stdout = yield* runBunFixture(fixture, input, {
 			env: {
 				PATH: process.env.PATH ?? '',
 				HOME: at('home'),
@@ -107,41 +147,74 @@ const runEmbeddedHost = Effect.fn('runEmbeddedHost')(function* (
 				XDG_CACHE_HOME: at('xdg', 'cache'),
 				XDG_STATE_HOME: at('xdg', 'state'),
 				TMPDIR: at('tmp'),
+				GH_TOKEN: hostToken,
 			},
-			extendEnv: false,
-			stdin: 'ignore',
+			deadline: hostDeadline,
+		})
+		const report = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Report))(stdout.trim())
+
+		expect(yield* fs.exists(at('xdg', 'data', 'opencode'))).toBe(true)
+		for (const { directory } of report.workspaces) {
+			expect(yield* fs.exists(path.join(directory, 'source.txt'))).toBe(true)
+		}
+		return report
+	})
+
+	return { at, secret, writeSource, embed }
+})
+type Host = Effect.Success<ReturnType<typeof makeHost>>
+
+const borrowCheckouts = (host: Host) =>
+	Effect.forEach(names, (name) =>
+		Effect.as(host.writeSource(host.at(name), name), { name, checkout: host.at(name) }),
+	)
+
+// Commits each checkout as its own repository and serves the bare remotes on loopback, where
+// Capsule's sandboxed clone can reach them.
+const publishSources = Effect.fn('publishSources')(function* (host: Host) {
+	const { environment, git } = makeHostGit(host.at('home'))
+	const sources = yield* Effect.forEach(names, (name) =>
+		Effect.gen(function* () {
+			const seed = host.at('seed', name)
+			const remote = host.at('remote', `${repository(name)}.git`)
+			yield* host.writeSource(seed, name)
+			yield* git(['init', '-q', '-b', 'main', seed])
+			yield* git(['-C', seed, 'add', '.'])
+			yield* git(['-C', seed, 'commit', '-q', '-m', name])
+			yield* git(['init', '-q', '--bare', '-b', 'main', remote])
+			yield* git(['-C', seed, 'push', '-q', remote, 'main'])
+			const commit = yield* git(['-C', seed, 'rev-parse', 'HEAD'])
+			return { name, source: { repository: repository(name), ref: 'main', branch: 'work', commit } }
 		}),
 	)
-	const [stdout, stderr, exitCode] = yield* Effect.all(
-		[
-			Stream.mkString(Stream.decodeText(handle.stdout)),
-			Stream.mkString(Stream.decodeText(handle.stderr)),
-			handle.exitCode,
-		],
-		{ concurrency: 'unbounded' },
+	const daemon = yield* serveGit(host.at('remote'), environment)
+	const remotes = Object.fromEntries(
+		names.map((name) => [repository(name), daemon.url(repository(name))]),
 	)
-	if (exitCode !== 0) return yield* Effect.die(new Error(`Embedded host failed:\n${stderr}`))
-	return {
-		report: yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Report))(stdout.trim()),
-		secret,
-		hostOnly,
-		isolatedData: yield* fs.exists(at('xdg', 'data', 'opencode')),
-		checkoutsRemain: yield* Effect.forEach(checkouts, (directory) =>
-			fs.exists(path.join(directory, 'source.txt')),
-		),
-	}
-}, Effect.scoped)
+	return { sources, remotes, git }
+})
 
-const proveWorkspaces = async (runtime?: RuntimeSettings) => {
-	const { report, secret, isolatedData, checkoutsRemain } = await Effect.runPromise(
-		runEmbeddedHost(runtime).pipe(Effect.provide(NodeServices.layer)),
-	)
+/**
+ * Both workspaces ran through one embedded host, each reached only its own Capsule, and
+ * `workspace.destroy` purged the second while an unprovisioned workspace needed no Capsule.
+ */
+const expectWorkspaces = (
+	report: Report,
+	{
+		secret,
+		sandboxed,
+		preparation,
+	}: {
+		readonly secret: string
+		readonly sandboxed: boolean
+		readonly preparation: 'prepare' | 'create'
+	},
+) => {
 	const [alpha, bravo] = report.workspaces
 	if (!alpha || !bravo) throw new Error('Expected two workspaces')
 	const unprovisioned = report.unprovisionedID
-	const visibility = runtime ? 'hidden' : 'visible'
+	const visibility = sandboxed ? 'hidden' : 'visible'
 
-	expect(isolatedData).toBe(true)
 	expect(alpha.id).not.toBe(bravo.id)
 	for (const [workspace, other] of [
 		[alpha, bravo],
@@ -151,7 +224,7 @@ const proveWorkspaces = async (runtime?: RuntimeSettings) => {
 		expect(workspace.sessionWorkspaceID).toBe(id)
 		expect(workspace.binding).toEqual({ id, directory })
 		expect(workspace.userShell).toBe(id)
-		expect(workspace.agentShell).toBe(`project:${id}:${visibility}`)
+		expect(workspace.agentShell).toBe(`project:${id}:${visibility}:anonymous`)
 		expect(workspace.pipeline).toBe('project:project')
 		const words = report.spawned
 			.filter(({ capsule }) => capsule === id)
@@ -167,25 +240,27 @@ const proveWorkspaces = async (runtime?: RuntimeSettings) => {
 	)
 	const leaked = report.toolResults.filter((result) => result.includes(secret))
 	// The stand-in runs on the host, so the escape probe must succeed there to be meaningful.
-	expect(leaked).toHaveLength(runtime ? 0 : 2)
+	expect(leaked).toHaveLength(sandboxed ? 0 : 2)
+	expect(report.toolResults.some((result) => result.includes(hostToken))).toBe(false)
 
 	expect([...report.operations].sort()).toEqual(
 		[
-			...[alpha.id, bravo.id].flatMap((id) => [`prepare:${id}`, `connect:${id}`, `connect:${id}`]),
+			...[alpha.id, bravo.id].flatMap((id) => [
+				`${preparation}:${id}`,
+				`connect:${id}`,
+				`connect:${id}`,
+			]),
 			`purge:${bravo.id}`,
 			`purge:${unprovisioned}`,
 		].sort(),
 	)
 	expect(report.destroyed).toEqual({ destroyed: true })
-	expect(report.phases).toEqual({
-		[alpha.id]: 'ready',
-		[bravo.id]: 'purged',
-		[unprovisioned]: null,
-	})
-	expect(checkoutsRemain).toEqual([true, true])
-	if (runtime) {
-		for (const { id, directory } of report.workspaces) {
-			const name = directory.split('/').at(-1)
+	expect(report.manifests[alpha.id]?.phase).toBe('ready')
+	expect(report.manifests[bravo.id]?.phase).toBe('purged')
+	expect(report.manifests[unprovisioned]).toBeNull()
+
+	if (sandboxed) {
+		for (const { id, name } of report.workspaces) {
 			const rg = report.spawned.filter(
 				({ capsule, words }) => capsule === id && words[0]?.endsWith('/bin/rg'),
 			)
@@ -200,28 +275,95 @@ const proveWorkspaces = async (runtime?: RuntimeSettings) => {
 	}
 }
 
-const runtimeConfig = process.env.CAPSULE_TEST_RUNTIME
+const proveBorrowedWorkspaces = (runtime?: RuntimeSettings) =>
+	run(
+		Effect.gen(function* () {
+			const host = yield* makeHost(runtime)
+			const report = yield* host.embed(yield* borrowCheckouts(host))
+			expectWorkspaces(report, {
+				secret: host.secret,
+				sandboxed: runtime !== undefined,
+				preparation: 'prepare',
+			})
+			expect(report.workspaces.map(({ directory }) => directory)).toEqual(
+				names.map((name) => host.at(name)),
+			)
+		}),
+	)
 
 describe('OpenCode workspaces', () => {
 	it(
 		'route the embedded SDK through a controlled Capsule service',
-		() => proveWorkspaces(),
-		120_000,
+		() => proveBorrowedWorkspaces(),
+		testTimeout,
 	)
 
 	// Set CAPSULE_TEST_RUNTIME to a runtime JSON file to run on the host's Bubblewrap and Nix daemon.
 	it.skipIf(!runtimeConfig)(
 		'route the embedded SDK through Bubblewrap Capsules',
-		async () => {
-			const runtime = await Effect.runPromise(
+		() =>
+			Effect.runPromise(loadRuntime.pipe(Effect.provide(NodeServices.layer))).then(
+				proveBorrowedWorkspaces,
+			),
+		testTimeout,
+	)
+
+	it.skipIf(!runtimeConfig)(
+		'clone managed sources for embedded SDK workspaces and retain them after destroy',
+		() =>
+			run(
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
-					const json = yield* fs.readFileString(runtimeConfig ?? '')
-					return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(RuntimeSettings))(json)
-				}).pipe(Effect.provide(NodeServices.layer)),
-			)
-			await proveWorkspaces(runtime)
-		},
-		300_000,
+					const path = yield* Path.Path
+					const host = yield* makeHost(yield* loadRuntime)
+					const { sources, remotes, git } = yield* publishSources(host)
+					const report = yield* host.embed(sources, remotes)
+					expectWorkspaces(report, { secret: host.secret, sandboxed: true, preparation: 'create' })
+
+					const [alpha, bravo] = report.workspaces
+					for (const { id, name, directory } of report.workspaces) {
+						const placement = sources.find((published) => published.name === name)
+						if (!placement) throw new Error(`Expected a source for ${name}`)
+						const { source } = placement
+						expect(directory).toBe(host.at('sources', id, 'checkout'))
+						expect(report.manifests[id]).toMatchObject({
+							owner: 'limitless-capsule-v2',
+							spec: { id, directory },
+							source: {
+								root: host.at('sources'),
+								request: { id, ...source },
+								commit: source.commit,
+							},
+						})
+
+						const inCheckout = (...args: ReadonlyArray<string>) => git(['-C', directory, ...args])
+						expect(yield* inCheckout('symbolic-ref', 'HEAD')).toBe('refs/heads/work')
+						expect(yield* inCheckout('rev-parse', 'HEAD~1')).toBe(source.commit)
+						expect(yield* inCheckout('log', '-1', '--format=%s|%an <%ae>|%cn <%ce>')).toBe(
+							`agent ${id}|${identity}|${identity}`,
+						)
+						expect(yield* inCheckout('show', 'HEAD:status.txt')).toBe(
+							['?? agent-shell.txt', '?? status.txt', '?? user-shell.txt'].join('\n'),
+						)
+						expect(yield* inCheckout('status', '--porcelain')).toBe(
+							['?? agent-shell.txt', '?? user-shell.txt'].join('\n'),
+						)
+					}
+
+					// Destroying a workspace purges its private runtime, but its source and provenance
+					// outlive it.
+					if (!alpha || !bravo) throw new Error('Expected two workspaces')
+					expect(yield* fs.exists(host.at('state', alpha.id, 'home'))).toBe(true)
+					expect(yield* fs.exists(host.at('state', bravo.id, 'home'))).toBe(false)
+					const ledger = yield* fs.readFileString(
+						path.join(host.at('sources', bravo.id), 'manifest.json'),
+					)
+					expect(JSON.parse(ledger)).toMatchObject({
+						request: report.manifests[bravo.id]?.source?.request,
+						status: { _tag: 'Ready', id: bravo.id, directory: bravo.directory },
+					})
+				}),
+			),
+		testTimeout,
 	)
 })

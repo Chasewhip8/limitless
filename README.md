@@ -474,12 +474,17 @@ Athena keeps routing, a durable command outbox, idempotency receipts and an
 advisory scheduling budget. OpenCode owns input, execution, history and outputs;
 Pipeline has no run/result ledger or verdict parser.
 
-A standalone helper prepares retained Git checkouts. Resume appends to the same
-ordinary directory session without resetting its files. Limitless tools dispatch,
+Pipeline calls Capsule's typed RPC in the shared native OpenCode server to prepare
+a retained checkout and workspace-bound session. Source and project commands run
+inside Capsule; there is no shell helper or ordinary-directory fallback. Resume
+appends to the same session without resetting its files. Limitless tools dispatch,
 observe, resume, request native interruption, and logically close submissions.
 Waiters use event streams; idle and interrupt acknowledgments do not promise OS
 process drainage. Unconfirmed writes are never automatically replayed, and close
-does not delete the checkout or native history.
+does not stop the Capsule or delete the checkout or native history. Long
+preparation runs independently per task, so it cannot block another task's
+interrupt. Retained session identity remains inspectable after Capsule stop or
+purge; only message admission requires execution readiness.
 
 Build `.#pipeline` on Linux and enable `programs.limitless.pipeline` through the
 Home Manager module. See [Pipeline setup and operation](docs/pipeline.md) for
@@ -491,19 +496,27 @@ recovery. Its storage cost and operational limitations are documented under
 
 ### Capsule
 
-Capsule is a small Effect library and `capsule` CLI, independent of Pipeline, that
-runs commands for a retained checkout inside its Nix development shell through
-Bubblewrap. It keeps private home and temporary state in a separate state root
-(`--root` or `CAPSULE_ROOT`) so work can stop and resume. It can expose an existing
-host Docker socket; repository hooks in an optional `capsule.json` manage
-services. Purge removes Capsule state and tombstones the ID but keeps the checkout.
+Capsule is a small Effect library and `capsule` CLI that runs commands for a
+retained checkout inside its Nix development shell through Bubblewrap. `prepare`
+borrows an existing checkout; `create` makes a managed full GitHub clone at a
+pinned ref in a separate checkout root (`--checkout-root`) and never resets its
+work. Private home and temporary state live in a state root (`--root` or
+`CAPSULE_ROOT`) so work can stop and resume. It can expose an existing host
+Docker socket; repository hooks in an optional `capsule.json` manage services.
+Purge removes Capsule state and tombstones the ID but keeps the checkout.
 
-It is hygiene for trusted code, not a security boundary: commands share the host
-network and the Nix and Docker daemons, and native OpenCode host features still
-act on the checkout directly. `@limitless/capsule/opencode` provides an OpenCode
-SDK workspace provider for embedding hosts. Native host registration, Pipeline
-integration and previews are not implemented. Build `.#capsule` on Linux; see the
-[Capsule guide](docs/capsule.md) for the CLI, lifecycle and limitations.
+The host can give commands a GitHub token for Git and `gh` through a token file
+or variable; trusted commands can read it. Capsule is hygiene for trusted code,
+not a security boundary: commands share the host network and the Nix and Docker
+daemons, and native OpenCode host features still act on the checkout directly.
+`@limitless/capsule/opencode` attaches prepared Capsules to an embedded SDK host.
+`programs.limitless.capsule.enable` registers the provider and management RPC in
+the shared native OpenCode server. The pinned native extension also prevents
+automatic host-side formatting of workspace files; explicit formatter commands
+run through the Capsule shell. Previews remain outside scope. Build `.#capsule`
+on Linux; see the
+[Capsule guide](docs/capsule.md) for the CLI, credentials, lifecycle and
+limitations.
 
 ### Pull request review
 

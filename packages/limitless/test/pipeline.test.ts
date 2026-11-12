@@ -35,9 +35,10 @@ const nativeSessionId = 'ses_native'
 const assignment = {
 	workerId: 'worker',
 	workerUrl: 'https://worker.example',
-	workspaceRoot: '/srv/pipeline',
-	helperExecutable: '/srv/pipeline/helper',
-	directory: '/srv/pipeline/checkout',
+	controlDirectory: '/srv/capsule/control',
+	storageId: 'storage-worker',
+	workspaceId: 'wrk_native',
+	directory: '/srv/capsule/checkouts/wrk_native/checkout',
 	sessionId: nativeSessionId,
 }
 

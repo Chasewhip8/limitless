@@ -115,7 +115,8 @@ in
             config.xdg.configFile."${opencodeDir}/AGENTS.md".source
             config.xdg.configFile."${opencodeDir}/agents".source
           ]
-          ++ lib.optional cfg.skills.enable config.xdg.configFile."${opencodeDir}/skills".source;
+          ++ lib.optional cfg.skills.enable config.xdg.configFile."${opencodeDir}/skills".source
+          ++ lib.optional (cfg._generated.capsuleHostConfig != null) cfg._generated.capsuleHostConfig;
         };
         Service = {
           Type = "exec";

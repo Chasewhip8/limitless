@@ -10,10 +10,10 @@ import {
 	Schema,
 	Scope,
 } from 'effect'
-import { ChildProcess, type ChildProcessSpawner } from 'effect/process'
+import { ChildProcess, ChildProcessSpawner } from 'effect/process'
 import { describe, expect, it } from 'vitest'
-import { type CapsuleSpec, RuntimeSettings } from '../schema'
-import { make } from '../service'
+import { type CapsuleSpec, RuntimeSettings } from '../src/schema'
+import { make } from '../src/service'
 
 const runtimeConfig = process.env.CAPSULE_TEST_RUNTIME
 
@@ -370,6 +370,79 @@ describe.skipIf(runtimeConfig === undefined)(
 					expect(yield* Effect.flip(capsule.purge(spec.id))).toMatchObject({ _tag: 'LockBusy' })
 					yield* Fiber.interrupt(fiber)
 					expect(yield* capsule.purge(spec.id)).toMatchObject({ phase: 'purged' })
+				}),
+			),
+		)
+
+		it(
+			'inspects without the lifecycle lock while a stop or purge hook holds it, refusing execution',
+			{ timeout: 60_000 },
+			() =>
+				run(
+					Effect.gen(function* () {
+						const { fs, path, root, control, capsule, spec } = yield* makeFixture()
+						const host = yield* ChildProcessSpawner.ChildProcessSpawner
+						// Each hook announces itself through one FIFO and waits on another, so the test
+						// observes the Capsule exactly while the hook holds the exclusive lock.
+						const fifo = (name: string) => path.join(control, name)
+						const hooks = ['stop', 'purge'] as const
+						yield* host.string(
+							ChildProcess.make(
+								'mkfifo',
+								hooks.flatMap((hook) => [fifo(`${hook}-started`), fifo(`${hook}-release`)]),
+							),
+						)
+						const blocking = (hook: string) => [
+							'/bin/sh',
+							'-c',
+							`printf started > .capsule-test/${hook}-started && timeout 30 sh -c 'read _ < .capsule-test/${hook}-release'`,
+						]
+						const blocked = {
+							...spec,
+							project: { stop: blocking('stop'), purge: blocking('purge') },
+						}
+						yield* capsule.prepare(blocked)
+						const spawner = yield* capsule.connect(spec.id)
+
+						const holdHook = Effect.fn('holdHook')(function* (
+							hook: (typeof hooks)[number],
+							phase: string,
+						) {
+							expect(yield* fs.readFileString(fifo(`${hook}-started`))).toBe('started')
+							expect(yield* capsule.inspect(spec.id)).toMatchObject({ phase })
+							expect(yield* Effect.flip(spawner.spawn(sh('echo ran')))).toMatchObject({
+								_tag: 'PlatformError',
+								cause: { _tag: 'LockBusy' },
+							})
+							expect(yield* Effect.flip(capsule.connect(spec.id))).toMatchObject({
+								_tag: 'LockBusy',
+							})
+							yield* fs.writeFileString(fifo(`${hook}-release`), 'release\n')
+						})
+
+						const stopping = yield* Effect.forkChild(capsule.stop(spec.id))
+						yield* holdHook('stop', 'stopping')
+						expect(yield* Fiber.join(stopping)).toMatchObject({ phase: 'stopped' })
+
+						const purging = yield* Effect.forkChild(capsule.purge(spec.id))
+						yield* holdHook('stop', 'purging')
+						yield* holdHook('purge', 'purging')
+						expect(yield* Fiber.join(purging)).toMatchObject({ phase: 'purged' })
+						expect(yield* capsule.inspect(spec.id)).toMatchObject({ phase: 'purged' })
+
+						expect(yield* capsule.inspect('unknown')).toBeUndefined()
+						expect(yield* fs.exists(path.join(root, 'unknown'))).toBe(false)
+						expect(yield* fs.exists(path.join(root, '.locks', 'unknown'))).toBe(false)
+					}),
+				),
+		)
+
+		it('inspects an unknown Capsule without creating its state root', { timeout: 60_000 }, () =>
+			run(
+				Effect.gen(function* () {
+					const { fs, root, capsule } = yield* makeFixture()
+					expect(yield* capsule.inspect('unknown')).toBeUndefined()
+					expect(yield* fs.exists(root)).toBe(false)
 				}),
 			),
 		)

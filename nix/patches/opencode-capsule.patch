@@ -1,0 +1,79 @@
+diff --git a/packages/core/src/formatter.ts b/packages/core/src/formatter.ts
+--- a/packages/core/src/formatter.ts
++++ b/packages/core/src/formatter.ts
+@@ -54,6 +54,8 @@ const layer = Layer.effect(
+     })
+ 
+     const file = Effect.fn("Formatter.file")(function* (filepath: string) {
++      // Limitless: formatter probes and commands run on the host, never inside a workspace environment.
++      if (location.workspaceID !== undefined) return false
+       const extension = path.extname(filepath)
+       const matching = state.get().formatters.filter((formatter) => formatter.extensions.includes(extension))
+ 
+diff --git a/packages/core/src/workspace.ts b/packages/core/src/workspace.ts
+--- a/packages/core/src/workspace.ts
++++ b/packages/core/src/workspace.ts
+@@ -25,6 +25,13 @@ export class Info extends Schema.Class<Info>("Workspace.Info")({
+   lastUsedAt: Schema.Number,
+ }) {}
+ 
++export interface Persisted {
++  readonly id: ID
++  readonly provider: string
++  /** Null until provisioning persists the provider binding. */
++  readonly binding: WorkspaceDriver.Binding | null
++}
++
+ export class NotFound extends Schema.TaggedError<NotFound>()("Workspace.NotFound", { workspaceID: ID }) {}
+ 
+ export class CreateConflict extends Schema.TaggedError<CreateConflict>()("Workspace.CreateConflict", {
+@@ -39,6 +46,8 @@ export interface Interface {
+     readonly id?: ID
+     readonly provider: string
+   }) => Effect.Effect<ID, CreateConflict | WorkspaceDriver.ProviderNotFound>
++  /** Reads the persisted workspace without provisioning or calling its provider. */
++  readonly get: (workspaceID: ID) => Effect.Effect<Persisted, NotFound>
+   /** Starts or joins the shared attempt that makes the backing resource real, then returns it. */
+   readonly provision: (
+     workspaceID: ID,
+@@ -254,6 +263,10 @@ const layer = (options: Options) =>
+             })
+           return workspaceID
+         }),
++        get: Effect.fn("Workspace.get")(function* (workspaceID) {
++          const row = yield* load(workspaceID)
++          return { id: row.id, provider: row.provider, binding: row.binding }
++        }),
+         provision,
+         connect: Effect.fn("Workspace.connect")(function* (workspaceID) {
+           const acquire = Effect.acquireRelease(
+diff --git a/packages/server/src/process.ts b/packages/server/src/process.ts
+--- a/packages/server/src/process.ts
++++ b/packages/server/src/process.ts
+@@ -100,6 +100,13 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
+   // Built without the startup span: route handlers and background fibers capture this context, and would
+   // otherwise nest every request and session turn for the life of the process under one trace.
+   const boot = Effect.gen(function* () {
++    const capsuleConfig = process.env.OPENCODE_CAPSULE_CONFIG
++    // Limitless: the Capsule bridge and its Linux runtime load only for a configured host.
++    const capsule = capsuleConfig
++      ? yield* Effect.promise(() => import("./limitless-capsule")).pipe(
++          Effect.flatMap((bridge) => bridge.load(capsuleConfig)),
++        )
++      : undefined
+     const context = yield* Layer.buildWithScope(
+       createRoutes(
+         {
+@@ -107,9 +114,12 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
+           password,
+         },
+         urls,
++        capsule?.overrides,
+       ).pipe(Layer.provideMerge(NodeHttpServer.layerHttpServices)),
+       applicationScope,
+     )
++    // Registered before readiness so no Location boots without the Capsule plugin.
++    if (capsule) yield* capsule.activate(context)
+     if (lifecycle) {
+       yield* installRestartContinuity(Context.get(context, SessionRestart.Service)).pipe(
+         Effect.provideService(Scope.Scope, applicationScope),

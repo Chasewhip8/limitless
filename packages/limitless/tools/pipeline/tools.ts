@@ -46,7 +46,7 @@ export function pipelineTools(client: Effect.Success<ReturnType<typeof makePipel
 		pipeline_review: defineLimitlessTool({
 			name: 'pipeline_review',
 			description:
-				'Dispatch a PR review into a retained checkout and native OpenCode session, or recover this session’s current receipt for that PR, including previously accepted ones. Inputs are immutable; a changed request conflicts. Only passing the previous accepted task as afterTaskId creates a fresh task and advances the sticky receipt; repeating that predecessor recovers the same task. AdmissionUnknown requires repeating the exact original request; unconfirmed native delivery is never replayed. Native OpenCode owns execution, history, and outputs.',
+				'Dispatch a PR review into a retained Capsule workspace and native OpenCode session, or recover this session’s current receipt for that PR, including previously accepted ones. Inputs are immutable; a changed request conflicts. Only passing the previous accepted task as afterTaskId creates a fresh task and advances the sticky receipt; repeating that predecessor recovers the same task. AdmissionUnknown requires repeating the exact original request; unconfirmed native delivery is never replayed. Native OpenCode owns execution, history, and outputs.',
 			input: ReviewInput,
 			output: Admission,
 			execute: (input, context) => execute(context, client.review(context.sessionID, input), true),
@@ -79,7 +79,7 @@ export function pipelineTools(client: Effect.Success<ReturnType<typeof makePipel
 		pipeline_close: defineLimitlessTool({
 			name: 'pipeline_close',
 			description:
-				'Explicitly close a task logically: disable future messages and cancel unsent ones. The checkout and native session are retained. This does not interrupt in-flight execution, prove it stopped, archive anything, or delete the checkout.',
+				'Explicitly close a task logically: disable future messages and cancel unsent ones. The Capsule, checkout, and native session are retained. This does not stop or purge the Capsule, interrupt in-flight execution, prove it stopped, archive anything, or delete the checkout.',
 			input: Schema.Struct({ taskId: TaskId }),
 			output: Task,
 			execute: (input, context) => execute(context, client.close(input.taskId), true),

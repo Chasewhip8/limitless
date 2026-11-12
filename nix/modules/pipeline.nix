@@ -35,15 +35,9 @@ let
         type = runtimePath;
         description = "Absolute runtime file containing the enrolled native OpenCode Basic password, not the password itself. Never use a Nix path literal or a store file.";
       };
-      workspaceRoot = lib.mkOption {
+      controlDirectory = lib.mkOption {
         type = runtimePath;
-        description = "Absolute Pipeline-owned workspace root on this worker. Must not contain unrelated checkouts.";
-      };
-      helperExecutable = lib.mkOption {
-        type = absolutePath;
-        default = "${config.home.profileDirectory}/bin/pipeline";
-        defaultText = lib.literalExpression ''"\${config.home.profileDirectory}/bin/pipeline"'';
-        description = "Absolute checkout-helper executable on the worker. Override when its profile differs from the coordinator's.";
+        description = "Absolute Capsule control Location on the worker. Must match that host's programs.limitless.capsule.controlDirectory.";
       };
       system = lib.mkOption {
         type = lib.types.enum [
@@ -69,7 +63,6 @@ in
 {
   options.programs.limitless.pipeline = {
     enable = lib.mkEnableOption "the standalone Pipeline coordinator (independent of programs.limitless.enable)";
-    worker.enable = lib.mkEnableOption "the standalone Pipeline checkout helper, without another worker daemon";
     client = {
       enable = lib.mkEnableOption "Pipeline dispatch, resume, native observation, interrupt, and logical-close tools in the Limitless plugin";
       url = lib.mkOption {
@@ -87,7 +80,7 @@ in
       type = lib.types.nullOr lib.types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.pipeline or null;
       defaultText = lib.literalExpression "the bundled Pipeline CLI on Linux; null otherwise";
-      description = "Standalone Pipeline dispatcher and checkout-helper executable.";
+      description = "Standalone Pipeline task coordinator executable.";
     };
     settings = lib.mkOption {
       default = { };
@@ -121,7 +114,7 @@ in
           githubTokenFile = lib.mkOption {
             type = lib.types.nullOr runtimePath;
             default = null;
-            description = "Optional absolute runtime GitHub token file for PR metadata. Private checkout access also requires separately provisioned worker Git authentication.";
+            description = "Optional runtime GitHub token file for PR metadata. Worker Capsule credentials separately authorize cloning and agent Git operations.";
           };
           pollIntervalMs = lib.mkOption {
             type = lib.types.ints.positive;
@@ -136,7 +129,7 @@ in
           workers = lib.mkOption {
             type = lib.types.listOf workerModule;
             default = [ ];
-            description = "Explicitly enrolled worker origins, credential paths, platforms, and workspace roots.";
+            description = "Enrolled native OpenCode origins, credential files, Capsule control Locations, platforms, and capacity.";
           };
         };
       };
@@ -147,16 +140,16 @@ in
     {
       assertions = [
         {
-          assertion = !(cfg.enable || cfg.worker.enable) || linux;
+          assertion = !cfg.enable || linux;
           message = "programs.limitless.pipeline requires Linux.";
         }
         {
-          assertion = !(cfg.enable || cfg.worker.enable) || cfg.package != null;
+          assertion = !cfg.enable || cfg.package != null;
           message = "programs.limitless.pipeline requires a Pipeline CLI package.";
         }
         {
           assertion = !cfg.client.enable || (config.programs.limitless.enable or false);
-          message = "Pipeline caller tools require programs.limitless.enable; the dispatcher and checkout helper are independent.";
+          message = "Pipeline caller tools require programs.limitless.enable; the coordinator is independent.";
         }
         {
           assertion = !cfg.client.enable || cfg.client.url != null;
@@ -164,7 +157,7 @@ in
         }
       ];
     }
-    (lib.mkIf ((enabled || cfg.worker.enable) && linux && cfg.package != null) {
+    (lib.mkIf enabled {
       home.packages = [ cfg.package ];
     })
     (lib.mkIf enabled {

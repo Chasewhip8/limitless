@@ -13,9 +13,7 @@ const WorkerConfig = Worker.check(
 			return 'Worker capacity must be a positive integer'
 		if (!['x86_64-linux', 'aarch64-linux'].includes(worker.system))
 			return 'Unsupported worker system'
-		if (
-			![worker.workspaceRoot, worker.credentialFile, worker.helperExecutable].every(path.isAbsolute)
-		)
+		if (![worker.credentialFile, worker.controlDirectory].every(path.isAbsolute))
 			return 'Worker paths must be absolute'
 		try {
 			const url = new URL(worker.url)

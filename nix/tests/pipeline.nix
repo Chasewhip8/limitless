@@ -3,6 +3,7 @@ let
   inherit (pkgs) lib;
   package = self.packages.${pkgs.stdenv.hostPlatform.system}.pipeline;
   opencode = self.packages.${pkgs.stdenv.hostPlatform.system}.opencode;
+  capsule = self.packages.${pkgs.stdenv.hostPlatform.system}.capsule;
   fileOption = lib.mkOption {
     type = lib.types.attrsOf lib.types.attrs;
     default = { };
@@ -93,7 +94,24 @@ let
   evaluate = evaluateWith (import ../modules/home.nix { inherit self; });
   valid = home: lib.all (entry: entry.assertion) home.config.assertions;
   defaults = evaluate { };
-  workerOnly = evaluate { programs.limitless.pipeline.worker.enable = true; };
+  capsuleHost = evaluate {
+    programs.limitless = {
+      enable = true;
+      capsule = {
+        enable = true;
+        github.tokenFile = "/run/secrets/capsule-github";
+        identity = {
+          name = "Capsule Agent";
+          email = "agent@example.invalid";
+        };
+        dockerSocket = "/run/docker.sock";
+      };
+      opencode.service.enable = true;
+    };
+  };
+  capsuleSettings = builtins.fromJSON (
+    builtins.unsafeDiscardStringContext capsuleHost.config.xdg.configFile."capsule/host.json".text
+  );
   clientOnly = evaluate {
     programs.limitless = {
       enable = true;
@@ -108,7 +126,7 @@ let
     id = "worker";
     url = "https://worker.example.ts.net";
     credentialFile = "/run/secrets/pipeline-worker";
-    workspaceRoot = "/home/test/pipeline-workspaces";
+    controlDirectory = "/home/test/capsule-control";
     system = "aarch64-linux";
   };
   coordinatorSettings = {
@@ -135,6 +153,37 @@ let
         }).config.xdg.configFile."pipeline/config.json".text
         true
     )).success;
+  runtimeTest = pkgs.runCommand "pipeline-runtime-test" { nativeBuildInputs = [ pkgs.bun ]; } ''
+    mkdir -p nix/tests node_modules "$out"
+    cp -r ${package.src}/packages packages
+    chmod -R u+w packages
+    ln -s ${package.dependencies}/node_modules/.bun node_modules/.bun
+    ln -s ${package.dependencies}/packages/pipeline/node_modules/* node_modules/
+    cp -r ${package.dependencies}/packages/pipeline/node_modules packages/pipeline/node_modules
+    cp -r ${package.dependencies}/packages/capsule/node_modules packages/capsule/node_modules
+    cp ${./pipeline-runtime.mjs} nix/tests/pipeline-runtime.mjs
+    bun build nix/tests/pipeline-runtime.mjs \
+      --target=node --format=esm --packages=bundle --outfile="$out/pipeline-runtime.mjs"
+  '';
+  runner = pkgs.writeShellApplication {
+    name = "validate-pipeline";
+    runtimeInputs = [
+      pkgs.git
+      pkgs.nix
+      pkgs.coreutils
+      pkgs.util-linux
+    ];
+    text = ''
+      exec ${lib.getExe package.node} ${runtimeTest}/pipeline-runtime.mjs ${
+        lib.escapeShellArgs [
+          (lib.getExe opencode)
+          capsule.runtimeConfig
+          opencode.version
+          pkgs.stdenv.hostPlatform.system
+        ]
+      } "$@"
+    '';
+  };
 in
 assert lib.assertMsg (
   valid defaults
@@ -144,12 +193,41 @@ assert lib.assertMsg (
 ) "Disabled Pipeline must not install packages, configuration, or services";
 assert lib.assertMsg
   (
-    valid workerOnly
-    && workerOnly.config.home.packages == [ package ]
-    && workerOnly.config.xdg.configFile == { }
-    && workerOnly.config.systemd.user.services == { }
+    valid capsuleHost
+    && builtins.elem capsule capsuleHost.config.home.packages
+    && !(builtins.elem package capsuleHost.config.home.packages)
+    && builtins.attrNames capsuleHost.config.systemd.user.services == [ "opencode" ]
+    &&
+      capsuleSettings == {
+        root = "/home/test/stateHome/capsule/runtime";
+        checkoutRoot = "/home/test/dataHome/capsule/checkouts";
+        controlDirectory = "/home/test/stateHome/capsule/control";
+        inherit (capsule) runtime;
+        credentials = {
+          github.tokenFile = "/run/secrets/capsule-github";
+          identity = {
+            name = "Capsule Agent";
+            email = "agent@example.invalid";
+          };
+        };
+        dockerSocket = "/run/docker.sock";
+      }
+    && builtins.elem capsuleHost.config.programs.limitless._generated.capsuleHostConfig capsuleHost.config.systemd.user.services.opencode.Unit.X-Restart-Triggers
+    && !(valid (evaluate {
+      programs.limitless.capsule.enable = true;
+    }))
+    && !(valid (evaluate {
+      programs.limitless.enable = true;
+      programs.limitless.capsule = {
+        enable = true;
+        github = {
+          tokenFile = "/run/secrets/token";
+          tokenEnv = "TOKEN";
+        };
+      };
+    }))
   )
-  "A worker installs only the checkout helper, without native configuration injection or another daemon";
+  "Capsule workers configure the existing native server, with runtime credential paths and no Pipeline helper or second daemon";
 assert lib.assertMsg (
   valid clientOnly
   && !(builtins.elem package clientOnly.config.home.packages)
@@ -197,7 +275,6 @@ assert lib.assertMsg
           (
             worker
             // {
-              helperExecutable = "/home/test/.nix-profile/bin/pipeline";
               capacity = 1;
               openCodeVersion = "2.2.7";
             }
@@ -245,7 +322,7 @@ assert lib.assertMsg
       "/run/secrets/token "
     ]
     && !accepts { workers = [ (worker // { credentialFile = "/nix/store/password"; }) ]; }
-    && !accepts { workers = [ (worker // { workspaceRoot = "relative-root"; }) ]; }
+    && !accepts { workers = [ (worker // { controlDirectory = "relative-control"; }) ]; }
     && !(valid (evaluate {
       programs.limitless.pipeline = lib.recursiveUpdate coordinatorSettings {
         settings.workers = [
@@ -255,9 +332,10 @@ assert lib.assertMsg
       };
     }))
   )
-  "Enrollment must reject insecure origins, store credentials, relative roots, and duplicate worker ids";
+  "Enrollment must reject insecure origins, store credentials, relative control Locations, and duplicate worker ids";
 pkgs.runCommand "pipeline-check"
   {
+    meta.mainProgram = "validate-pipeline";
     nativeBuildInputs = [
       package.node
       pkgs.bun
@@ -269,6 +347,10 @@ pkgs.runCommand "pipeline-check"
   ''
     umask 077
     test -x ${lib.getExe package}
+    grep -qF 'OPENCODE_CAPSULE_CONFIG' ${capsuleHost.config.programs.limitless._generated.opencodePackage}/bin/opencode
+    for directory in ${lib.escapeShellArgs (lib.splitString ":" capsule.runtime.basePath)}; do
+      grep -qF "$directory" ${capsuleHost.config.programs.limitless._generated.opencodePackage}/bin/opencode
+    done
     if [ -n "$(find ${package.dependencies} -type d -path '*/node_modules/.bin' -print -quit)" ]; then
       echo "Pipeline dependencies contain nondeterministic executable links" >&2
       exit 1
@@ -288,7 +370,7 @@ pkgs.runCommand "pipeline-check"
       XDG_CONFIG_HOME: join(root, "config"), XDG_STATE_HOME: join(root, "state"),
       XDG_DATA_HOME: join(root, "data"), XDG_CACHE_HOME: join(root, "cache"),
     };
-    const workspaceRoot = join(root, "workspaces");
+    const controlDirectory = join(root, "capsule-control");
     const socket = createServer();
     await new Promise(resolve => socket.listen(0, "127.0.0.1", resolve));
     const { port } = socket.address();
@@ -306,7 +388,7 @@ pkgs.runCommand "pipeline-check"
       pollIntervalMs: 100, queueTimeoutMs: 1000,
       workers: [{
         id: "fixture", url: "http://127.0.0.1:1", credentialFile,
-        workspaceRoot, helperExecutable: process.argv[2],
+        controlDirectory,
         system: "${pkgs.stdenv.hostPlatform.system}", capacity: 1, openCodeVersion: "2.2.7",
       }],
     }));
@@ -341,7 +423,7 @@ pkgs.runCommand "pipeline-check"
         headers: { Authorization: "Bearer incorrect" },
       })).status, 401, "Health must reject incorrect auth");
       assert.equal((await fetch(`''${base}/tasks/00000000-0000-4000-8000-000000000000`, { headers })).status, 404);
-      assert((await stat(database)).size > 0, "Packaged SQLite migrations did not run");
+      assert((await stat(database)).size > 0, "Packaged SQLite schema was not initialized");
       child.kill("SIGTERM");
       const deadline = AbortSignal.timeout(10000);
       const result = await Promise.race([
@@ -358,16 +440,7 @@ pkgs.runCommand "pipeline-check"
       await exited;
     }
     EOF
-    mkdir -p nix/tests
-    cp -r ${package.src}/packages packages
-    chmod -R u+w packages
-    ln -s ${package.dependencies}/packages/pipeline/node_modules node_modules
-    ln -s ${package.dependencies}/packages/pipeline/node_modules packages/pipeline/node_modules
-    cp ${./pipeline-runtime.mjs} nix/tests/pipeline-runtime.mjs
-    bun build nix/tests/pipeline-runtime.mjs \
-      --target=node --format=esm --packages=bundle --outfile=pipeline-runtime.mjs
-    ${lib.getExe package.node} pipeline-runtime.mjs \
-      ${lib.getExe opencode} ${lib.getExe package} ${lib.escapeShellArg opencode.version} \
-      ${lib.escapeShellArg pkgs.stdenv.hostPlatform.system}
-    touch "$out"
+    # Namespace creation and the shared Nix daemon are available only on the host.
+    mkdir -p "$out"
+    ln -s ${runner}/bin "$out/bin"
   ''

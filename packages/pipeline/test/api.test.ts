@@ -100,7 +100,7 @@ test('every route requires auth and dispatch routes return durable idempotent re
 		expect(resumed.command).toMatchObject({
 			kind: 'resume',
 			afterCommandId: first.command.id,
-			delivery: { _tag: 'Pending', step: 'session' },
+			delivery: { _tag: 'Pending', step: 'send' },
 		})
 
 		const closed = await decode(Task)(await request(`${base}/close`, 'POST'))

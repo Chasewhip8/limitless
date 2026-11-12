@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { Clock, Context, Effect, Layer, Stream } from 'effect'
 import { PipelineConfig } from '../config'
+import { PullRequestUnavailable } from '../github/schema'
 import { GitHub } from '../github/service'
 import type { NativeObservation } from '../worker/schema'
 import { OpenCodeWorker } from '../worker/service'
+import { pullRequestSource } from '../worker/source'
+import { type Payload, StoredCommand } from './command'
 import { interruptIntent, resumeIntent, reviewIntent } from './intent'
 import { deliveryTerminal, receipt } from './machine'
 import { pinnedWorker, sessionIdentity } from './placement'
@@ -11,10 +14,8 @@ import { resumePrompt, reviewPrompt } from './prompt'
 import {
 	type CommandView,
 	type InterruptRequest,
-	type Payload,
 	type ResumeRequest,
 	type ReviewRequest,
-	StoredCommand,
 	Task,
 } from './schema'
 import { TaskStore } from './store'
@@ -89,7 +90,7 @@ const make = Effect.gen(function* () {
 			requestHash,
 			...(afterCommandId === undefined ? {} : { afterCommandId }),
 			...(kind === 'interrupt' ? {} : { messageId: `msg_pipeline${id.replaceAll('-', '')}` }),
-			delivery: { _tag: 'Pending', step: kind === 'review' ? 'checkout' : 'session', payload },
+			delivery: { _tag: 'Pending', step: kind === 'review' ? 'session' : 'send', payload },
 		})
 	})
 
@@ -99,6 +100,13 @@ const make = Effect.gen(function* () {
 		if (existing !== undefined) return dispatchReceipt(existing)
 
 		const pr = yield* github.resolve(request)
+		const source = yield* pullRequestSource(pr).pipe(
+			Effect.mapError(() =>
+				PullRequestUnavailable.make({
+					message: 'Pull request head is not a supported checkout source',
+				}),
+			),
+		)
 		const task = Task.make({
 			id: yield* Effect.sync(randomUUID),
 			createdAt: yield* Clock.currentTimeMillis,
@@ -109,6 +117,7 @@ const make = Effect.gen(function* () {
 		const command = yield* newCommand(task.id, requestHash, {
 			_tag: 'Review',
 			pr,
+			source,
 			prompt: reviewPrompt(task.id, pr),
 		})
 		const stored = yield* store.insert(task, command, key)

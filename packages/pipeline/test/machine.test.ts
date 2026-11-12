@@ -1,8 +1,8 @@
 import { Effect, Result } from 'effect'
 import { expect, test } from 'vitest'
+import { type CommandEvent, StoredCommand } from '../tasks/command'
 import { receipt, transition } from '../tasks/machine'
-import { type CommandEvent, StoredCommand } from '../tasks/schema'
-import { pullRequest } from './fixtures'
+import { pullRequest, source } from './fixtures'
 
 const messageId = 'msg_pipeline22222222222242228222000000000001'
 const pending = StoredCommand.make({
@@ -15,8 +15,8 @@ const pending = StoredCommand.make({
 	requestHash: 'hash',
 	delivery: {
 		_tag: 'Pending',
-		step: 'checkout',
-		payload: { _tag: 'Review', pr: pullRequest, prompt: 'Review once.' },
+		step: 'session',
+		payload: { _tag: 'Review', pr: pullRequest, source, prompt: 'Review once.' },
 	},
 })
 const acknowledged: CommandEvent = {
@@ -33,12 +33,7 @@ const run = (command: StoredCommand, ...events: ReadonlyArray<CommandEvent>) =>
 		}).pipe(Effect.result),
 	)
 const unconfirmed = Result.getOrThrow(
-	run(
-		pending,
-		{ _tag: 'CheckoutPrepared' },
-		{ _tag: 'SessionPrepared' },
-		{ _tag: 'DeliveryStarted' },
-	),
+	run(pending, { _tag: 'SessionPrepared' }, { _tag: 'DeliveryStarted' }),
 )
 
 test('possible native delivery can never become unsent or be replaced by a local outcome', () => {
@@ -62,7 +57,7 @@ test('acknowledgment must name the exact message and discards the retained paylo
 	const done = Result.getOrThrow(run(unconfirmed, acknowledged))
 	expect(done.delivery).toEqual({ _tag: 'Acknowledged', nativeRef: acknowledged.nativeRef })
 	expect(JSON.stringify(done)).not.toContain('Review once.')
-	expect(done.version).toBe(4)
+	expect(done.version).toBe(3)
 })
 
 test('caller receipts never expose the retained exact payload', () => {
@@ -76,8 +71,8 @@ test('closing cannot cancel a queued interrupt', () => {
 	const interrupt = StoredCommand.make({
 		...base,
 		kind: 'interrupt',
-		delivery: { _tag: 'Pending', step: 'session', payload: { _tag: 'Interrupt' } },
+		delivery: { _tag: 'Pending', step: 'send', payload: { _tag: 'Interrupt' } },
 	})
 	expect(Result.isFailure(run(interrupt, { _tag: 'CancelledBeforeSend' }))).toBe(true)
-	expect(Result.isFailure(run(interrupt, { _tag: 'CheckoutPrepared' }))).toBe(true)
+	expect(Result.isFailure(run(interrupt, { _tag: 'SessionPrepared' }))).toBe(true)
 })

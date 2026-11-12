@@ -155,7 +155,7 @@ test('an unconfirmed delivery blocks every followup until positive acknowledgmen
 					afterCommandId: command.id,
 					message: 'More.',
 				})
-				expect(resumed.command.delivery).toEqual({ _tag: 'Pending', step: 'session' })
+				expect(resumed.command.delivery).toEqual({ _tag: 'Pending', step: 'send' })
 			}),
 		)
 	} finally {

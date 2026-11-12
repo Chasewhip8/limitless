@@ -1,10 +1,42 @@
+import { FailureCode } from '@limitless/capsule/rpc'
 import { OpenCode } from '@opencode/client/effect'
-import { Effect, FileSystem, Option, Redacted, Scope } from 'effect'
+import { Context, type Duration, Effect, FileSystem, Option, Redacted, Schema, Scope } from 'effect'
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest } from 'effect/http'
 import { type Worker, WorkerError } from './schema'
 
 export const failure = (code: WorkerError['code'], message: string) =>
 	WorkerError.make({ code, message })
+
+const hostFailure: Record<FailureCode, WorkerError['code']> = {
+	unavailable: 'unavailable',
+	not_ready: 'unavailable',
+	incompatible: 'incompatible',
+	ownership: 'ownership',
+	invalid_input: 'protocol',
+}
+
+const Rejected = Schema.Struct({ code: FailureCode })
+
+/** Typed RPC failures arrive as plain `{ type, message, data }` values rather than tagged errors. */
+const rpcFailure = (error: { readonly type: unknown; readonly data?: unknown }) => {
+	const rejected = Schema.decodeUnknownOption(Rejected)(error.data)
+	if (error.type === 'rejected' && Option.isSome(rejected)) {
+		const { code } = rejected.value
+		return failure(hostFailure[code], `The Capsule host refused the request (${code})`)
+	}
+	switch (error.type) {
+		case 'rpc.method_not_found':
+			return failure('incompatible', 'The worker does not provide the Capsule host RPC')
+		case 'rpc.invalid_input':
+		case 'rpc.invalid_output':
+			return failure('protocol', 'The Capsule host RPC rejected the request or its response')
+		default:
+			return failure(
+				'unavailable',
+				'The Capsule host RPC could not be confirmed; this does not prove it failed',
+			)
+	}
+}
 
 export const translateError = (error: unknown): WorkerError => {
 	if (error instanceof WorkerError) return error
@@ -18,6 +50,8 @@ export const translateError = (error: unknown): WorkerError => {
 				'OpenCode returned an invalid response or rejected the native request',
 			)
 		}
+	} else if (typeof error === 'object' && error !== null && 'type' in error) {
+		return rpcFailure(error)
 	}
 	return failure(
 		'unavailable',
@@ -25,8 +59,19 @@ export const translateError = (error: unknown): WorkerError => {
 	)
 }
 
+/** Bounds both the whole native response and each transport attempt of the request it is provided to. */
+export const RequestDeadline = Context.Reference<Duration.Input>(
+	'pipeline/worker/RequestDeadline',
+	{
+		defaultValue: () => '15 seconds',
+	},
+)
+
 export const nativeRequest = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
-	operation.pipe(Effect.timeout('15 seconds'), Effect.scoped, Effect.mapError(translateError))
+	Effect.gen(function* () {
+		const deadline = yield* RequestDeadline
+		return yield* operation.pipe(Effect.timeout(deadline))
+	}).pipe(Effect.scoped, Effect.mapError(translateError))
 
 export const makeConnection = Effect.gen(function* () {
 	const http = (yield* HttpClient.HttpClient).pipe(HttpClient.withScope)
@@ -76,12 +121,13 @@ export const makeConnection = Effect.gen(function* () {
 							description: 'Native response lifetime requires a scope',
 						}),
 					})
+				const deadline = yield* RequestDeadline
 				return yield* http
 					.execute(HttpClientRequest.basicAuth(request, 'opencode', credential))
 					.pipe(
 						Effect.provideService(Scope.Scope, scope.value),
 						Effect.provideService(FetchHttpClient.RequestInit, { redirect: 'error' }),
-						Effect.timeout('15 seconds'),
+						Effect.timeout(deadline),
 						Effect.catchTag('TimeoutError', () =>
 							Effect.fail(
 								new HttpClientError.HttpClientError({

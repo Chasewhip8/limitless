@@ -3,7 +3,6 @@ import { Effect } from 'effect'
 import { Command, Flag } from 'effect/cli'
 import { loadPipelineConfig } from './config'
 import { runPipeline } from './server'
-import { protocolCommand, workspaceCommand } from './workspace/cli'
 
 const serve = Command.make(
 	'serve',
@@ -19,7 +18,7 @@ const serve = Command.make(
 ).pipe(Command.withDescription('Run the authenticated task API, scheduler, and reconciler.'))
 
 const cli = Command.make('pipeline').pipe(
-	Command.withSubcommands([serve, protocolCommand, workspaceCommand]),
+	Command.withSubcommands([serve]),
 	Command.run({ version: '0.1.0' }),
 )
 

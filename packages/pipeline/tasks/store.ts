@@ -2,16 +2,9 @@ import { SqliteClient, SqliteMigrator } from '@effect/sql-sqlite-node'
 import { Context, Effect, Layer, PubSub, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 import type { Worker } from '../worker/schema'
+import { type CommandEvent, StoredCommand } from './command'
 import { transition } from './machine'
-import {
-	type Assignment,
-	type CommandEvent,
-	CommandNotFound,
-	StoredCommand,
-	Task,
-	TaskConflict,
-	TaskNotFound,
-} from './schema'
+import { type Assignment, CommandNotFound, Task, TaskConflict, TaskNotFound } from './schema'
 
 class StorageDefect extends Schema.TaggedError<StorageDefect>()('StorageDefect', {
 	operation: Schema.String,
@@ -21,10 +14,9 @@ const storage =
 	<A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		effect.pipe(Effect.catch(() => Effect.die(StorageDefect.make({ operation }))))
 
-// Earlier unshipped run-ledger tables are neither adopted nor deleted.
 const migrations = SqliteMigrator.layer({
 	loader: SqliteMigrator.fromRecord({
-		'0003_dispatch': Effect.gen(function* () {
+		'0001_dispatch': Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient
 			yield* sql`CREATE TABLE dispatch_tasks (
 				id TEXT PRIMARY KEY,
@@ -344,14 +336,22 @@ const make = Effect.gen(function* () {
 		return task
 	}, Effect.uninterruptible)
 
-	const release = Effect.fn('TaskStore.release')(function* (taskId: string) {
+	const releaseLease = Effect.fn('TaskStore.releaseLease')(function* (taskId: string) {
 		const outstanding =
 			yield* sql`SELECT id FROM dispatch_commands WHERE task_id = ${taskId} AND delivery IN ('Pending','Unconfirmed') LIMIT 1`.pipe(
 				storage('outstanding'),
 			)
-		if (outstanding.length > 0) return
-		yield* sql`DELETE FROM dispatch_leases WHERE task_id = ${taskId}`.pipe(storage('release'))
+		if (outstanding.length > 0) return false
+		const released =
+			yield* sql`DELETE FROM dispatch_leases WHERE task_id = ${taskId} RETURNING task_id`.pipe(
+				storage('release'),
+			)
+		return released.length > 0
 	}, transaction('release'))
+
+	const release = Effect.fn('TaskStore.release')(function* (taskId: string) {
+		if (yield* releaseLease(taskId)) yield* notify(taskId, true)
+	}, Effect.uninterruptible)
 
 	const hasLease = Effect.fn('TaskStore.hasLease')(function* (taskId: string) {
 		const rows = yield* sql`SELECT task_id FROM dispatch_leases WHERE task_id = ${taskId}`.pipe(
@@ -395,7 +395,7 @@ const make = Effect.gen(function* () {
 	}
 })
 
-/** Mutations commit before notifying; subscribe before reading to observe every later commit. */
+/** Mutations commit before notifying; subscribe before reading to observe every later commit. Changes signal new commands, closes, and released capacity. */
 export class TaskStore extends Context.Service<TaskStore, Effect.Success<typeof make>>()(
 	'pipeline/tasks/TaskStore',
 ) {}

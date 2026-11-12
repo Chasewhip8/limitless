@@ -11,18 +11,53 @@ import {
 } from '@opencode/sdk/effect'
 import { Effect, FileSystem, Path, PlatformError, Schema, Stream } from 'effect'
 import { ChildProcess, ChildProcessSpawner } from 'effect/process'
-import * as CapsuleWorkspace from '../../opencode'
-import { CapsuleError, type CapsuleSpec, type Manifest, RuntimeSettings } from '../../schema'
-import { Capsule, make as makeCapsule } from '../../service'
+import * as CapsuleWorkspace from '../../src/opencode'
+import { CapsuleError, type CapsuleSpec, type Manifest, RuntimeSettings } from '../../src/schema'
+import { Capsule, make as makeCapsule } from '../../src/service'
+
+// Each workspace either borrows an existing checkout or names a fixture source Capsule clones.
+const Placement = Schema.Union([
+	Schema.Struct({ name: Schema.String, checkout: Schema.String }),
+	Schema.Struct({
+		name: Schema.String,
+		source: Schema.Struct({
+			repository: Schema.String,
+			ref: Schema.String,
+			branch: Schema.String,
+			commit: Schema.String,
+		}),
+	}),
+])
+type Placement = typeof Placement.Type
 
 const Input = Schema.Struct({
-	checkouts: Schema.Array(Schema.String),
+	workspaces: Schema.Array(Placement),
 	config: Schema.String,
 	hostOnly: Schema.String,
-	search: Schema.Boolean,
-	runtime: Schema.optionalKey(Schema.Struct({ settings: RuntimeSettings, root: Schema.String })),
+	timeout: Schema.Number,
+	runtime: Schema.optionalKey(
+		Schema.Struct({
+			settings: RuntimeSettings,
+			root: Schema.String,
+			checkoutRoot: Schema.String,
+			remotes: Schema.Record(Schema.String, Schema.String),
+		}),
+	),
 })
 const input = Schema.decodeUnknownSync(Schema.fromJsonString(Input))(process.argv[2])
+
+const realCapsule = (runtime: NonNullable<typeof input.runtime>) =>
+	makeCapsule({
+		root: runtime.root,
+		checkoutRoot: runtime.checkoutRoot,
+		runtime: runtime.settings,
+		credentials: { identity: { name: 'Capsule Agent', email: 'agent@example.invalid' } },
+		repositoryUrl: (repository) => {
+			const url = runtime.remotes[repository]
+			if (url === undefined) throw new Error(`No fixture remote serves ${repository}.`)
+			return url
+		},
+	})
 
 const refuse = (description: string) =>
 	PlatformError.badArgument({ module: 'Fixture', method: 'spawn', description })
@@ -67,12 +102,13 @@ const controlledCapsule = Effect.gen(function* () {
 	}
 
 	return Capsule.of({
+		create: () => Effect.die('The controlled fixture only accepts existing checkouts.'),
 		prepare: (spec: CapsuleSpec) =>
 			Effect.sync(() => {
 				const existing = manifests.get(spec.id)
 				if (existing?.phase === 'ready') return existing
 				const manifest: Manifest = {
-					owner: 'limitless-capsule-v1',
+					owner: 'limitless-capsule-v2',
 					spec,
 					generation: (existing?.generation ?? 0) + 1,
 					phase: 'ready',
@@ -113,6 +149,11 @@ const recorded = (capsule: Capsule['Service']) => {
 			: [command.command, ...command.args.map(String), command.options.cwd ?? '']
 	const service = Capsule.of({
 		...capsule,
+		create: (request, settings) =>
+			Effect.suspend(() => {
+				operations.push(`create:${request.id}`)
+				return capsule.create(request, settings)
+			}),
 		prepare: (spec, refresh) =>
 			Effect.suspend(() => {
 				operations.push(`prepare:${spec.id}`)
@@ -204,20 +245,16 @@ const respond = async (
 const program = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
-	const base = input.runtime
-		? yield* makeCapsule({ root: input.runtime.root, runtime: input.runtime.settings })
-		: yield* controlledCapsule
+	const base = input.runtime ? yield* realCapsule(input.runtime) : yield* controlledCapsule
 	const capsule = recorded(base)
 	const model = yield* scriptedModel
-	const checkouts = new Map(input.checkouts.map((directory) => [Workspace.ID.create(), directory]))
+	const placements = new Map(
+		input.workspaces.map((workspace) => [Workspace.ID.create(), workspace]),
+	)
 
-	const driver = yield* CapsuleWorkspace.make({
-		resolveSpec: (workspaceID) =>
-			Effect.succeed({
-				directory: checkouts.get(Workspace.ID.make(workspaceID)) ?? '',
-				project: {},
-			}),
-	}).pipe(Effect.provideService(Capsule, capsule.service))
+	const driver = yield* CapsuleWorkspace.make().pipe(
+		Effect.provideService(Capsule, capsule.service),
+	)
 	const opencode = yield* OpenCode.create({
 		config: {
 			directory: input.config,
@@ -243,31 +280,62 @@ const program = Effect.gen(function* () {
 		workspaceProviders: { capsule: driver },
 	})
 
-	const visibility = `"$(test -e '${input.hostOnly}' && echo visible || echo hidden)"`
+	// OpenCode attaches a workspace only to a Capsule prepared under its ID, and discovers a session's
+	// project from the provisioned checkout on the host.
+	const prepareCapsule = (workspace: Placement, id: Workspace.ID) => {
+		if ('checkout' in workspace) {
+			return capsule.service.prepare({ id, directory: workspace.checkout, project: {} })
+		}
+		return capsule.service.create({ ...workspace.source, id })
+	}
+	const provisionDirectory = Effect.fn('provisionDirectory')(function* (workspaceID: Workspace.ID) {
+		const { binding } = yield* opencode.workspace.provision({ workspaceID })
+		const { directory } = yield* Schema.decodeUnknownEffect(
+			Schema.Struct({ directory: Schema.String }),
+		)(binding)
+		return directory
+	})
+
+	const probe = (test: string, yes: string, no: string) =>
+		`"$(${test} && echo ${yes} || echo ${no})"`
+	const agentShell = [
+		'"$CAPSULE_FIXTURE"',
+		'"$CAPSULE_ID"',
+		probe(`test -e '${input.hostOnly}'`, 'visible', 'hidden'),
+		probe('test -n "$GH_TOKEN$GITHUB_TOKEN"', 'credentialed', 'anonymous'),
+	]
 	// Search tools run the ripgrep that OpenCode resolves from its own PATH, so they only work when
 	// that path is visible inside the workspace.
 	const searches = [
 		['grep', { pattern: 'GREP_NEEDLE' }],
 		['glob', { pattern: '**/*.needle' }],
 	] as const
-	const toolCalls = (directory: string) => [
+	// The agent commits its own view of the working tree, so the retained source records both.
+	const sourceWork = [
+		'shell',
+		{
+			command: `git status --porcelain > status.txt && git add status.txt && git commit -q -m "agent $CAPSULE_ID"`,
+		},
+	] as const
+	const toolCalls = (workspace: Placement, directory: string) => [
 		['read', { path: path.join(directory, 'source.txt') }] as const,
 		['read', { path: path.join(directory, 'escape') }] as const,
 		[
 			'shell',
-			{
-				command: `printf '%s:%s:%s' "$CAPSULE_FIXTURE" "$CAPSULE_ID" ${visibility} > agent-shell.txt`,
-			},
+			{ command: `printf '%s:%s:%s:%s' ${agentShell.join(' ')} > agent-shell.txt` },
 		] as const,
-		...(input.search ? searches : []),
+		...(input.runtime ? searches : []),
+		...('source' in workspace ? [sourceWork] : []),
 	]
 
 	// Both workspaces run at once, each through its own Capsule connection.
 	const workspaces = yield* Effect.forEach(
-		checkouts,
-		([id, directory]) =>
+		placements,
+		([id, workspace]) =>
 			Effect.gen(function* () {
 				const workspaceID = yield* opencode.workspace.create({ id, provider: 'capsule' })
+				yield* prepareCapsule(workspace, workspaceID)
+				const directory = yield* provisionDirectory(workspaceID)
 				const session = yield* opencode.sessions.create({
 					location: Location.Ref.make({ directory: AbsolutePath.make(directory), workspaceID }),
 				})
@@ -275,7 +343,7 @@ const program = Effect.gen(function* () {
 					sessionID: session.id,
 					command: `printf '%s' "$CAPSULE_ID" > user-shell.txt`,
 				})
-				for (const [tool, args] of toolCalls(directory)) {
+				for (const [tool, args] of toolCalls(workspace, directory)) {
 					yield* opencode.sessions.prompt({
 						sessionID: session.id,
 						text: `CAPSULE_CALL ${tool} ${JSON.stringify(args)}`,
@@ -287,6 +355,7 @@ const program = Effect.gen(function* () {
 					fs.readFileString(path.join(directory, name)).pipe(Effect.orElseSucceed(() => null))
 				return {
 					id: workspaceID,
+					name: workspace.name,
 					directory,
 					sessionWorkspaceID: session.location.workspaceID,
 					binding,
@@ -298,22 +367,22 @@ const program = Effect.gen(function* () {
 		{ concurrency: 'unbounded' },
 	)
 
-	const [, destroyedID] = checkouts.keys()
+	const [, destroyedID] = placements.keys()
 	const destroyed = destroyedID
 		? yield* opencode.workspace.destroy({ workspaceID: destroyedID })
 		: null
 	const unprovisionedID = yield* opencode.workspace.create({ provider: 'capsule' })
 	yield* opencode.workspace.destroy({ workspaceID: unprovisionedID })
-	const ids = [...checkouts.keys(), unprovisionedID]
-	const phases = yield* Effect.forEach(ids, (id) =>
-		Effect.map(base.inspect(id), (manifest) => [id, manifest?.phase ?? null] as const),
+	const ids = [...placements.keys(), unprovisionedID]
+	const manifests = yield* Effect.forEach(ids, (id) =>
+		Effect.map(base.inspect(id), (manifest) => [id, manifest ?? null] as const),
 	)
 	return {
 		workspaces,
 		destroyed,
 		unprovisionedID,
 		operations: capsule.operations,
-		phases: Object.fromEntries(phases),
+		manifests: Object.fromEntries(manifests),
 		spawned: capsule.spawned,
 		toolResults: model.toolResults,
 	}
@@ -343,6 +412,6 @@ const pipelineEnvironment = Effect.fn('pipelineEnvironment')(function* (
 }, Effect.scoped)
 
 const report = await Effect.runPromise(
-	program.pipe(Effect.timeout('5 minutes'), Effect.scoped, Effect.provide(NodeServices.layer)),
+	program.pipe(Effect.timeout(input.timeout), Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 process.stdout.write(`${JSON.stringify(report)}\n`)

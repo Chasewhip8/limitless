@@ -5,33 +5,10 @@ import {
 	type SessionInbox,
 	SessionMessage,
 } from '@opencode/client/effect'
-import { Effect, Option, Schema, Stream } from 'effect'
-import { failure, nativeRequest } from './client'
-import type { SessionIdentity } from './schema'
+import { Effect, Option, Stream } from 'effect'
+import { nativeRequest } from './client'
 
-const Ownership = Schema.Struct({ pipeline: Schema.Struct({ taskId: Schema.String }) })
 export const location = (directory: string) => ({ directory: AbsolutePath.make(directory) })
-
-export const validateSession = Effect.fn('OpenCodeWorker.validateSession')(function* (
-	session: Session.Info,
-	identity: SessionIdentity,
-) {
-	const owner = Schema.decodeUnknownOption(Ownership)(session.metadata)
-	if (
-		session.id !== identity.sessionId ||
-		session.location.directory !== identity.directory ||
-		session.parentID ||
-		session.fork ||
-		Option.isNone(owner) ||
-		owner.value.pipeline.taskId !== identity.taskId
-	) {
-		return yield* failure(
-			'ownership',
-			'The native session no longer matches the retained task reference',
-		)
-	}
-	return session
-})
 
 export const matchesPrompt = (payload: SessionInbox.UserPayload, prompt: string) =>
 	payload.text === prompt &&

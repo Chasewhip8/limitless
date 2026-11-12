@@ -58,7 +58,7 @@ export class PipelineApi extends HttpApi.make('pipeline').add(
 				error: [conflict, unavailable, ...missing],
 			}).annotate(
 				OpenApi.Description,
-				'Create a task routed to a retained checkout and a new native OpenCode session, with its initial review message in the durable outbox. Idempotency-Key binds the intent; an identical retry returns the same receipt.',
+				'Create a task routed to a retained Capsule checkout and a new native OpenCode session, with its initial review message in the durable outbox. Idempotency-Key binds the intent; an identical retry returns the same receipt.',
 			),
 			HttpApiEndpoint.post('resume', '/tasks/:id/resume', {
 				params: taskParams,
@@ -86,7 +86,7 @@ export class PipelineApi extends HttpApi.make('pipeline').add(
 				error: taskMissing,
 			}).annotate(
 				OpenApi.Description,
-				'Idempotently disable new messages and cancel unsent ones. Never interrupts, archives, or deletes; the checkout and native session are retained.',
+				'Idempotently disable new messages and cancel unsent ones. Never interrupts, stops the Capsule, archives, or deletes; the Capsule checkout and native session are retained.',
 			),
 			HttpApiEndpoint.get('get', '/tasks/:id', {
 				params: taskParams,

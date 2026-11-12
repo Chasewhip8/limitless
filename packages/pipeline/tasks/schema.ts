@@ -20,7 +20,7 @@ export const ReviewRequest = Schema.Struct({
 	system: Schema.optionalKey(Schema.Literals(['x86_64-linux', 'aarch64-linux'])),
 }).annotate({
 	description:
-		'Dispatch a PR review into a retained checkout and native OpenCode session. OpenCode owns execution, input, history and results.',
+		'Dispatch a PR review into a retained Capsule checkout and native OpenCode session. OpenCode owns execution, input, history and results.',
 })
 export type ReviewRequest = typeof ReviewRequest.Type
 
@@ -55,10 +55,16 @@ export type PullRequest = typeof PullRequest.Type
 export const Assignment = Schema.Struct({
 	workerId: Schema.String,
 	workerUrl: Schema.String,
-	workspaceRoot: Schema.String,
-	helperExecutable: Schema.String,
-	directory: Schema.String,
+	controlDirectory: Schema.String,
+	storageId: Schema.String,
+	workspaceId: Schema.String,
 	sessionId: Schema.String,
+	directory: Schema.String.annotate({
+		description: 'Checkout directory observed from the Capsule host at assignment.',
+	}),
+}).annotate({
+	description:
+		'Pinned worker and Capsule host placement. The host owns the checkout and runtime; it refuses a changed storage identity instead of moving the session.',
 })
 export type Assignment = typeof Assignment.Type
 
@@ -88,7 +94,7 @@ export const Rejection = Schema.Struct({
 })
 export type Rejection = typeof Rejection.Type
 
-const PendingStep = Schema.Literals(['checkout', 'session', 'send'])
+export const PendingStep = Schema.Literals(['session', 'send'])
 
 export const Delivery = Schema.Union([
 	Schema.TaggedStruct('Pending', { step: PendingStep }),
@@ -102,7 +108,7 @@ export const Delivery = Schema.Union([
 })
 export type Delivery = typeof Delivery.Type
 
-const commandFields = {
+export const CommandReceipt = Schema.Struct({
 	id: CommandId,
 	taskId: TaskId,
 	createdAt: Schema.Number,
@@ -111,8 +117,8 @@ const commandFields = {
 	afterCommandId: Schema.optionalKey(CommandId),
 	messageId: Schema.optionalKey(Schema.String),
 	requestHash: Schema.String,
-}
-export const CommandReceipt = Schema.Struct({ ...commandFields, delivery: Delivery })
+	delivery: Delivery,
+})
 export type CommandReceipt = typeof CommandReceipt.Type
 
 export const DispatchReceipt = Schema.Struct({ task: Task, command: CommandReceipt })
@@ -132,39 +138,6 @@ export const TaskView = Schema.Struct({
 })
 export type TaskView = typeof TaskView.Type
 
-export const Payload = Schema.Union([
-	Schema.TaggedStruct('Review', { pr: PullRequest, prompt: Schema.String }),
-	Schema.TaggedStruct('Resume', { prompt: Schema.String }),
-	Schema.TaggedStruct('Interrupt', {}),
-])
-export type Payload = typeof Payload.Type
-
-export const StoredCommand = Schema.Struct({
-	...commandFields,
-	delivery: Schema.Union([
-		Schema.TaggedStruct('Pending', { step: PendingStep, payload: Payload }),
-		Schema.TaggedStruct('Unconfirmed', { payload: Payload }),
-		Schema.TaggedStruct('Acknowledged', { nativeRef: NativeReference }),
-		Schema.TaggedStruct('CancelledBeforeSend', {}),
-		Schema.TaggedStruct('Rejected', { reason: Rejection }),
-	]),
-})
-export type StoredCommand = typeof StoredCommand.Type
-
-export const CommandEvent = Schema.Union([
-	Schema.TaggedStruct('CheckoutPrepared', {}),
-	Schema.TaggedStruct('SessionPrepared', {}),
-	Schema.TaggedStruct('DeliveryStarted', {}),
-	Schema.TaggedStruct('Acknowledged', { nativeRef: NativeReference }),
-	Schema.TaggedStruct('CancelledBeforeSend', {}),
-	Schema.TaggedStruct('Rejected', { reason: Rejection }),
-])
-export type CommandEvent = typeof CommandEvent.Type
-
-export class InvalidTransition extends Schema.TaggedError<InvalidTransition>()(
-	'InvalidTransition',
-	{ commandId: Schema.String, event: Schema.String, state: Schema.String },
-) {}
 export class TaskNotFound extends Schema.TaggedError<TaskNotFound>()('TaskNotFound', {
 	id: Schema.String,
 }) {}

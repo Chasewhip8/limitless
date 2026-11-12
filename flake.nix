@@ -39,7 +39,7 @@
           opencode-agents = agentsPackage;
           anthropic-auth = import ./nix/packages/anthropic-auth.nix { inherit pkgs; };
           limitless = import ./nix/packages/limitless.nix { inherit pkgs self; };
-          opencode = import ./nix/packages/opencode.nix { inherit pkgs; };
+          opencode = import ./nix/packages/opencode.nix { inherit pkgs self; };
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pipeline = import ./nix/packages/pipeline.nix { inherit pkgs self; };
@@ -72,6 +72,11 @@
             capsule = import ./nix/tests/capsule.nix {
               inherit pkgs;
               package = self.packages.${system}.capsule;
+            };
+            opencode-capsule = import ./nix/tests/opencode-capsule.nix {
+              inherit pkgs;
+              opencode = self.packages.${system}.opencode;
+              capsule = self.packages.${system}.capsule;
             };
             opencode-password = import ./nix/tests/opencode-password.nix {
               inherit pkgs;
