@@ -23,13 +23,13 @@
 				"gpt-6-astra": {
 					"limit": {
 						"context": 872000,
-						"input": 828400
+						"input": 288000
 					}
 				},
 				"gpt-6-astra-fast": {
 					"limit": {
 						"context": 872000,
-						"input": 828400
+						"input": 288000
 					}
 				}
 			}

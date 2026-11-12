@@ -94,6 +94,13 @@ for (const file of files) {
 		'native',
 		`${file}: OpenAI models must default to native compaction`,
 	)
+	for (const model of ['gpt-6-astra', 'gpt-6-astra-fast']) {
+		assert.deepEqual(
+			input.providers?.openai?.models?.[model]?.limit,
+			{ context: 872000, input: 288000 },
+			`${file}: ${model} must compact near 245k while retaining its large context window`,
+		)
+	}
 	for (const name of [...primaryAgents, ...supportAgents]) {
 		assert(agents[name], `Missing packaged agent: ${name}`)
 		const rules = [
