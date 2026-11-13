@@ -71,6 +71,9 @@ export function fakeWorker() {
 		unreachable: false,
 		observation: { _tag: 'Running', backgroundJobs: 0 } as NativeObservation,
 		result: { _tag: 'Pending' } as NativeResult,
+		resultErrors: [] as WorkerError[],
+		resultDelayMs: 0,
+		observationErrors: [] as WorkerError[],
 		resultGate: null as Deferred.Deferred<void> | null,
 		resultStarted: Effect.runSync(Deferred.make<void>()),
 		resultsInterrupted: 0,
@@ -170,6 +173,8 @@ export function fakeWorker() {
 					...(messageId === undefined ? {} : { messageId }),
 				})
 				yield* reachable()
+				const error = control.observationErrors.shift()
+				if (error !== undefined) return yield* error
 				return control.observation
 			}),
 		result: (_worker, session, messageId) =>
@@ -177,6 +182,9 @@ export function fakeWorker() {
 				calls.push({ operation: 'result', session, messageId })
 				yield* reachable()
 				yield* Deferred.succeed(control.resultStarted, undefined)
+				if (control.resultDelayMs > 0) yield* Effect.sleep(control.resultDelayMs)
+				const error = control.resultErrors.shift()
+				if (error !== undefined) return yield* error
 				if (control.resultGate !== null)
 					yield* Deferred.await(control.resultGate).pipe(
 						Effect.onInterrupt(() =>

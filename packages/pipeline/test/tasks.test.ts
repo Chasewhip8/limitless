@@ -1,11 +1,11 @@
-import { Deferred, Effect, Fiber } from 'effect'
+import { Deferred, Effect, Fiber, Logger } from 'effect'
 import { TestClock } from 'effect/testing'
 import { expect, test } from 'vitest'
 import { Scheduler } from '../scheduler'
 import { continuePrompt } from '../tasks/prompt'
 import { Tasks } from '../tasks/service'
 import { TaskStore } from '../tasks/store'
-import type { NativeObservation, NativeResult } from '../worker/schema'
+import { type NativeObservation, type NativeResult, WorkerError } from '../worker/schema'
 import { nativeEvaluationBudgetMs } from '../workflow'
 import { coordinator, review } from './fixtures'
 
@@ -13,6 +13,240 @@ const completed: NativeResult = {
 	_tag: 'Completed',
 	message: { id: 'msg_final', text: 'Final review.' },
 }
+
+test('temporary native read failures recover without admitting another prompt', async () => {
+	const { runtime, control, calls } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const first = yield* tasks.review(review())
+				yield* (yield* Scheduler).tick()
+				control.resultErrors.push(WorkerError.make({ code: 'unavailable', message: 'Timeout' }))
+				control.result = completed
+				const pending = yield* tasks.get(first.operation).pipe(Effect.forkChild)
+				yield* Deferred.await(control.resultStarted)
+				yield* TestClock.adjust('2 seconds')
+				expect((yield* Fiber.join(pending)).state).toEqual(completed)
+				expect(calls.filter((call) => call.operation === 'result')).toHaveLength(2)
+				expect(calls.filter((call) => call.operation === 'admit')).toHaveLength(1)
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test.each([
+	'protocol',
+	'ownership',
+	'incompatible',
+] as const)('permanent %s failures return immediately without exposing raw messages', async (code) => {
+	const { runtime, control, calls } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const first = yield* tasks.review(review())
+				yield* (yield* Scheduler).tick()
+				control.resultErrors.push(WorkerError.make({ code, message: 'private response body' }))
+				const view = yield* tasks.get(first.operation)
+				expect(view.state).toMatchObject({
+					_tag: 'Unavailable',
+					message: expect.stringContaining(code),
+				})
+				expect(JSON.stringify(view)).not.toContain('private response body')
+				expect(calls.filter((call) => call.operation === 'result')).toHaveLength(1)
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('persistent native read failures exhaust the retry window without submitting work', async () => {
+	const { runtime, control, calls } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const first = yield* tasks.review(review())
+				yield* (yield* Scheduler).tick()
+				control.resultErrors.push(
+					...Array.from({ length: 100 }, () =>
+						WorkerError.make({ code: 'unavailable', message: 'Timeout' }),
+					),
+				)
+				const pending = yield* tasks.get(first.operation).pipe(Effect.forkChild)
+				yield* Deferred.await(control.resultStarted)
+				yield* TestClock.adjust('2 minutes')
+				expect((yield* Fiber.join(pending)).state).toMatchObject({ _tag: 'Unavailable' })
+				expect(calls.filter((call) => call.operation === 'result')).toHaveLength(61)
+				expect(calls.filter((call) => call.operation === 'admit')).toHaveLength(1)
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('ambiguous native history is returned unchanged without retrying', async () => {
+	const { runtime, control, calls } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const first = yield* tasks.review(review())
+				yield* (yield* Scheduler).tick()
+				control.result = { _tag: 'Unavailable', message: 'Unattributed native history' }
+				expect((yield* tasks.get(first.operation)).state).toEqual(control.result)
+				expect(calls.filter((call) => call.operation === 'result')).toHaveLength(1)
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('cancelling a native read during backoff prevents further retries without interrupting the reviewer', async () => {
+	const { runtime, control, calls } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const first = yield* tasks.review(review())
+				yield* (yield* Scheduler).tick()
+				control.resultErrors.push(WorkerError.make({ code: 'unavailable', message: 'Timeout' }))
+				const pending = yield* tasks.get(first.operation).pipe(Effect.forkChild)
+				yield* Deferred.await(control.resultStarted)
+				yield* TestClock.adjust('1 second')
+				yield* Fiber.interrupt(pending)
+				yield* TestClock.adjust('2 minutes')
+				expect(calls.filter((call) => call.operation === 'result')).toHaveLength(1)
+				expect(calls.some((call) => call.operation === 'interrupt')).toBe(false)
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('temporary observation failures recover the live input request without submitting work', async () => {
+	const { runtime, control, calls } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const first = yield* tasks.review(review())
+				yield* (yield* Scheduler).tick()
+				control.observationErrors.push(
+					WorkerError.make({ code: 'unavailable', message: 'Timeout' }),
+				)
+				control.observation = { _tag: 'NeedsInput', permissionIds: ['per_1'], formIds: [] }
+				const pending = yield* tasks.get(first.operation).pipe(Effect.forkChild)
+				yield* Deferred.await(control.resultStarted)
+				yield* TestClock.adjust('2 seconds')
+				expect((yield* Fiber.join(pending)).state).toEqual({
+					_tag: 'NeedsInput',
+					permissions: 1,
+					forms: 0,
+				})
+				expect(calls.filter((call) => call.operation === 'result')).toHaveLength(2)
+				expect(calls.filter((call) => call.operation === 'admit')).toHaveLength(1)
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('a slow failure and hanging retry share the original evaluation deadline', async () => {
+	const { runtime, control, calls } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const first = yield* tasks.review(review())
+				yield* (yield* Scheduler).tick()
+				control.resultDelayMs = 15_000
+				control.resultErrors.push(WorkerError.make({ code: 'unavailable', message: 'Timeout' }))
+				control.resultGate = yield* Deferred.make<void>()
+				const pending = yield* tasks.get(first.operation).pipe(Effect.forkChild)
+				yield* Deferred.await(control.resultStarted)
+				yield* TestClock.adjust(nativeEvaluationBudgetMs)
+				expect((yield* Fiber.join(pending)).state).toMatchObject({
+					_tag: 'Unavailable',
+					message: expect.stringContaining('three-minute budget'),
+				})
+				expect(calls.filter((call) => call.operation === 'result')).toHaveLength(2)
+				expect(control.resultsInterrupted).toBe(1)
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('a two-minute history timeout still gets a retry within the original evaluation budget', async () => {
+	const { runtime, control, calls } = coordinator()
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const first = yield* tasks.review(review())
+				yield* (yield* Scheduler).tick()
+				control.resultDelayMs = 120_000
+				control.resultErrors.push(
+					WorkerError.make({ code: 'unavailable', message: 'History timeout' }),
+				)
+				control.result = completed
+				const pending = yield* tasks.get(first.operation).pipe(Effect.forkChild)
+				yield* Deferred.await(control.resultStarted)
+				yield* TestClock.adjust('2 minutes')
+				control.resultDelayMs = 0
+				yield* TestClock.adjust('2 seconds')
+				expect((yield* Fiber.join(pending)).state).toEqual(completed)
+				expect(calls.filter((call) => call.operation === 'result')).toHaveLength(2)
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('native read diagnostics retain the stage and HTTP status without leaking upstream text', async () => {
+	const { runtime, control } = coordinator()
+	const logs: unknown[] = []
+	const logger = Logger.layer([Logger.make(({ message }) => logs.push(message))])
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const first = yield* tasks.review(review())
+				yield* (yield* Scheduler).tick()
+				control.resultErrors.push(
+					WorkerError.make({
+						code: 'protocol',
+						reason: 'http_status',
+						stage: 'history',
+						status: 401,
+						message: 'private credential or native response content',
+					}),
+				)
+				const view = yield* tasks.get(first.operation).pipe(Effect.provide(logger))
+				expect(view.state).toMatchObject({
+					_tag: 'Unavailable',
+					message: expect.stringContaining('history: http_status, HTTP 401'),
+				})
+				expect(JSON.stringify(logs)).toContain(first.operation)
+				expect(JSON.stringify(logs)).toContain('http_status')
+				expect(JSON.stringify({ view, logs })).not.toContain('private credential')
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
 
 test.each([
 	'continue',
@@ -247,8 +481,6 @@ test('historical native results precede session activity while unresolved operat
 				})
 				control.result = completed
 				expect((yield* tasks.get(first.operation)).state).toEqual(completed)
-				control.unreachable = true
-				expect((yield* tasks.get(first.operation)).state._tag).toBe('Unavailable')
 			}),
 		)
 	} finally {

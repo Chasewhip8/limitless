@@ -241,6 +241,14 @@ to start. Cancelling a waiter only detaches that caller. It does not interrupt,
 cancel input, release a reservation, or submit replacement work. The `review-pr`
 skill drives this procedure; the review agent owns methodology and verdicts.
 
+Temporary native read errors are retried by the coordinator every two seconds
+within a two-minute window starting at the first failure, bounded by the existing three-minute evaluation
+deadline. A brief timeout does not terminate the wait stream. Ownership, protocol,
+and compatibility failures, and unavailable attribution from native history, are
+not retried. Retries only read retained state; they never submit or repeat a prompt.
+Coordinator warnings identify the operation and sanitized failure category without
+recording credentials, response bodies, or session content.
+
 ## Credentials, storage and operations
 
 The shared native OpenCode password authenticates worker requests. Capsule's

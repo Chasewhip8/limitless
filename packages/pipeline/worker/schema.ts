@@ -61,7 +61,60 @@ export const NativeResult = Schema.Union([
 })
 export type NativeResult = typeof NativeResult.Type
 
+export const WorkerFailureReason = Schema.Literals([
+	'timeout',
+	'transport',
+	'http_status',
+	'encode',
+	'decode',
+	'origin',
+	'credential',
+	'rpc',
+	'rejected',
+	'not_found',
+	'mismatch',
+	'incomplete',
+	'unknown',
+]).annotate({
+	description:
+		'The safe category of a worker failure. It never carries upstream text, URLs, credentials or payloads.',
+})
+export type WorkerFailureReason = typeof WorkerFailureReason.Type
+
+export const WorkerStage = Schema.Literals([
+	'connect',
+	'server_info',
+	'agents',
+	'capsule_info',
+	'prepare_session',
+	'placement',
+	'inbox',
+	'delivered_message',
+	'history',
+	'active',
+	'jobs',
+	'permissions',
+	'forms',
+	'final_response',
+	'admit',
+	'interrupt',
+	'events',
+	'ready',
+	'find_admission',
+	'observe',
+	'read_result',
+]).annotate({
+	description:
+		'The native step that failed, or the worker operation when no narrower step applies.',
+})
+export type WorkerStage = typeof WorkerStage.Type
+
 export class WorkerError extends Schema.TaggedError<WorkerError>()('WorkerError', {
 	code: Schema.Literals(['unavailable', 'incompatible', 'ownership', 'protocol']),
 	message: Schema.String,
+	reason: Schema.optional(WorkerFailureReason),
+	stage: Schema.optional(WorkerStage),
+	status: Schema.optional(
+		Schema.Int.annotate({ description: 'The HTTP status OpenCode answered with, if any.' }),
+	),
 }) {}

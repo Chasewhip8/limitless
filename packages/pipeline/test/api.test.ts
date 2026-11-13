@@ -8,6 +8,7 @@ import { PipelineConfig } from '../config'
 import { Scheduler } from '../scheduler'
 import { routesLayer } from '../server'
 import { Tasks } from '../tasks/service'
+import { WorkerError } from '../worker/schema'
 import { OperationReceipt, OperationView } from '../workflow'
 import { coordinator, review, settings } from './fixtures'
 
@@ -144,6 +145,32 @@ test('event transport opens before slow native reconstruction and cancellation r
 		await runtime.runPromise(Deferred.await(control.resultStarted))
 		await reader.cancel()
 		expect(control.resultsInterrupted).toBe(1)
+	} finally {
+		await dispose()
+	}
+})
+
+test('a temporary native read failure keeps the event stream open until the result is recovered', async () => {
+	const { request, tick, control, calls, dispose } = await harness()
+	try {
+		const first = await receipt(await request('/reviews', 'POST', review()))
+		await tick()
+		control.resultErrors.push(
+			WorkerError.make({ code: 'unavailable', message: 'Synthetic timeout' }),
+		)
+		control.result = {
+			_tag: 'Completed',
+			message: { id: 'msg_final', text: 'Recovered native final message.' },
+		}
+		const response = await request(`/operations/${first.operation}/events`)
+		const text = await response.text()
+		const views = text
+			.trim()
+			.split('\n')
+			.map((line) => Schema.decodeUnknownSync(OperationView)(JSON.parse(line)))
+		expect(views).toHaveLength(1)
+		expect(views[0]).toMatchObject({ operation: first.operation, state: control.result })
+		expect(calls.filter((call) => call.operation === 'admit')).toHaveLength(1)
 	} finally {
 		await dispose()
 	}

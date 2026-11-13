@@ -1,7 +1,14 @@
 import { CapsuleHostRpc, type PreparedSession, type PrepareSession } from '@limitless/capsule/rpc'
 import { type OpenCodeClient, Session, SessionMessage } from '@opencode/client/effect'
 import { Context, Effect, Layer, Option, Stream } from 'effect'
-import { failure, makeConnection, nativeRequest, RequestDeadline, translateError } from './client'
+import {
+	atStage,
+	failure,
+	makeConnection,
+	nativeRequest,
+	RequestDeadline,
+	translateErrorAt,
+} from './client'
 import {
 	admissionInJournal,
 	deliveredMessage,
@@ -43,6 +50,7 @@ const requirePlaced = Effect.fn('OpenCodeWorker.requirePlaced')(function* (
 		return yield* failure(
 			'ownership',
 			'The Capsule host placed the session outside the retained task assignment',
+			{ reason: 'mismatch', stage: 'placement' },
 		)
 	}
 })
@@ -53,13 +61,16 @@ const make = Effect.gen(function* () {
 		const host = client.rpc(CapsuleHostRpc)
 		const options = { location: location(worker.controlDirectory) }
 		return {
-			info: () => host.info({}, options).pipe(nativeRequest),
+			info: () => host.info({}, options).pipe(nativeRequest('capsule_info')),
 			prepareSession: (input: typeof PrepareSession.Encoded) =>
 				host
 					.prepareSession(input, options)
-					.pipe(nativeRequest, Effect.provideService(RequestDeadline, prepareDeadline)),
+					.pipe(
+						nativeRequest('prepare_session'),
+						Effect.provideService(RequestDeadline, prepareDeadline),
+					),
 			getSession: (identity: SessionIdentity) =>
-				host.getSession(sessionReference(identity), options).pipe(nativeRequest),
+				host.getSession(sessionReference(identity), options).pipe(nativeRequest('placement')),
 		}
 	}
 
@@ -76,17 +87,23 @@ const make = Effect.gen(function* () {
 
 	const ready = Effect.fn('OpenCodeWorker.ready')(function* (worker: Worker) {
 		const client = yield* connect(worker)
-		const info = yield* client.server.info().pipe(nativeRequest)
+		const info = yield* client.server.info().pipe(nativeRequest('server_info'))
 		if (info.version !== worker.openCodeVersion)
-			return yield* failure('incompatible', 'OpenCode version does not match worker enrollment')
+			return yield* failure('incompatible', 'OpenCode version does not match worker enrollment', {
+				reason: 'mismatch',
+				stage: 'server_info',
+			})
 		const { data: agents } = yield* client.agent
 			.list({ location: location(worker.controlDirectory) })
-			.pipe(nativeRequest)
+			.pipe(nativeRequest('agents'))
 		if (!agents.some((agent) => agent.id === 'review' && agent.mode !== 'subagent')) {
-			return yield* failure('incompatible', 'The worker must provide a primary review agent')
+			return yield* failure('incompatible', 'The worker must provide a primary review agent', {
+				reason: 'mismatch',
+				stage: 'agents',
+			})
 		}
 		return yield* capsule(client, worker).info()
-	}, Effect.mapError(translateError))
+	}, atStage('ready'))
 
 	/** Idempotently creates the Capsule, workspace and session; retrying an identical request is safe. */
 	const prepareSession = Effect.fn('OpenCodeWorker.prepareSession')(function* (
@@ -102,7 +119,7 @@ const make = Effect.gen(function* () {
 			metadata: { pipeline: { taskId: identity.taskId, pr: request.pr } },
 		})
 		yield* requirePlaced(placed, identity)
-	}, Effect.mapError(translateError))
+	}, atStage('prepare_session'))
 
 	const requirePlacement = Effect.fn('OpenCodeWorker.requirePlacement')(function* (
 		worker: Worker,
@@ -110,7 +127,7 @@ const make = Effect.gen(function* () {
 	) {
 		const client = yield* connect(worker)
 		return yield* provePlacement(client, worker, identity)
-	}, Effect.mapError(translateError))
+	}, atStage('placement'))
 
 	const findAdmission = Effect.fn('OpenCodeWorker.findAdmission')(function* (
 		worker: Worker,
@@ -122,7 +139,7 @@ const make = Effect.gen(function* () {
 		yield* provePlacement(client, worker, identity)
 		const sessionID = Session.ID.make(identity.sessionId)
 		const reference: NativeReference = { sessionId: identity.sessionId, messageId }
-		const inbox = yield* client.session.inbox.list({ sessionID }).pipe(nativeRequest)
+		const inbox = yield* client.session.inbox.list({ sessionID }).pipe(nativeRequest('inbox'))
 		const pending = inbox.find((item) => item.id === messageId)
 		if (pending !== undefined) {
 			if (
@@ -133,6 +150,7 @@ const make = Effect.gen(function* () {
 				return yield* failure(
 					'ownership',
 					'Native input identity has a different immutable payload',
+					{ reason: 'mismatch', stage: 'inbox' },
 				)
 			}
 			return reference
@@ -147,6 +165,7 @@ const make = Effect.gen(function* () {
 				return yield* failure(
 					'ownership',
 					'Native message identity has a different immutable payload',
+					{ reason: 'mismatch', stage: 'delivered_message' },
 				)
 			}
 			return reference
@@ -163,10 +182,11 @@ const make = Effect.gen(function* () {
 			return yield* failure(
 				'ownership',
 				'Original native admission has a different immutable payload',
+				{ reason: 'mismatch', stage: 'history' },
 			)
 		}
 		return reference
-	}, Effect.mapError(translateError))
+	}, atStage('find_admission'))
 
 	/** Prove placement and persist Unconfirmed before calling. An unconfirmed response must be reconciled, never automatically reposted. */
 	const admit = Effect.fn('OpenCodeWorker.admit')(function* (
@@ -184,7 +204,7 @@ const make = Effect.gen(function* () {
 				text: prompt,
 				delivery: 'queue',
 			})
-			.pipe(nativeRequest)
+			.pipe(nativeRequest('admit'))
 		if (
 			accepted.id !== messageId ||
 			accepted.sessionID !== sessionID ||
@@ -193,10 +213,11 @@ const make = Effect.gen(function* () {
 			return yield* failure(
 				'ownership',
 				'Native admission response does not match the dispatched input',
+				{ reason: 'mismatch', stage: 'admit' },
 			)
 		}
 		return { sessionId: identity.sessionId, messageId } satisfies NativeReference
-	}, Effect.mapError(translateError))
+	}, atStage('admit'))
 
 	/** Acknowledges native delivery only. Unknown interruptions cannot be reconciled from idle or automatically retried. */
 	const interrupt = Effect.fn('OpenCodeWorker.interrupt')(function* (
@@ -206,9 +227,9 @@ const make = Effect.gen(function* () {
 		const client = yield* connect(worker)
 		yield* client.session
 			.interrupt({ sessionID: Session.ID.make(identity.sessionId), resume: false })
-			.pipe(nativeRequest)
+			.pipe(nativeRequest('interrupt'))
 		return { sessionId: identity.sessionId } satisfies NativeReference
-	}, Effect.mapError(translateError))
+	}, atStage('interrupt'))
 
 	const observe = Effect.fn('OpenCodeWorker.observe')(function* (
 		worker: Worker,
@@ -218,8 +239,10 @@ const make = Effect.gen(function* () {
 		const client = yield* connect(worker)
 		yield* provePlacement(client, worker, identity)
 		const sessionID = Session.ID.make(identity.sessionId)
-		const permissions = yield* client.permission.list({ sessionID }).pipe(nativeRequest)
-		const forms = yield* client.session.form.list({ sessionID }).pipe(nativeRequest)
+		const permissions = yield* client.permission
+			.list({ sessionID })
+			.pipe(nativeRequest('permissions'))
+		const forms = yield* client.session.form.list({ sessionID }).pipe(nativeRequest('forms'))
 		const pendingForms = forms.filter((form) => form.sessionID === sessionID)
 		if (permissions.length > 0 || pendingForms.length > 0)
 			return {
@@ -227,11 +250,11 @@ const make = Effect.gen(function* () {
 				permissionIds: permissions.map((request) => request.id),
 				formIds: pendingForms.map((form) => form.id),
 			}
-		const inbox = yield* client.session.inbox.list({ sessionID }).pipe(nativeRequest)
-		const active = yield* client.session.active().pipe(nativeRequest)
+		const inbox = yield* client.session.inbox.list({ sessionID }).pipe(nativeRequest('inbox'))
+		const active = yield* client.session.active().pipe(nativeRequest('active'))
 		const jobs = yield* client.experimental.job
 			.list({ sessionID, descendants: true })
-			.pipe(nativeRequest)
+			.pipe(nativeRequest('jobs'))
 		// A finished job stays listed until its completion notice is admitted, which wakes the session again.
 		const backgroundJobs = jobs.length
 		if (active[sessionID] !== undefined || backgroundJobs > 0)
@@ -242,7 +265,7 @@ const make = Effect.gen(function* () {
 		if (delivered?.id === messageId && delivered.type === 'user') return { _tag: 'Idle' }
 		if (yield* wasCancelled(client, sessionID, messageId)) return { _tag: 'InputCancelled' }
 		return { _tag: 'NotObserved' }
-	}, Effect.mapError(translateError))
+	}, atStage('observe'))
 
 	/** Reads the settled outcome of exactly this admitted input from durable history; live input requests stay with `observe`. */
 	const result = Effect.fn('OpenCodeWorker.result')(function* (
@@ -253,7 +276,7 @@ const make = Effect.gen(function* () {
 		const client = yield* connect(worker)
 		yield* provePlacement(client, worker, identity)
 		return yield* readResult(client, Session.ID.make(identity.sessionId), messageId)
-	}, Effect.mapError(translateError))
+	}, atStage('read_result'))
 
 	const watch = (worker: Worker) =>
 		Stream.unwrap(
@@ -284,7 +307,7 @@ const make = Effect.gen(function* () {
 					})
 					.pipe(Stream.map(() => undefined))
 			}),
-		).pipe(Stream.mapError(translateError))
+		).pipe(Stream.mapError(translateErrorAt('events')))
 
 	return {
 		ready,

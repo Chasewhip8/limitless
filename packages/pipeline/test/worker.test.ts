@@ -1,9 +1,10 @@
 import { Agent } from '@opencode/client/effect'
-import { Effect, Fiber, FileSystem, Layer, Schema } from 'effect'
-import { FetchHttpClient } from 'effect/http'
+import { Cause, Effect, Fiber, FileSystem, Layer, Schema } from 'effect'
+import { FetchHttpClient, HttpClientError, HttpClientRequest } from 'effect/http'
 import { TestClock } from 'effect/testing'
 import { expect, test } from 'vitest'
-import type { SessionIdentity, Worker } from '../worker/schema'
+import { translateError, translateErrorAt } from '../worker/client'
+import type { SessionIdentity, Worker, WorkerError } from '../worker/schema'
 import { OpenCodeWorker, openCodeWorkerLayer } from '../worker/service'
 import { pullRequestSource } from '../worker/source'
 
@@ -306,7 +307,135 @@ test('request deadlines include the entire response body', async () => {
 		new Response(new ReadableStream(), { headers: { 'content-type': 'application/json' } })
 	await expect(f.runTimed((service) => service.ready(worker), 15001)).rejects.toMatchObject({
 		code: 'unavailable',
+		reason: 'timeout',
+		stage: 'server_info',
 	})
+})
+
+const secret = 'secret-credential-token'
+/** Every rendering of the error a caller could log; none may echo upstream text. */
+const exposed = (error: WorkerError) =>
+	[error.message, String(error), JSON.stringify(error), JSON.stringify(Cause.fail(error))].join(
+		'\n',
+	)
+const failureOf = (promise: Promise<unknown>) =>
+	promise.then(
+		() => expect.unreachable('the native read succeeded'),
+		(error: WorkerError) => error,
+	)
+
+test('a native read that outlives its deadline is a retryable timeout at its named stage', async () => {
+	const f = fixture()
+	const placement = f.hold('/api/rpc/capsule/getSession')
+	expect(
+		await failureOf(
+			f.runTimed((service) => service.result(worker, identity, messageId), 15001, placement),
+		),
+	).toMatchObject({ code: 'unavailable', reason: 'timeout', stage: 'placement' })
+	const permissions = f.hold(`/api/session/${identity.sessionId}/permission`)
+	expect(
+		await failureOf(
+			f.runTimed((service) => service.observe(worker, identity, messageId), 15001, permissions),
+		),
+	).toMatchObject({ code: 'unavailable', reason: 'timeout', stage: 'permissions' })
+	expect(nativeWrites(f.calls)).toEqual([])
+})
+
+test('network failures stay retryable without exposing the request or its cause', async () => {
+	const f = fixture()
+	f.state.override = (url) => {
+		if (!url.pathname.endsWith('/log')) return undefined
+		throw new TypeError(`fetch failed: https://opencode:${secret}@worker.example/?token=${secret}`)
+	}
+	const error = await failureOf(f.run((service) => service.result(worker, identity, messageId)))
+	expect(error).toMatchObject({ code: 'unavailable', reason: 'transport', stage: 'history' })
+	expect(error.status).toBeUndefined()
+	expect(exposed(error)).not.toContain(secret)
+})
+
+test('HTTP statuses separate retryable worker pressure from permanent refusals', async () => {
+	const f = fixture()
+	const respond = (pathname: string, response: () => Response) => {
+		f.state.override = (url) => (url.pathname === pathname ? response() : undefined)
+	}
+	const placement = '/api/rpc/capsule/getSession'
+	const active = '/api/session/active'
+	for (const [pathname, response, expected] of [
+		[
+			placement,
+			() => Response.json({ _tag: 'UnauthorizedError', message: secret }, { status: 401 }),
+			{ code: 'incompatible', reason: 'http_status', status: 401, stage: 'placement' },
+		],
+		[
+			active,
+			() => new Response(secret, { status: 401 }),
+			{ code: 'incompatible', reason: 'http_status', status: 401, stage: 'active' },
+		],
+		[
+			active,
+			() => new Response(secret, { status: 403 }),
+			{ code: 'incompatible', reason: 'http_status', status: 403, stage: 'active' },
+		],
+		[
+			active,
+			() => new Response(secret, { status: 404 }),
+			{ code: 'protocol', reason: 'http_status', status: 404, stage: 'active' },
+		],
+		[
+			active,
+			() => Response.json({ data: secret }),
+			{ code: 'protocol', reason: 'decode', stage: 'active' },
+		],
+		[
+			active,
+			() => new Response(secret, { status: 503 }),
+			{ code: 'unavailable', reason: 'http_status', status: 503, stage: 'active' },
+		],
+		[
+			active,
+			() => new Response(secret, { status: 429 }),
+			{ code: 'unavailable', reason: 'http_status', status: 429, stage: 'active' },
+		],
+	] as const) {
+		respond(pathname, response)
+		const error = await failureOf(f.run((service) => service.observe(worker, identity)))
+		expect(error).toMatchObject(expected)
+		expect(exposed(error)).not.toContain(secret)
+	}
+	expect(nativeWrites(f.calls)).toEqual([])
+})
+
+test('translated failures keep only safe categories whatever the raw error carries', () => {
+	const request = HttpClientRequest.get(
+		`https://opencode:${secret}@worker.example/?token=${secret}`,
+	)
+	const deadline = new HttpClientError.HttpClientError({
+		reason: new HttpClientError.TransportError({
+			request,
+			cause: new Cause.TimeoutError(secret),
+			description: secret,
+		}),
+	})
+	for (const [raw, expected] of [
+		[deadline, { code: 'unavailable', reason: 'timeout' }],
+		[new Cause.TimeoutError(secret), { code: 'unavailable', reason: 'timeout' }],
+		[new Error(secret), { code: 'unavailable', reason: 'unknown' }],
+		[
+			{ type: 'rpc.internal', message: secret, data: secret },
+			{ code: 'unavailable', reason: 'rpc' },
+		],
+		[
+			{ _tag: 'ClientError', cause: { _tag: 'SchemaError', message: secret } },
+			{ code: 'protocol', reason: 'decode' },
+		],
+	] as const) {
+		const error = translateErrorAt('read_result')(raw)
+		expect(error).toMatchObject({ ...expected, stage: 'read_result' })
+		expect(exposed(error)).not.toContain(secret)
+	}
+	const named = translateErrorAt('observe')(translateErrorAt('jobs')(deadline))
+	expect(named).toMatchObject({ reason: 'timeout', stage: 'jobs' })
+	expect(translateError(named)).toBe(named)
 })
 
 test('a pull request maps to its fork head, pinned by both the pull and branch refs', async () => {

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { Clock, Context, Effect, Layer, Stream } from 'effect'
+import { Clock, Context, Effect, Layer, Ref, Schedule, Stream } from 'effect'
 import { PipelineConfig } from '../config'
 import { PullRequestUnavailable } from '../github/schema'
 import { GitHub } from '../github/service'
@@ -251,47 +251,87 @@ const make = Effect.gen(function* () {
 			),
 	)
 
-	const nativeState = Effect.fn('Tasks.nativeState')(
-		function* ({ task, command }: StoredOperation) {
-			const { worker, identity } = yield* placement(task)
-			if (command.messageId === undefined)
-				return {
-					_tag: 'Unavailable',
-					message: 'The native prompt reference is missing',
-				} satisfies OperationState
-			const result = yield* remote.result(worker, identity, command.messageId)
-			if (result._tag !== 'Pending') return result
-			const observation = yield* remote.observe(worker, identity, command.messageId)
-			switch (observation._tag) {
-				case 'NeedsInput':
-					return {
-						_tag: 'NeedsInput',
-						permissions: observation.permissionIds.length,
-						forms: observation.formIds.length,
-					} satisfies OperationState
-				case 'Running':
-					return { _tag: 'Running' } satisfies OperationState
-				case 'Unavailable':
-					return observation
-				default:
-					return result
-			}
-		},
-		Effect.catchTag('WorkerError', () =>
-			Effect.succeed({
+	const readNativeState = Effect.fn('Tasks.readNativeState')(function* ({
+		task,
+		command,
+	}: StoredOperation) {
+		const { worker, identity } = yield* placement(task)
+		if (command.messageId === undefined)
+			return {
 				_tag: 'Unavailable',
-				message: 'Native result retrieval is unavailable; retry waiting on this operation',
-			} satisfies OperationState),
-		),
-		Effect.timeoutOrElse({
-			duration: nativeEvaluationBudgetMs,
-			orElse: () =>
-				Effect.succeed({
-					_tag: 'Unavailable',
-					message:
-						'Native result evaluation exceeded its three-minute budget; retry waiting on this operation',
-				} satisfies OperationState),
-		}),
+				message: 'The native prompt reference is missing',
+			} satisfies OperationState
+		const result = yield* remote.result(worker, identity, command.messageId)
+		if (result._tag !== 'Pending') return result
+		const observation = yield* remote.observe(worker, identity, command.messageId)
+		switch (observation._tag) {
+			case 'NeedsInput':
+				return {
+					_tag: 'NeedsInput',
+					permissions: observation.permissionIds.length,
+					forms: observation.formIds.length,
+				} satisfies OperationState
+			case 'Running':
+				return { _tag: 'Running' } satisfies OperationState
+			case 'Unavailable':
+				return observation
+			default:
+				return result
+		}
+	})
+
+	const nativeState = Effect.fn('Tasks.nativeState')(
+		function* (stored: StoredOperation) {
+			const retryStarted = yield* Ref.make<number | undefined>(undefined)
+			return yield* readNativeState(stored).pipe(
+				Effect.tapErrorTag('WorkerError', (error) =>
+					Effect.logWarning('Pipeline native result read failed', {
+						operation: stored.command.id,
+						task: stored.task.id,
+						code: error.code,
+						reason: error.reason ?? 'unknown',
+						stage: error.stage ?? 'read_result',
+						status: error.status,
+						retryable: error.code === 'unavailable',
+					}),
+				),
+				Effect.retry({
+					schedule: Schedule.spaced('2 seconds'),
+					while: Effect.fn('Tasks.retryNativeRead')(function* (error) {
+						if (error._tag !== 'WorkerError' || error.code !== 'unavailable') return false
+						const now = yield* Clock.currentTimeMillis
+						const started = yield* Ref.modify(retryStarted, (first) => [first ?? now, first ?? now])
+						return now - started < 120_000
+					}),
+				}),
+				Effect.catchTag('WorkerError', (error) => {
+					const detail = `${error.stage ?? 'read_result'}: ${error.reason ?? error.code}${error.status === undefined ? '' : `, HTTP ${error.status}`}`
+					return Effect.succeed({
+						_tag: 'Unavailable',
+						message: `Native result retrieval failed (${detail}); retry waiting on this operation after checking the coordinator diagnostics`,
+					} satisfies OperationState)
+				}),
+			)
+		},
+		(effect, stored) =>
+			effect.pipe(
+				Effect.timeoutOrElse({
+					duration: nativeEvaluationBudgetMs,
+					orElse: () =>
+						Effect.gen(function* () {
+							yield* Effect.logWarning('Pipeline native result evaluation timed out', {
+								operation: stored.command.id,
+								task: stored.task.id,
+								budgetMs: nativeEvaluationBudgetMs,
+							})
+							return {
+								_tag: 'Unavailable',
+								message:
+									'Native result evaluation exceeded its three-minute budget; retry waiting on this operation',
+							} satisfies OperationState
+						}),
+				}),
+			),
 	)
 
 	const state = Effect.fn('Tasks.state')(function* (stored: StoredOperation) {

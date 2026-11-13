@@ -25,7 +25,7 @@ export const deliveredMessage = Effect.fn('OpenCodeWorker.deliveredMessage')(fun
 		.get({ sessionID, messageID: SessionMessage.ID.make(messageId) })
 		.pipe(
 			Effect.catchTag('MessageNotFoundError', () => Effect.void),
-			nativeRequest,
+			nativeRequest('delivered_message'),
 		)
 })
 
@@ -62,7 +62,7 @@ export const replayLog = Effect.fn('OpenCodeWorker.replayLog')(function* <A>(
 					return found === undefined
 				}),
 			),
-			nativeRequest,
+			nativeRequest('history'),
 			Effect.provideService(RequestDeadline, replayDeadline),
 		)
 	if (found !== undefined) return { found: Option.some(found), seq: undefined }
@@ -70,6 +70,7 @@ export const replayLog = Effect.fn('OpenCodeWorker.replayLog')(function* <A>(
 		return yield* failure(
 			'unavailable',
 			'The native session history replay ended before it was complete',
+			{ reason: 'incomplete', stage: 'history' },
 		)
 	return { found: Option.none<A>(), seq: synced.seq ?? after }
 })

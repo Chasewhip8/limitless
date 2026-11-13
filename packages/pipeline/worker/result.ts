@@ -319,7 +319,7 @@ const respond = Effect.fn('OpenCodeWorker.respond')(function* (
 		.pipe(
 			Effect.map(Option.some),
 			Effect.catchTag('MessageNotFoundError', () => Effect.succeedNone),
-			nativeRequest,
+			nativeRequest('final_response'),
 		)
 	if (Option.isNone(message)) return unavailable('The final native response no longer exists')
 	const assistant = message.value
@@ -382,11 +382,11 @@ const quiescent = Effect.fn('OpenCodeWorker.quiescent')(function* (
 	client: OpenCodeClient,
 	sessionID: Session.ID,
 ) {
-	const inbox = yield* client.session.inbox.list({ sessionID }).pipe(nativeRequest)
-	const active = yield* client.session.active().pipe(nativeRequest)
+	const inbox = yield* client.session.inbox.list({ sessionID }).pipe(nativeRequest('inbox'))
+	const active = yield* client.session.active().pipe(nativeRequest('active'))
 	const jobs = yield* client.experimental.job
 		.list({ sessionID, descendants: true })
-		.pipe(nativeRequest)
+		.pipe(nativeRequest('jobs'))
 	return inbox.length === 0 && active[sessionID] === undefined && jobs.length === 0
 })
 
