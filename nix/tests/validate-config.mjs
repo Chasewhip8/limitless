@@ -21,7 +21,7 @@ for (const file of await readdir(agentsDirectory)) {
 }
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
 assert.equal(agents.limitless?.model, 'anthropic/claude-opus-5-5#high')
-assert.equal(agents.review?.model, 'openai/gpt-6-astra#xhigh')
+assert.equal(agents.review?.model, 'openai/gpt-6.1-sol#max')
 assert.equal(agents.oracle?.model, 'openai/gpt-6-astra#xhigh')
 assert.equal(agents.research?.model, 'openai/gpt-6.1-sol#high')
 assert.equal(agents.worker?.model, 'anthropic/claude-opus-5-5#high')
