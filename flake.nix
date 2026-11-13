@@ -102,8 +102,9 @@
               node-gyp
               nixfmt
               python3
-              pkg-config
-              statix
+               pkg-config
+               ripgrep
+               statix
             ];
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
