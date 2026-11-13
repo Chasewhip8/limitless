@@ -72,7 +72,7 @@ export function pipelineTools(client: Effect.Success<ReturnType<typeof makePipel
 		}),
 		pipeline_continue: defineLimitlessTool({
 			name: 'pipeline_continue',
-			description: `Ask the retained reviewer to continue after the settled operation \`after\`, such as rechecking the PR's new head or retrying after a repaired failure. The fixed message rechecks the current PR, findings, and CI. Wait for active work to settle first; unconfirmed delivery or unavailable history does not authorize continuation. Returns the successor operation; repeating the same anchor recovers that successor. ${lostResponse}`,
+			description: `Ask the retained reviewer to continue after the settled operation \`after\`, such as rechecking the PR's new head or retrying after a repaired failure. The fixed message rechecks the current PR, findings, and verification. Wait for active work to settle first; unconfirmed delivery or unavailable history does not authorize continuation. Returns the successor operation; repeating the same anchor recovers that successor. ${lostResponse}`,
 			input: ContinueInput,
 			output: OperationReceipt,
 			execute: (input, context) => execute(context, client.continue(input), { mutation: true }),

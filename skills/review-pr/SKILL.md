@@ -5,7 +5,7 @@ description: Run a pull request through the retained Review agent and relay its 
 
 # Review PR
 
-The reviewer assesses the design, improves the test suite, runs verification and CI, and publishes a verdict on the PR. It can commit and push test changes; a failed phase ends the review with findings. You own authorized production fixes, then return the PR to the reviewer for rechecking.
+The reviewer keeps the PR in draft while assessing the design, improving the test suite, and running checks in its review environment. It can commit and push test changes. It publishes a verdict and marks an approved PR ready; a failed phase ends the review with findings and leaves the PR draft. You own authorized production fixes, then return the PR to the reviewer for rechecking.
 
 ## Procedure
 

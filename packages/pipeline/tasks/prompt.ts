@@ -11,7 +11,7 @@ export function reviewPrompt(taskId: string, pr: PullRequest): string {
 export function continuePrompt(pr: string): string {
 	return [
 		`Continue the review of ${pr} using your review agent instructions in the same retained checkout and session.`,
-		'Check the current PR head and CI, recheck findings and any pushed fixes, and finish or update your review report.',
+		'Recheck the current PR head, findings, and any pushed fixes. Run the checks needed to finish or update your review report.',
 		'Preserve local and unpublished work. If an earlier attempt was blocked or failed, continue from the retained evidence after checking whether that blocker is resolved.',
 		'The original review authorization still applies; this continuation does not authorize production fixes or merging.',
 	].join('\n\n')
