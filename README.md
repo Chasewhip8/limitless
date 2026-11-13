@@ -833,6 +833,15 @@ package ships with a matching server version; an independently updated client
 needs compatible protocols and feature support. Home Manager restarts T3 on
 changed units when service switching is enabled.
 
+The Linux T3 desktop runs in an AppImage sandbox, so it hands links and **Open in**
+targets such as Zed's remote `zed://ssh/…` links to a private `xdg-open`. This
+starts the pinned `xdg-open` as a transient systemd user service, outside the
+sandbox. The handler therefore uses the user manager's environment, and opened
+editors keep running after T3 closes. The desktop therefore requires a running
+systemd user manager; without one, links fail rather than open inside the sandbox.
+Your desktop session must also export its display and `XDG_DATA_DIRS` to the user
+manager, as most sessions do.
+
 ## T3 Code
 
 Use the packaged `opencode-t3` launcher to connect T3 to the existing managed
