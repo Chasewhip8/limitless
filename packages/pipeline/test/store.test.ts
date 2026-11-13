@@ -1,15 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
-import { SqliteClient, SqliteMigrator } from '@effect/sql-sqlite-node'
-import { Effect, Layer } from 'effect'
-import { SqlClient } from 'effect/sql'
+import { Effect } from 'effect'
 import { afterEach, beforeEach, expect, test } from 'vitest'
 import { type CommandEvent, StoredCommand } from '../tasks/command'
 import { type Assignment, type PullRequest, Task } from '../tasks/schema'
 import { TaskStore, taskStoreLayer } from '../tasks/store'
 import type { Worker } from '../worker/schema'
 import { pullRequestSource } from '../worker/source'
+import { databaseState, raw, releasedDatabase } from './released'
 
 let directory = ''
 beforeEach(async () => {
@@ -153,52 +152,6 @@ const deliver = Effect.fn('test.deliver')(function* (
 const run = <A, E>(effect: Effect.Effect<A, E, TaskStore>, database = ':memory:') =>
 	Effect.runPromise(effect.pipe(Effect.provide(taskStoreLayer(database))))
 
-const raw = <A extends object>(filename: string, query: string) =>
-	Effect.runPromise(
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient
-			return yield* sql.unsafe<A>(query)
-		}).pipe(Effect.provide(SqliteClient.layer({ filename }))),
-	)
-
-/** The released 0001 schema, frozen as written by deployments before migration 0002. */
-const releasedSchema = [
-	`CREATE TABLE dispatch_tasks (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, submissions TEXT NOT NULL CHECK(submissions IN ('Open','Closed')), worker_id TEXT, record TEXT NOT NULL)`,
-	`CREATE TABLE dispatch_commands (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES dispatch_tasks(id), after_command_id TEXT, position INTEGER NOT NULL CHECK(position > 0), version INTEGER NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('review','resume','interrupt')), delivery TEXT NOT NULL CHECK(delivery IN ('Pending','Unconfirmed','Acknowledged','CancelledBeforeSend','Rejected')), request_hash TEXT NOT NULL, record TEXT NOT NULL, UNIQUE(task_id,id), UNIQUE(task_id,position), FOREIGN KEY(task_id,after_command_id) REFERENCES dispatch_commands(task_id,id))`,
-	`CREATE UNIQUE INDEX dispatch_initial_command ON dispatch_commands(task_id) WHERE kind = 'review'`,
-	`CREATE TABLE dispatch_keys (key TEXT PRIMARY KEY, request_hash TEXT NOT NULL, task_id TEXT NOT NULL, command_id TEXT NOT NULL, FOREIGN KEY(task_id,command_id) REFERENCES dispatch_commands(task_id,id))`,
-	`CREATE TABLE dispatch_leases (worker_id TEXT NOT NULL, slot INTEGER NOT NULL CHECK(slot >= 0), task_id TEXT NOT NULL UNIQUE REFERENCES dispatch_tasks(id), PRIMARY KEY(worker_id,slot))`,
-]
-
-const releasedDatabase = (filename: string, rows: ReadonlyArray<string>) =>
-	Effect.runPromise(
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient
-			for (const row of rows) yield* sql.unsafe(row)
-		}).pipe(
-			Effect.provide(
-				SqliteMigrator.layer({
-					loader: SqliteMigrator.fromRecord({
-						'0001_dispatch': Effect.gen(function* () {
-							const sql = yield* SqlClient.SqlClient
-							for (const statement of releasedSchema) yield* sql.unsafe(statement)
-						}),
-					}),
-				}).pipe(Layer.provideMerge(SqliteClient.layer({ filename }))),
-			),
-		),
-	)
-
-const snapshot = async (filename: string) => ({
-	schema: await raw(filename, 'SELECT type, name, sql FROM sqlite_master ORDER BY name'),
-	migrations: await raw(filename, 'SELECT migration_id, name FROM effect_sql_migrations'),
-	rows: await Promise.all(
-		['dispatch_tasks', 'dispatch_commands', 'dispatch_keys', 'dispatch_leases'].map((table) =>
-			raw(filename, `SELECT * FROM ${table} ORDER BY rowid`),
-		),
-	),
-})
-
 test('a populated released database refuses startup with a diagnostic and stays unchanged', async () => {
 	const database = path.join(directory, 'pipeline.sqlite')
 	const task = '11111111-1111-4111-8111-000000000001'
@@ -209,7 +162,7 @@ test('a populated released database refuses startup with a diagnostic and stays 
 		`INSERT INTO dispatch_keys VALUES ('caller-key', 'hash-b', '${task}', '22222222-2222-4222-8222-000000000002')`,
 		`INSERT INTO dispatch_leases VALUES ('pc', 0, '${task}')`,
 	])
-	const before = await snapshot(database)
+	const before = await databaseState(database)
 
 	const error = await Effect.runPromise(
 		Effect.provide(Effect.service(TaskStore), taskStoreLayer(database)).pipe(Effect.flip),
@@ -221,9 +174,9 @@ test('a populated released database refuses startup with a diagnostic and stays 
 		cause: { _tag: 'LegacyStateRefused', tasks: 1, commands: 2, keys: 1, leases: 1 },
 	})
 	expect(String((error as { cause: { message: string } }).cause.message)).toContain(
-		'This database is unchanged; preserve it and use the previous coordinator',
+		'This database is unchanged; preserve it and keep the previous coordinator',
 	)
-	expect(await snapshot(database)).toEqual(before)
+	expect(await databaseState(database)).toEqual(before)
 })
 
 test('an empty released database migrates, and mapped work persists across restarts', async () => {

@@ -15,7 +15,7 @@ import {
 	operationSettled,
 	type ReviewInput,
 } from '../workflow'
-import { type Payload, StoredCommand } from './command'
+import { type Payload, pipelineMessageId, StoredCommand } from './command'
 import { pinnedWorker, sessionIdentity } from './placement'
 import { continuePrompt, reviewPrompt } from './prompt'
 import { OperationNotFound, Task, TaskConflict } from './schema'
@@ -73,7 +73,7 @@ const make = Effect.gen(function* () {
 			version: 0,
 			kind,
 			...(afterCommandId === undefined ? {} : { afterCommandId }),
-			...(kind === 'interrupt' ? {} : { messageId: `msg_pipeline${id.replaceAll('-', '')}` }),
+			...(kind === 'interrupt' ? {} : { messageId: pipelineMessageId(id) }),
 			delivery: { _tag: 'Pending', step: kind === 'review' ? 'session' : 'send', payload },
 		})
 	})

@@ -47,6 +47,9 @@ export const ReviewKey = Schema.String.check(Schema.isPattern(/^[0-9]+:[1-9][0-9
 		'Stable GitHub pull request identity, `repositoryId:number`, that survives repository renames.',
 })
 
+export const pullRequestReviewKey = (repositoryId: number, number: number) =>
+	`${repositoryId}:${number}`
+
 export const Task = Schema.Struct({
 	id: TaskId,
 	createdAt: Schema.Number,

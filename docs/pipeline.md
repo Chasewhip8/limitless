@@ -257,13 +257,73 @@ input cancelled before it became a visible message; absent evidence never proves
 that an uncertain request failed.
 
 The dispatcher uses `dispatch_tasks`, `dispatch_reviews`, `dispatch_commands`,
-and `dispatch_leases`. Migration 0002 accepts a fresh or empty legacy database
-and **refuses populated legacy state without changing it**. Existing installations
-need an explicit reviewed state migration before deployment; none is shipped
-here. Keep the previous coordinator on the live database until then. Do not clear
-reservations, discard caller receipts, select among duplicate PR tasks, or reset
-delivery uncertainty to make the new version start. Upgrade caller and coordinator
-protocols together only after that state migration is resolved.
+and `dispatch_leases`. On ordinary startup, migration 0002 accepts a fresh or
+empty legacy database and **refuses populated legacy state without changing
+it**. Do not clear reservations, discard caller receipts, select among duplicate
+PR tasks, or reset delivery uncertainty to make the new version start. Upgrade
+caller and coordinator protocols together after the state migration below.
+
+### Legacy state migration
+
+`pipeline legacy migrate` runs migration 0002 with a reviewed plan instead of
+the refusal. It converts only open, Capsule-assigned tasks whose commands are a
+review followed by resumes, each anchored on its predecessor and acknowledged as
+its Pipeline message in the assigned session, with no held leases. Anything
+else, including pending or unconfirmed deliveries, interrupts, closed or
+unassigned tasks, placement on an unconfigured worker, or any change since the
+plan was reviewed, fails and rolls back the migration transaction, leaving the
+database unchanged.
+
+Conversion preserves task, command and native identifiers, positions, anchors,
+versions, timestamps and placement. Records keep their legacy request and
+request-hash fields; each task gains the review key from the plan, which maps it
+as current, so its latest resume is the next continuation anchor. The canonical
+legacy snapshot, including caller idempotency keys, is archived in
+`dispatch_legacy_snapshots`. It holds no prompts, because pending payloads are
+refused.
+
+1. Stop every coordinator using the database: `systemctl --user stop pipeline`.
+   A newly deployed coordinator that starts first only refuses and retries; stop
+   it the same way.
+2. Inspect the stopped database with the new package. This opens it read-only and
+   prints the snapshot digest with task, command and delivery identifiers:
+
+   ```sh
+   pipeline legacy inspect --config ~/.config/pipeline/config.json
+   ```
+
+3. Write a plan mapping every listed task to its PR base repository's numeric
+   GitHub ID and review key, `repositoryId:number`:
+
+   ```json
+   {
+     "format": "pipeline-legacy-migration/1",
+     "snapshot": "sha256:<inspected digest>",
+     "reviews": [
+       {
+         "taskId": "<task id>",
+         "repositoryId": 1158510034,
+         "reviewKey": "1158510034:2"
+       }
+     ]
+   }
+   ```
+
+4. Migrate with a new backup path. The command takes an online SQLite backup,
+   converts in one transaction, reopens the database as startup does, and prints
+   each review's current operation and the outstanding work list, which should be
+   empty:
+
+   ```sh
+   pipeline legacy migrate --config ~/.config/pipeline/config.json \
+     --plan ./pipeline-plan.json \
+     --backup ~/.local/state/pipeline/pipeline-legacy-backup.sqlite
+   ```
+
+5. Start the coordinator: `systemctl --user start pipeline`.
+
+Rerunning `migrate` after conversion reopens and reports without another backup.
+A refused run reports why; its backup file remains and a retry needs a new path.
 
 Core agent shell and file tools use Capsule. Automatic formatting is disabled for
 explicit workspace Locations because the upstream formatter and its discovery

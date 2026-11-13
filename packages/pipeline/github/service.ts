@@ -1,7 +1,13 @@
 import { Context, Effect, Layer, Schema } from 'effect'
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { PipelineConfig, readSecret } from '../config'
-import { Commit, PullRequest, Repository, type ReviewRequest } from '../tasks/schema'
+import {
+	Commit,
+	PullRequest,
+	pullRequestReviewKey,
+	Repository,
+	type ReviewRequest,
+} from '../tasks/schema'
 import { PullRequestUnavailable } from './schema'
 
 const GitHubRepository = Schema.Struct({
@@ -55,7 +61,7 @@ const make = Effect.gen(function* () {
 				),
 			)
 			const identity = {
-				key: `${pr.base.repo.id}:${pr.number}`,
+				key: pullRequestReviewKey(pr.base.repo.id, pr.number),
 				url: `https://github.com/${pr.base.repo.full_name}/pull/${pr.number}`,
 			}
 			if (pr.state !== 'open' || pr.head.repo === null) return { ...identity, checkout: undefined }

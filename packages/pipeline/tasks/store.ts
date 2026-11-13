@@ -3,6 +3,7 @@ import { Context, Effect, Layer, PubSub, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 import type { Worker } from '../worker/schema'
 import { type CommandEvent, StoredCommand } from './command'
+import type { LegacyConversion } from './legacy'
 import { transition } from './machine'
 import {
 	type Assignment,
@@ -36,7 +37,7 @@ export class LegacyStateRefused extends Schema.TaggedError<LegacyStateRefused>()
 	},
 	{
 		description:
-			'Migration 0002 found legacy dispatch state. It never deletes tasks, chooses among duplicate PR tasks, or settles possibly delivered commands; the database is left unchanged.',
+			'Migration 0002 found legacy dispatch state during ordinary startup. It never deletes tasks, chooses among duplicate PR tasks, or settles possibly delivered commands; the database is left unchanged. Only `pipeline legacy migrate` with a reviewed plan converts legacy state.',
 	},
 ) {}
 
@@ -56,12 +57,39 @@ const refuseLegacyState = Effect.fn('TaskStore.refuseLegacyState')(function* () 
 	if (tasks + commands + keys + leases === 0) return
 	return yield* LegacyStateRefused.make({
 		...counts,
-		message: `Pipeline database holds legacy dispatch state (${tasks} tasks, ${commands} commands, ${keys} idempotency keys, ${leases} leases). Migration 0002 requires an explicit reviewed mapping of retained reviews and pending deliveries before deployment. This database is unchanged; preserve it and use the previous coordinator until that migration is available.`,
+		message: `Pipeline database holds legacy dispatch state (${tasks} tasks, ${commands} commands, ${keys} idempotency keys, ${leases} leases). Migration 0002 converts it only through 'pipeline legacy migrate' with a reviewed plan. This database is unchanged; preserve it and keep the previous coordinator until a reviewed migration succeeds.`,
 	})
 })
 
-const migrations = SqliteMigrator.layer({
-	loader: SqliteMigrator.fromRecord({
+const legacyConversion = Effect.fn('TaskStore.legacyConversion')(function* (
+	legacy: LegacyMigration | undefined,
+) {
+	if (legacy !== undefined) return yield* legacy
+	yield* refuseLegacyState()
+	return undefined
+})
+
+const insertLegacy = Effect.fn('TaskStore.insertLegacy')(function* ({
+	tasks,
+	commands,
+	snapshot,
+}: LegacyConversion) {
+	const sql = yield* SqlClient.SqlClient
+	for (const { task, assignment, record } of tasks) {
+		yield* sql`INSERT INTO dispatch_tasks (id,created_at,review_key,submissions,worker_id,record) VALUES (${task.id},${task.createdAt},${task.reviewKey},${task.submissions._tag},${assignment.workerId},${record})`
+		yield* sql`INSERT INTO dispatch_reviews (review_key,task_id) VALUES (${task.reviewKey},${task.id})`
+	}
+	for (const { command, position, record } of commands)
+		yield* sql`INSERT INTO dispatch_commands (id,task_id,after_command_id,position,version,kind,delivery,record) VALUES (${command.id},${command.taskId},${command.afterCommandId ?? null},${position},${command.version},${command.kind},${command.delivery._tag},${record})`
+	yield* sql`CREATE TABLE dispatch_legacy_snapshots (digest TEXT PRIMARY KEY, snapshot TEXT NOT NULL)`
+	yield* sql`INSERT INTO dispatch_legacy_snapshots (digest,snapshot) VALUES (${snapshot.digest},${snapshot.canonical})`
+})
+
+/** Converts released legacy rows inside migration 0002; it must read them before 0002 replaces their tables. */
+export type LegacyMigration = Effect.Effect<LegacyConversion, unknown, SqlClient.SqlClient>
+
+const migrations = (legacy?: LegacyMigration) =>
+	SqliteMigrator.fromRecord({
 		'0001_dispatch': Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient
 			yield* sql`CREATE TABLE dispatch_tasks (
@@ -102,7 +130,7 @@ const migrations = SqliteMigrator.layer({
 		}),
 		'0002_operations': Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient
-			yield* refuseLegacyState()
+			const conversion = yield* legacyConversion(legacy)
 			yield* sql`DROP TABLE dispatch_keys`
 			yield* sql`DROP TABLE dispatch_leases`
 			yield* sql`DROP TABLE dispatch_commands`
@@ -138,9 +166,17 @@ const migrations = SqliteMigrator.layer({
 				task_id TEXT NOT NULL UNIQUE REFERENCES dispatch_tasks(id),
 				PRIMARY KEY(worker_id,slot)
 			)`
+			if (conversion !== undefined) yield* insertLegacy(conversion)
 		}),
-	}),
-})
+	})
+
+/**
+ * Applies pending migrations, converting populated released state with `legacy` instead of refusing it.
+ * Each run commits or rolls back as one migrator transaction.
+ */
+export const migrateTaskStore = (legacy: LegacyMigration) =>
+	SqliteMigrator.run({ loader: migrations(legacy) })
+
 const decodeTask = Schema.decodeUnknownEffect(Schema.fromJsonString(Task))
 const decodeCommand = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredCommand))
 
@@ -604,5 +640,9 @@ export class TaskStore extends Context.Service<TaskStore, Effect.Success<typeof 
 ) {}
 export const taskStoreLayer = (filename: string) =>
 	Layer.effect(TaskStore, make).pipe(
-		Layer.provide(migrations.pipe(Layer.provideMerge(SqliteClient.layer({ filename })))),
+		Layer.provide(
+			SqliteMigrator.layer({ loader: migrations() }).pipe(
+				Layer.provideMerge(SqliteClient.layer({ filename })),
+			),
+		),
 	)
