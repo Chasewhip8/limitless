@@ -54,12 +54,13 @@ const make = Effect.gen(function* () {
 					PullRequestUnavailable.make({ message: 'GitHub returned an unsupported pull request' }),
 				),
 			)
-			if (pr.state !== 'open' || pr.head.repo === null)
-				return yield* PullRequestUnavailable.make({
-					message: 'Pull request must be open with an available source repository',
-				})
-			return PullRequest.make({
+			const identity = {
+				key: `${pr.base.repo.id}:${pr.number}`,
 				url: `https://github.com/${pr.base.repo.full_name}/pull/${pr.number}`,
+			}
+			if (pr.state !== 'open' || pr.head.repo === null) return { ...identity, checkout: undefined }
+			const checkout = PullRequest.make({
+				url: identity.url,
 				repository: pr.base.repo.full_name,
 				sourceRepository: pr.head.repo.full_name,
 				repositoryId: pr.base.repo.id,
@@ -69,6 +70,7 @@ const make = Effect.gen(function* () {
 				headSha: pr.head.sha,
 				baseSha: pr.base.sha,
 			})
+			return { ...identity, checkout }
 		},
 		Effect.timeout('20 seconds'),
 		Effect.catchTag('TimeoutError', () =>

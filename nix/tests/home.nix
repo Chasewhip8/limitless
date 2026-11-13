@@ -541,14 +541,10 @@ in
       }
       ''
         mkdir -p "$out"
-        for skill in commit-and-pr repository-setup behavior-model; do
+        for skill in commit-and-pr review-pr repository-setup; do
           test -f ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}/$skill/SKILL.md
           test -f ${installedSkills withExtraSkills}/$skill/SKILL.md
         done
-        test -f ${
-          self.packages.${pkgs.stdenv.hostPlatform.system}.skills
-        }/behavior-model/references/format.md
-        test -f ${installedSkills withExtraSkills}/behavior-model/references/format.md
         test ${installedSkills defaults} = ${self.packages.${pkgs.stdenv.hostPlatform.system}.skills}
         test "$(cat ${installedSkills withExtraSkills}/extra-skill/SKILL.md)" = extra
         grep -q "duplicate skill 'commit-and-pr'" ${pkgs.testers.testBuildFailure (installedSkills withDuplicateSkills)}/testBuildFailure.log

@@ -1,43 +1,63 @@
 import type { Tool } from '@opencode/schema/tool'
 import { Tool as ToolSchema } from '@opencode/schema/tool'
-import { Effect, Schema } from 'effect'
-import { Task, TaskId } from '../../../pipeline/tasks/schema'
+import { Effect } from 'effect'
+import {
+	ContinueInput,
+	InterruptReceipt,
+	OperationInput,
+	OperationReceipt,
+	ReviewInput,
+} from '../../../pipeline/workflow'
 import { defineLimitlessTool } from '../../plugin/tool-boundary'
-import { type makePipelineClient, WaitInput, WaitResult } from './client'
-import { Admission, InterruptInput, PipelineError, ResumeInput, ReviewInput } from './receipts'
+import { type makePipelineClient, PipelineError, WaitResult } from './client'
 
 export const pipelineMutationTools = [
 	'pipeline_review',
-	'pipeline_resume',
+	'pipeline_continue',
+	'pipeline_restart',
 	'pipeline_interrupt',
-	'pipeline_close',
 ] as const
+
+const lostResponse =
+	'If the response is lost or the call is interrupted, repeat this exact call with identical arguments. Do not substitute a continuation or restart for recovery.'
+
+const waitText = (result: WaitResult) => {
+	if ('state' in result && result.state._tag === 'Completed') return result.state.message.text
+	return JSON.stringify(result)
+}
 
 export function pipelineTools(client: Effect.Success<ReturnType<typeof makePipelineClient>>) {
 	const execute = <A>(
 		context: Tool.Context,
 		operation: Effect.Effect<A, PipelineError>,
-		mutation: boolean,
+		options: { readonly mutation: boolean; readonly text?: (output: A) => string },
 	) =>
 		Effect.gen(function* () {
-			if (mutation && context.agent !== 'limitless') {
+			if (options.mutation && context.agent !== 'limitless') {
 				return yield* PipelineError.make({
 					code: 'forbidden',
 					message:
-						'Only the primary limitless agent may mutate Pipeline tasks. Review and research agents must not submit recursive work.',
+						'Only the primary limitless agent may mutate Pipeline reviews. Review and research agents must not submit recursive work.',
 				})
 			}
 			const output = yield* operation
-			return { output, content: [{ type: 'text' as const, text: JSON.stringify(output) }] }
+			const text = options.text?.(output) ?? JSON.stringify(output)
+			return { output, content: [{ type: 'text' as const, text }] }
 		}).pipe(
 			Effect.mapError((error) =>
-				ToolSchema.Error.make({ message: error.message, metadata: { code: error.code } }),
+				ToolSchema.Error.make({
+					message: error.message,
+					metadata: {
+						code: error.code,
+						...(error.conflict === undefined ? {} : { conflict: error.conflict }),
+					},
+				}),
 			),
 			Effect.catchDefect(() =>
 				Effect.fail(
 					ToolSchema.Error.make({
 						message:
-							'Pipeline tool failed unexpectedly. Recover the existing durable receipt; do not submit replacement work.',
+							'Pipeline tool failed unexpectedly. Its request may have been accepted; repeat this exact call rather than submitting other work.',
 					}),
 				),
 			),
@@ -45,44 +65,43 @@ export function pipelineTools(client: Effect.Success<ReturnType<typeof makePipel
 	return {
 		pipeline_review: defineLimitlessTool({
 			name: 'pipeline_review',
-			description:
-				'Dispatch a PR review into a retained Capsule workspace and native OpenCode session, or recover this session’s current receipt for that PR, including previously accepted ones. Inputs are immutable; a changed request conflicts. Only passing the previous accepted task as afterTaskId creates a fresh task and advances the sticky receipt; repeating that predecessor recovers the same task. AdmissionUnknown requires repeating the exact original request; unconfirmed native delivery is never replayed. Native OpenCode owns execution, history, and outputs.',
+			description: `Start the PR's current retained review, or return it when one already exists, including from another conversation. This does not continue or restart an existing review. Returns the current operation, which another caller may have advanced; pass it to pipeline_wait. ${lostResponse}`,
 			input: ReviewInput,
-			output: Admission,
-			execute: (input, context) => execute(context, client.review(context.sessionID, input), true),
+			output: OperationReceipt,
+			execute: (input, context) => execute(context, client.review(input), { mutation: true }),
 		}),
-		pipeline_resume: defineLimitlessTool({
-			name: 'pipeline_resume',
-			description:
-				'Explicitly send an immutable followup message to the task’s existing native OpenCode session. afterCommandId is a caller intent anchor belonging to this task, not a result or execution status. Repeating taskId/afterCommandId recovers the same command; a changed message conflicts. Unconfirmed native delivery blocks followups. Recover AdmissionUnknown with the exact original request.',
-			input: ResumeInput,
-			output: Admission,
-			execute: (input, context) => execute(context, client.resume(context.sessionID, input), true),
+		pipeline_continue: defineLimitlessTool({
+			name: 'pipeline_continue',
+			description: `Ask the retained reviewer to continue after the settled operation \`after\`, such as rechecking the PR's new head or retrying after a repaired failure. The fixed message rechecks the current PR, findings, and CI. Wait for active work to settle first; unconfirmed delivery or unavailable history does not authorize continuation. Returns the successor operation; repeating the same anchor recovers that successor. ${lostResponse}`,
+			input: ContinueInput,
+			output: OperationReceipt,
+			execute: (input, context) => execute(context, client.continue(input), { mutation: true }),
+		}),
+		pipeline_restart: defineLimitlessTool({
+			name: 'pipeline_restart',
+			description: `Start a fresh, independent review of the PR of settled operation \`after\`, without the retained reviewer's context. Use only when explicitly asked. Preserves the previous checkout and session. Returns the new operation; repeating the same anchor recovers that successor. ${lostResponse}`,
+			input: ContinueInput,
+			output: OperationReceipt,
+			execute: (input, context) => execute(context, client.restart(input), { mutation: true }),
 		}),
 		pipeline_wait: defineLimitlessTool({
 			name: 'pipeline_wait',
 			description:
-				'Observe one dispatch command and its native OpenCode session through the event stream, without model polling. Observed means the command was rejected or cancelled before send, or was positively acknowledged and the native session is now Idle, NeedsInput, or InputCancelled; it is not a verdict, a result, or proof that all OS writers stopped. Unconfirmed delivery stays Pending: it never means the command did not start or has stopped, and it blocks automatic followups. Omit timeoutMs for an unbounded wait; a positive budget may return Pending; 0 reads once. Unavailable means the view could not be read. Detaching never interrupts or resubmits execution. Session and directory references are in view.task.placement; messages, history, and outputs belong to native OpenCode.',
-			input: WaitInput,
+				"Wait for an operation's native result or input requirement, without model polling. A completed operation returns the reviewer's final message verbatim. Idle alone is not a verdict. Answer permission and input requests through the native session, then wait again. Healthy waits have no overall time limit. If waiting detaches, repeat the same call. Unavailable means retrieval or attribution failed, not that work did not start; inspect the reason and retry the same operation. Waiting never submits or interrupts work.",
+			input: OperationInput,
 			output: WaitResult,
-			execute: (input, context) => execute(context, client.wait(input, context.progress), false),
+			execute: (input, context) =>
+				execute(context, client.wait(input, context.progress), {
+					mutation: false,
+					text: waitText,
+				}),
 		}),
 		pipeline_interrupt: defineLimitlessTool({
 			name: 'pipeline_interrupt',
-			description:
-				'Explicitly forward a native interrupt with a durable idempotent dispatch receipt. afterCommandId is a caller intent anchor belonging to this task, not a native execution run. The returned receipt and any native acknowledgement are not proof execution stopped, and native Idle is not proof all OS writers exited. Repeating the same taskId/afterCommandId recovers the same command. Never interrupt merely to detach a waiter.',
-			input: InterruptInput,
-			output: Admission,
-			execute: (input, context) =>
-				execute(context, client.interrupt(context.sessionID, input), true),
-		}),
-		pipeline_close: defineLimitlessTool({
-			name: 'pipeline_close',
-			description:
-				'Explicitly close a task logically: disable future messages and cancel unsent ones. The Capsule, checkout, and native session are retained. This does not stop or purge the Capsule, interrupt in-flight execution, prove it stopped, archive anything, or delete the checkout.',
-			input: Schema.Struct({ taskId: TaskId }),
-			output: Task,
-			execute: (input, context) => execute(context, client.close(input.taskId), true),
+			description: `Request a native interrupt of the reviewer's work after operation \`after\` when the user asks. The status reports the interrupt's delivery; even Acknowledged does not prove work stopped. This is not an assistant operation to wait on. Never interrupt merely to stop waiting. Repeating the same anchor recovers the same interrupt. ${lostResponse}`,
+			input: ContinueInput,
+			output: InterruptReceipt,
+			execute: (input, context) => execute(context, client.interrupt(input), { mutation: true }),
 		}),
 	}
 }

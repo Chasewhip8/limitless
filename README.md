@@ -41,8 +41,8 @@ avoid conflicts with T3 Code's browser tools. Use them for browser access.
   the managed OpenCode service, plus opt-in [desktop apps](#desktop-clients) for
   OpenCode and T3 Code.
 - **Skills:** `repository-setup` for parallel worktrees, `commit-and-pr` for
-  convention-following commits and PR delivery through green CI, and
-  `behavior-model` for evidence-backed behavioral models.
+  convention-following commits and PR delivery through green CI, and `review-pr`
+  for retained Pipeline reviews.
 - **Artifacts:** project-scoped folders under `.limitless/artifacts/`.
 - **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
 - **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
@@ -401,11 +401,6 @@ when present and is otherwise empty. `skills.extraDirectories` adds directories 
 `<name>/SKILL.md` skills beside the package; a skill name defined twice fails the
 build. OpenCode's built-in skills remain available.
 
-[Behavior Model](skills/behavior-model/SKILL.md) combines system probing and
-code-based state mapping in one skill. Its modeling procedure consolidates
-findings and compares revisions using a [common format and review checks](skills/behavior-model/references/format.md).
-Use the procedures the investigation needs; they contribute to the same model.
-
 ## Agents and models
 
 `limitless` is the primary user-facing agent and defaults to
@@ -416,8 +411,8 @@ OpenCode, or supply custom agent definitions through `programs.limitless.agents.
 Agent Markdown model fields take precedence over settings in the same configuration
 directory, so `opencode.settings.agents.limitless.model` does not override the packaged default.
 
-`review` is a second primary agent and uses `openai/gpt-6-astra#xhigh`, as does
-Oracle. Worker uses `anthropic/claude-opus-5-5#high`; Research uses
+`review` is a second primary agent and uses `openai/gpt-6.1-sol#max`.
+Oracle uses `openai/gpt-6-astra#xhigh`; Worker uses `anthropic/claude-opus-5-5#high`; Research uses
 `openai/gpt-6.1-sol#high`. Subagents keep the processing tier of their configured model.
 
 Limitless owns delivery, integration, and final validation, and can delegate
@@ -470,25 +465,29 @@ by default. Configure `providers.openai.settings.compaction.type` through
 ### Pipeline
 
 Pipeline is a thin Effect dispatcher for the fleet's existing OpenCode servers.
-Athena keeps routing, a durable command outbox, idempotency receipts and an
+Athena keeps one current retained review per PR, routing, a durable command outbox and an
 advisory scheduling budget. OpenCode owns input, execution, history and outputs;
 Pipeline has no run/result ledger or verdict parser.
 
 Pipeline calls Capsule's typed RPC in the shared native OpenCode server to prepare
 a retained checkout and workspace-bound session. Source and project commands run
-inside Capsule; there is no shell helper or ordinary-directory fallback. Resume
-appends to the same session without resetting its files. Limitless tools dispatch,
-observe, resume, request native interruption, and logically close submissions.
+inside Capsule; there is no shell helper or ordinary-directory fallback.
+`pipeline_review({pr})` starts or recovers current work across conversations;
+`pipeline_wait({operation})` returns its native final message or input/failure
+condition. `pipeline_continue({after})` sends a fixed recheck prompt to the same
+session after settled work. Restart is an explicit independent review. Interrupt
+is the only stop control; cleanup is future Pipeline service-owned work.
 Waiters use event streams; idle and interrupt acknowledgments do not promise OS
-process drainage. Unconfirmed writes are never automatically replayed, and close
-does not stop the Capsule or delete the checkout or native history. Long
+process drainage. Unconfirmed writes are never automatically replayed. Long
 preparation runs independently per task, so it cannot block another task's
 interrupt. Retained session identity remains inspectable after Capsule stop or
 purge; only message admission requires execution readiness.
 
 Build `.#pipeline` on Linux and enable `programs.limitless.pipeline` through the
 Home Manager module. See [Pipeline setup and operation](docs/pipeline.md) for
-authentication, fleet configuration, the API, and retention behavior.
+authentication, fleet configuration, the API, and retention behavior. Populated
+legacy databases are refused without mutation; deployment needs an explicit
+reviewed state migration before switching coordinator and caller protocols.
 
 The separately approved native event journal supports positive admission
 recovery. Its storage cost and operational limitations are documented under

@@ -1,135 +1,125 @@
 import { Effect, Option, type Redacted, Ref, Schedule, Schema, Stream } from 'effect'
 import { Ndjson } from 'effect/encoding'
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http'
-import { interruptIntent, resumeIntent, reviewIntent } from '../../../pipeline/tasks/intent'
 import {
-	CommandId,
-	CommandView,
-	DispatchReceipt,
-	InterruptRequest,
-	ResumeRequest,
-	ReviewRequest,
-	Task,
-	TaskId,
-} from '../../../pipeline/tasks/schema'
-import {
-	AcceptedAdmission,
-	type makeReceipts,
-	PipelineError,
-	type PreparedReceipt,
-	type Receipt,
-	UnknownAdmission,
-} from './receipts'
+	type ContinueInput,
+	canonicalPullRequest,
+	InterruptReceipt,
+	nativeEvaluationBudgetMs,
+	OperationId,
+	type OperationInput,
+	OperationReceipt,
+	OperationView,
+	operationSettled,
+	type ReviewInput,
+} from '../../../pipeline/workflow'
 
-export const CommandInput = Schema.Struct({ taskId: TaskId, commandId: CommandId })
-export type CommandInput = typeof CommandInput.Type
-export const WaitInput = Schema.Struct({
-	...CommandInput.fields,
-	timeoutMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-})
-export type WaitInput = typeof WaitInput.Type
-const Observed = Schema.TaggedStruct('Observed', { view: CommandView })
-const Pending = Schema.TaggedStruct('Pending', { view: CommandView })
-const Unavailable = Schema.TaggedStruct('Unavailable', {
-	...CommandInput.fields,
+export class PipelineError extends Schema.TaggedError<PipelineError>()('PipelineError', {
+	code: Schema.Literals([
+		'forbidden',
+		'conflict',
+		'not_found',
+		'admission_unknown',
+		'unavailable',
+		'protocol',
+		'refused',
+	]),
 	message: Schema.String,
-	view: Schema.optionalKey(CommandView),
+	conflict: Schema.optionalKey(Schema.String),
+}) {}
+
+export const WaitUnavailable = Schema.TaggedStruct('Unavailable', {
+	operation: OperationId,
+	message: Schema.String,
+	view: Schema.optionalKey(OperationView),
 })
-export const WaitResult = Schema.Union([Observed, Pending, Unavailable])
+export const WaitResult = Schema.Union([OperationView, WaitUnavailable])
 export type WaitResult = typeof WaitResult.Type
 
-const requestDeadlineMs = 10000
+const responseDeadlineMs = nativeEvaluationBudgetMs + 15_000
+const eventHandshakeDeadlineMs = 10_000
 const unavailable = () =>
 	PipelineError.make({
 		code: 'unavailable',
-		message:
-			'Pipeline request outcome is unavailable. A lost response does not prove dispatch failed; recover its receipt or inspect the native session.',
+		message: 'Pipeline could not be reached or did not respond in time.',
 	})
 const protocolError = () =>
 	PipelineError.make({
 		code: 'protocol',
-		message:
-			'Pipeline returned an invalid or misrouted response. Preserve the existing dispatch receipt; do not infer that the native command failed.',
+		message: 'Pipeline returned an invalid or misrouted response.',
 	})
 
-const identifiesTarget = (view: DispatchReceipt, target: Partial<CommandInput>) => {
-	const { task, command } = view
-	if (command.taskId !== task.id) return false
-	if (target.taskId !== undefined && task.id !== target.taskId) return false
-	if (target.commandId !== undefined && command.id !== target.commandId) return false
-	if (command.delivery._tag !== 'Acknowledged') return true
-	const { nativeRef } = command.delivery
-	if (command.messageId !== undefined && nativeRef.messageId !== command.messageId) return false
-	return (
-		task.placement._tag === 'Assigned' &&
-		task.placement.assignment.sessionId === nativeRef.sessionId
-	)
+const admissionUnknown = (error: PipelineError) => {
+	if (error.code !== 'unavailable' && error.code !== 'protocol') return error
+	return PipelineError.make({
+		code: 'admission_unknown',
+		message: `${error.message} Pipeline may already have accepted this request, and its work may have started. Repeat this exact tool call with identical arguments to recover the accepted or current work; never change the arguments or substitute other work.`,
+	})
 }
-const validateTarget = Effect.fn('Pipeline.validateTarget')(function* <A extends DispatchReceipt>(
-	view: A,
-	target: Partial<CommandInput>,
+
+const conflictGuidance: Record<string, string> = {
+	stale_operation:
+		'The anchor operation is no longer current: later work superseded it. Act on the current operation instead.',
+	operation_pending:
+		'The anchor operation has not settled. Call pipeline_wait on it, then repeat this exact call.',
+	native_unsettled:
+		'Native settlement or idleness has not been established; the session may be busy, or its history may be missing or interrupted. Inspect it with pipeline_wait on the anchor operation or in the native session before repeating this exact call.',
+	task_closed: 'The review is closed and accepts no further messages.',
+	delivery_unconfirmed:
+		'Native delivery of an earlier message is unconfirmed and may have started. Followups stay blocked until it resolves; call pipeline_wait on the anchor operation and never resubmit it.',
+	session_unavailable: 'The review’s native session is unavailable.',
+	version_conflict: 'Pipeline state changed concurrently. Repeat this exact call.',
+	observation_timeout:
+		'Pipeline could not establish the anchor’s native state or the request’s preconditions within its evaluation budget. Inspect the anchor with pipeline_wait or in the native session, then repeat this exact call.',
+}
+const ConflictBody = Schema.Struct({ code: Schema.String })
+const NotFoundBody = Schema.TaggedStruct('OperationNotFound', {})
+
+const conflictError = Effect.fn('Pipeline.conflictError')(function* (
+	response: HttpClientResponse.HttpClientResponse,
 ) {
-	if (!identifiesTarget(view, target)) return yield* protocolError()
-	return view
+	const body = yield* HttpClientResponse.schemaBodyJson(ConflictBody)(response).pipe(Effect.option)
+	const code = Option.match(body, { onNone: () => 'unknown', onSome: ({ code }) => code })
+	const guidance = conflictGuidance[code] ?? 'Pipeline state conflicts with this request.'
+	return yield* PipelineError.make({
+		code: 'conflict',
+		conflict: code,
+		message: `${guidance} Pipeline refused this attempt (${code}), and this attempt submitted nothing new. A refusal does not prove an earlier attempt was not accepted.`,
+	})
 })
 
-const decodeBody = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, body: string) =>
-	Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(schema))(body))
-
-const preparedIntent = (receipt: PreparedReceipt) => {
-	if (receipt.operation === 'review') {
-		const request = decodeBody(ReviewRequest, receipt.body)
-		return request === undefined ? undefined : reviewIntent(request)
-	}
-	if (receipt.targetTaskId === undefined) return undefined
-	if (receipt.operation === 'resume') {
-		const request = decodeBody(ResumeRequest, receipt.body)
-		return request === undefined ? undefined : resumeIntent(receipt.targetTaskId, request)
-	}
-	const request = decodeBody(InterruptRequest, receipt.body)
-	return request === undefined ? undefined : interruptIntent(receipt.targetTaskId, request)
-}
-
-const matchesIntent = (receipt: PreparedReceipt, { task, command }: DispatchReceipt) => {
-	if (command.kind !== receipt.operation) return false
-	if (command.requestHash !== preparedIntent(receipt)) return false
-	if (receipt.operation !== 'review') {
-		return (
-			task.id === receipt.targetTaskId &&
-			command.afterCommandId === receipt.afterCommandId &&
-			command.id !== receipt.afterCommandId
+const refusedError = Effect.fn('Pipeline.refusedError')(function* (
+	response: HttpClientResponse.HttpClientResponse,
+) {
+	if (response.status === 404) {
+		const missing = yield* HttpClientResponse.schemaBodyJson(NotFoundBody)(response).pipe(
+			Effect.option,
 		)
+		if (Option.isSome(missing))
+			return yield* PipelineError.make({
+				code: 'not_found',
+				message:
+					'Pipeline has no such operation. Pass back an operation reference exactly as a Pipeline tool returned it.',
+			})
 	}
-	return reviewIntent(task.request) === command.requestHash && task.id !== receipt.afterTaskId
-}
+	return yield* PipelineError.make({
+		code: 'refused',
+		message: `Pipeline refused this request (HTTP ${response.status}). A refusal does not prove an earlier attempt was not accepted; repeat the exact call after repairing credentials, routing, or input.`,
+	})
+})
 
-const observedStates = new Set<CommandView['observation']['_tag']>([
-	'Idle',
-	'NeedsInput',
-	'InputCancelled',
-])
-
-export function isObserved(view: CommandView) {
-	switch (view.command.delivery._tag) {
-		case 'Rejected':
-		case 'CancelledBeforeSend':
-			return true
-		case 'Acknowledged':
-			return observedStates.has(view.observation._tag)
-		default:
-			return false
-	}
-}
-
-const reconnectSchedule = Schedule.min([Schedule.exponential(250), Schedule.spaced(5000)]).pipe(
+const reconnectSchedule = Schedule.max([
+	Schedule.min([Schedule.exponential(250), Schedule.spaced(5000)]),
+	Schedule.during('2 minutes'),
+]).pipe(
 	Schedule.setInputType<PipelineError>(),
 	Schedule.while(({ input }) => input.code === 'unavailable'),
 )
 
-export const makePipelineClient = Effect.fn('Pipeline.makeClient')(function* (
-	config: { readonly url: string; readonly token: Redacted.Redacted<string> },
-	receipts: Effect.Success<ReturnType<typeof makeReceipts>>,
-) {
+export const makePipelineClient = Effect.fn('Pipeline.makeClient')(function* (config: {
+	readonly url: string
+	readonly token: Redacted.Redacted<string>
+}) {
 	const http = (yield* HttpClient.HttpClient).pipe(
 		HttpClient.withScope,
 		HttpClient.mapRequest(HttpClientRequest.bearerToken(config.token)),
@@ -137,220 +127,152 @@ export const makePipelineClient = Effect.fn('Pipeline.makeClient')(function* (
 			Effect.provideService(FetchHttpClient.RequestInit, { redirect: 'error' }),
 		),
 	)
-	const request = Effect.fn('Pipeline.request')(function* (
-		path: string,
-		options: {
-			readonly method?: 'GET' | 'POST'
-			readonly body?: string
-			readonly key?: string
-		} = {},
-	) {
-		const url = new URL(path, config.url)
-		if (url.origin !== config.url) return yield* protocolError()
-		const request = HttpClientRequest.make(options.method ?? 'GET')(url, {
-			accept: 'application/json, application/x-ndjson',
-			headers: options.key === undefined ? {} : { 'idempotency-key': options.key },
-		})
-		const body =
-			options.body === undefined
-				? request
-				: HttpClientRequest.bodyText(request, options.body, 'application/json')
-		const response = yield* http.execute(body).pipe(
-			Effect.mapError(unavailable),
-			Effect.timeoutOrElse({
-				duration: requestDeadlineMs,
-				orElse: () => Effect.fail(unavailable()),
-			}),
-		)
-		if (response.status >= 200 && response.status < 300) return response
-		if (response.status === 409)
-			return yield* PipelineError.make({
-				code: 'receipt_conflict',
-				message:
-					'Pipeline rejected an immutable dispatch intent or a followup blocked by its current dispatch state; no replacement was submitted.',
+	const request = Effect.fn('Pipeline.request')(
+		function* (
+			path: string,
+			_deadlineMs: number,
+			options: { readonly method?: 'GET' | 'POST'; readonly body?: unknown },
+		) {
+			const url = new URL(path, config.url)
+			if (url.origin !== config.url) return yield* protocolError()
+			const request = HttpClientRequest.make(options.method ?? 'GET')(url, {
+				accept: 'application/json, application/x-ndjson',
 			})
-		if (
-			response.status >= 400 &&
-			response.status < 500 &&
-			response.status !== 408 &&
-			response.status !== 429
-		)
-			return yield* PipelineError.make({
-				code: 'refused',
-				message: `Pipeline refused this request (HTTP ${response.status}). A refused retry does not prove an earlier attempt was not accepted; any Prepared receipt is kept, so repeat the exact request after repairing credentials, routing, or state.`,
-			})
-		return yield* unavailable()
-	})
+			const body =
+				options.body === undefined
+					? request
+					: HttpClientRequest.bodyText(request, JSON.stringify(options.body), 'application/json')
+			const response = yield* http.execute(body).pipe(Effect.mapError(unavailable))
+			if (response.status >= 200 && response.status < 300) return response
+			if (response.status === 409) return yield* conflictError(response)
+			if (
+				response.status >= 400 &&
+				response.status < 500 &&
+				response.status !== 408 &&
+				response.status !== 429
+			)
+				return yield* refusedError(response)
+			return yield* unavailable()
+		},
+		(effect, _path, deadlineMs, _options) =>
+			effect.pipe(
+				Effect.timeoutOrElse({ duration: deadlineMs, orElse: () => Effect.fail(unavailable()) }),
+			),
+	)
 	const json = Effect.fn('Pipeline.json')(
 		function* <S extends Schema.ConstraintDecoder<unknown>>(
 			path: string,
 			schema: S,
-			options: {
-				readonly method?: 'GET' | 'POST'
-				readonly body?: string
-				readonly key?: string
-			} = {},
+			options: { readonly method?: 'GET' | 'POST'; readonly body?: unknown } = {},
 		) {
-			const response = yield* request(path, options)
+			const response = yield* request(path, responseDeadlineMs, options)
 			return yield* HttpClientResponse.schemaBodyJson(schema)(response).pipe(
 				Effect.mapError(protocolError),
 			)
 		},
 		Effect.scoped,
-		Effect.timeoutOrElse({ duration: requestDeadlineMs, orElse: () => Effect.fail(unavailable()) }),
+		Effect.timeoutOrElse({
+			duration: responseDeadlineMs,
+			orElse: () => Effect.fail(unavailable()),
+		}),
 	)
 
-	const submit = Effect.fn('Pipeline.submit')(function* (receipt: PreparedReceipt) {
-		const dispatch = yield* json(receipt.path, DispatchReceipt, {
+	const operationPath = (operation: string) => `/operations/${encodeURIComponent(operation)}`
+	const review = (input: ReviewInput) =>
+		json('/reviews', OperationReceipt, {
 			method: 'POST',
-			body: receipt.body,
-			key: receipt.key,
+			body: { pr: canonicalPullRequest(input.pr) },
+		}).pipe(Effect.mapError(admissionUnknown))
+	const successor = Effect.fn('Pipeline.successor')(function* (
+		action: 'continue' | 'restart',
+		{ after }: ContinueInput,
+	) {
+		const receipt = yield* json(`${operationPath(after)}/${action}`, OperationReceipt, {
+			method: 'POST',
 		})
-		if (!identifiesTarget(dispatch, {}) || !matchesIntent(receipt, dispatch))
-			return yield* protocolError()
-		return dispatch
-	})
-	const admitPrepared = Effect.fn('Pipeline.admitPrepared')(function* (receipt: PreparedReceipt) {
-		const dispatch = yield* submit(receipt).pipe(
-			Effect.catchIf(
-				(error) => error.code === 'unavailable' || error.code === 'protocol',
-				() => Effect.void,
-			),
-		)
-		if (dispatch === undefined)
-			return UnknownAdmission.make({
-				receipt,
-				message:
-					'Athena may have accepted this dispatch intent. Repeat the exact original tool request to recover this receipt, never a changed request. Recovery does not replay an unconfirmed native write.',
-			})
-		const accepted = yield* receipts.accept(
-			receipt,
-			dispatch.task.id,
-			dispatch.command.id,
-			dispatch.task.request.pr,
-		)
-		return AcceptedAdmission.make({
-			receipt: accepted,
-			taskId: accepted.taskId,
-			commandId: accepted.commandId,
+		if (receipt.operation === after) return yield* protocolError()
+		return receipt
+	}, Effect.mapError(admissionUnknown))
+	const interrupt = Effect.fn('Pipeline.interrupt')(function* ({ after }: ContinueInput) {
+		const receipt = yield* json(`${operationPath(after)}/interrupt`, InterruptReceipt, {
+			method: 'POST',
 		})
-	})
-	const admit = (receipt: Receipt) => {
-		if (receipt._tag === 'Accepted')
-			return Effect.succeed(
-				AcceptedAdmission.make({ receipt, taskId: receipt.taskId, commandId: receipt.commandId }),
-			)
-		return admitPrepared(receipt)
-	}
-	const review = Effect.fn('Pipeline.review')(function* (
-		sessionId: string,
-		input: Parameters<typeof receipts.review>[1],
-	) {
-		const receipt = yield* receipts.review(sessionId, input)
-		return yield* admit(receipt)
-	})
-	const resume = Effect.fn('Pipeline.resume')(function* (
-		sessionId: string,
-		input: Parameters<typeof receipts.resume>[1],
-	) {
-		const receipt = yield* receipts.resume(sessionId, input)
-		return yield* admit(receipt)
-	})
-	const interrupt = Effect.fn('Pipeline.interrupt')(function* (
-		sessionId: string,
-		input: Parameters<typeof receipts.interrupt>[1],
-	) {
-		const receipt = yield* receipts.interrupt(sessionId, input)
-		return yield* admit(receipt)
-	})
-	const close = Effect.fn('Pipeline.close')(function* (taskId: string) {
-		const task = yield* json(`/tasks/${encodeURIComponent(taskId)}/close`, Task, { method: 'POST' })
-		if (task.id !== taskId) return yield* protocolError()
-		return task
-	})
+		if (receipt.operation !== after) return yield* protocolError()
+		return receipt
+	}, Effect.mapError(admissionUnknown))
 
-	const commandPath = (input: CommandInput) =>
-		`/tasks/${encodeURIComponent(input.taskId)}/commands/${encodeURIComponent(input.commandId)}`
-	const read = Effect.fn('Pipeline.read')(function* (input: CommandInput) {
-		const view = yield* json(commandPath(input), CommandView)
-		return yield* validateTarget(view, input)
+	const identified = Effect.fn('Pipeline.identified')(function* (
+		view: OperationView,
+		operation: string,
+	) {
+		if (view.operation !== operation) return yield* protocolError()
+		return view
 	})
-	const events = (input: CommandInput) =>
-		HttpClientResponse.stream(request(`${commandPath(input)}/events`)).pipe(
+	const read = Effect.fn('Pipeline.read')(function* (operation: string) {
+		const view = yield* json(operationPath(operation), OperationView)
+		return yield* identified(view, operation)
+	})
+	const events = (operation: string) =>
+		HttpClientResponse.stream(
+			request(`${operationPath(operation)}/events`, eventHandshakeDeadlineMs, {}),
+		).pipe(
 			Stream.mapError((error) => (error._tag === 'PipelineError' ? error : unavailable())),
-			Stream.pipeThroughChannel(Ndjson.decodeSchema(CommandView)({ ignoreEmptyLines: true })),
+			Stream.pipeThroughChannel(Ndjson.decodeSchema(OperationView)({ ignoreEmptyLines: true })),
 			Stream.mapError((error) => {
 				if (error._tag === 'PipelineError') return error
 				if (Ndjson.isNdjsonError(error) && error.unterminated) return unavailable()
 				return protocolError()
 			}),
-			Stream.mapEffect((view) => validateTarget(view, input)),
+			Stream.mapEffect((view) => identified(view, operation)),
 		)
-	const connection = (input: CommandInput) =>
-		Stream.fromEffect(read(input)).pipe(
-			Stream.flatMap((view) => {
-				if (isObserved(view)) return Stream.succeed(view)
-				return Stream.succeed(view).pipe(
-					Stream.concat(events(input)),
-					Stream.concat(Stream.fail(unavailable())),
-				)
-			}),
-			Stream.scoped,
-		)
+	const connection = (operation: string) =>
+		events(operation).pipe(Stream.concat(Stream.fail(unavailable())), Stream.scoped)
 	const wait = Effect.fn('Pipeline.wait')(function* (
-		input: WaitInput,
+		{ operation }: OperationInput,
 		progress: (update: Record<string, string>) => Effect.Effect<void> = () => Effect.void,
-	): Effect.fn.Return<WaitResult> {
-		const latest = yield* Ref.make(Option.none<CommandView>())
+	) {
+		const latest = yield* Ref.make(Option.none<OperationView>())
 		const reported = yield* Ref.make<string | undefined>(undefined)
-		const observe = Effect.fn('Pipeline.wait.observe')(function* (view: CommandView) {
+		const observe = Effect.fn('Pipeline.wait.observe')(function* (view: OperationView) {
 			yield* Ref.set(latest, Option.some(view))
-			const status = `${view.command.delivery._tag}/${view.observation._tag}`
-			const signature = JSON.stringify([view.command.delivery, view.observation])
-			const previous = yield* Ref.getAndSet(reported, signature)
-			if (signature !== previous)
-				yield* progress({ taskId: input.taskId, commandId: input.commandId, status })
+			const state = view.state._tag
+			const previous = yield* Ref.getAndSet(reported, state)
+			if (state !== previous) yield* progress({ operation, state })
 		})
-		const unavailableResult = Effect.fn('Pipeline.wait.unavailable')(function* (message: string) {
+		const unavailableResult = Effect.fn('Pipeline.wait.unavailable')(function* (
+			error: PipelineError,
+		) {
 			const view = yield* Ref.get(latest)
-			return Unavailable.make({
-				taskId: input.taskId,
-				commandId: input.commandId,
-				message,
+			return WaitUnavailable.make({
+				operation,
+				message: `${error.message} This does not show whether the operation started, is running, or settled. Waiting never submits or interrupts work; call pipeline_wait again with the same operation.`,
 				...Option.match(view, { onNone: () => ({}), onSome: (view) => ({ view }) }),
 			})
 		})
 
-		if (input.timeoutMs === 0) {
-			return yield* Effect.gen(function* () {
-				const view = yield* read(input)
-				yield* observe(view)
-				if (isObserved(view)) return Observed.make({ view })
-				return Pending.make({ view })
-			}).pipe(Effect.catch((error) => unavailableResult(error.message)))
-		}
-
-		const follow = connection(input).pipe(
+		return yield* connection(operation).pipe(
 			Stream.retry(reconnectSchedule),
 			Stream.tap(observe),
-			Stream.filter(isObserved),
+			Stream.filter(operationSettled),
 			Stream.runHead,
 			Effect.flatMap(
 				Option.match({
 					onNone: () => Effect.fail(protocolError()),
-					onSome: (view) => Effect.succeed(Observed.make({ view })),
+					onSome: (view): Effect.Effect<WaitResult> => Effect.succeed(view),
 				}),
 			),
-			Effect.catch((error) => unavailableResult(error.message)),
-		)
-		if (input.timeoutMs === undefined) return yield* follow
-		const result = yield* follow.pipe(Effect.timeoutOption(input.timeoutMs))
-		if (Option.isSome(result)) return result.value
-		const view = yield* Ref.get(latest)
-		if (Option.isSome(view)) return Pending.make({ view: view.value })
-		return yield* unavailableResult(
-			'Pipeline could not be read before the wait budget expired. Waiting did not submit or interrupt native execution.',
+			Effect.catchIf(
+				(error) => error.code === 'unavailable' || error.code === 'protocol',
+				unavailableResult,
+			),
 		)
 	})
-	return { review, resume, interrupt, wait, read, close }
+	return {
+		review,
+		continue: (input: ContinueInput) => successor('continue', input),
+		restart: (input: ContinueInput) => successor('restart', input),
+		interrupt,
+		read,
+		wait,
+	}
 })

@@ -72,7 +72,6 @@ const make = Effect.gen(function* () {
 		command: PendingCommand,
 	) {
 		for (const worker of config.workers) {
-			if (task.request.system !== undefined && task.request.system !== worker.system) continue
 			if (!(yield* store.hasCapacity(worker))) continue
 			const host = yield* remote.ready(worker).pipe(Effect.option)
 			if (Option.isNone(host)) continue

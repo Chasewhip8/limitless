@@ -1,7 +1,7 @@
 import { Effect, Result } from 'effect'
 import { expect, test } from 'vitest'
 import { type CommandEvent, StoredCommand } from '../tasks/command'
-import { receipt, transition } from '../tasks/machine'
+import { transition } from '../tasks/machine'
 import { pullRequest, source } from './fixtures'
 
 const messageId = 'msg_pipeline22222222222242228222000000000001'
@@ -12,7 +12,6 @@ const pending = StoredCommand.make({
 	version: 0,
 	kind: 'review',
 	messageId,
-	requestHash: 'hash',
 	delivery: {
 		_tag: 'Pending',
 		step: 'session',
@@ -58,12 +57,6 @@ test('acknowledgment must name the exact message and discards the retained paylo
 	expect(done.delivery).toEqual({ _tag: 'Acknowledged', nativeRef: acknowledged.nativeRef })
 	expect(JSON.stringify(done)).not.toContain('Review once.')
 	expect(done.version).toBe(3)
-})
-
-test('caller receipts never expose the retained exact payload', () => {
-	expect(JSON.stringify(receipt(pending))).not.toContain('Review once.')
-	expect(JSON.stringify(receipt(unconfirmed))).not.toContain('Review once.')
-	expect(receipt(unconfirmed).delivery).toEqual({ _tag: 'Unconfirmed' })
 })
 
 test('closing cannot cancel a queued interrupt', () => {

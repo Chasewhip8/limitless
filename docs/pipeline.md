@@ -19,14 +19,14 @@ Limitless caller tools
 
 | Owner | Durable information |
 | --- | --- |
-| Athena | Task routing, command delivery/idempotency, advisory scheduling reservations |
+| Athena | Current review per PR, task routing, command delivery/deduplication, advisory scheduling reservations |
 | OpenCode | Native workspace binding, session placement, input messages, execution, history, requests for input, errors and outputs |
 | Capsule | Source intent, checkout provenance, runtime lifecycle and execution leases |
 
 Athena has no run ledger, review-report schema, verdict parser, transcript copy,
 or execution-event journal. It retains an exact outgoing payload only while
 delivery is Pending or Unconfirmed. Positive acknowledgment replaces that payload
-with native references; request hashes and command IDs remain for idempotency.
+with native references. Command IDs and action anchors remain for deduplication.
 
 `Idle` is a current OpenCode observation, **not** a permanent task outcome or a
 proof that every OS process has stopped. An acknowledged interrupt means the
@@ -41,10 +41,9 @@ no automatic recovery that guesses a lost write failed. An unconfirmed interrupt
 has no native command receipt to look up and can remain unresolved indefinitely;
 manual investigation is required, and this version has no force-resolution API.
 
-Checkouts and sessions are retained. Logical close disables future messages and
-cancels messages not yet sent; it does not interrupt in-flight work or archive,
-delete, or revoke a native session. Guaranteed process drainage, automatic
-cleanup, and worker-submitted result APIs are outside this version's scope.
+Checkouts and sessions are retained. Interrupt is the only caller stop control.
+Cleanup belongs to future Pipeline service work. Guaranteed process drainage,
+automatic cleanup, and worker-submitted result APIs are outside this version's scope.
 
 The [dispatch model](behavior/pipeline/model.md) records the explicit delivery
 states and the boundary between dispatch acknowledgment and native observation.
@@ -101,7 +100,7 @@ workspace ID, session ID and checkout directory before preparation starts. The
 host rejects a changed storage fingerprint. Keep the worker's storage roots
 stable; a new root is not recovery of the old workspace.
 
-Review and resume admission require a ready Capsule with a bound workspace.
+Review and continuation admission require a ready Capsule with a bound workspace.
 Interruption, history and exact admission reconciliation require matching retained
 identity, not execution readiness. They remain available after stop or purge,
 including when the native workspace has been explicitly destroyed. A missing
@@ -109,7 +108,7 @@ Capsule manifest or conflicting ownership is still refused.
 
 Capsule owns source and runtime manifests directly. There are no legacy helper
 protocols, manifest adoption paths or upgrade conversions. Unknown records are
-refused rather than migrated. Logical task close never invokes source archival,
+refused rather than migrated. Review operations never invoke source archival,
 release or Capsule purge.
 
 ### Athena
@@ -152,7 +151,10 @@ The standalone `homeModules.pipeline` module can run without hosted Limitless.
 Native events and local outbox changes wake reconciliation. Each task has scoped
 in-flight reconciliation, so a long Nix preparation does not block another task's
 interrupt or dispatch. Preparation has a 15-minute request deadline; ordinary
-native reads and admission requests have 15-second deadlines. These are transport
+native reads and admission requests have 15-second deadlines. Finite native event
+replay has a two-minute deadline. One native-result evaluation or continuation/
+restart preflight has a three-minute total budget, ending before outbox mutation.
+Caller JSON requests allow three minutes and fifteen seconds. These are transport
 budgets, not agent execution timeouts. Queue expiry applies only before a command
 may have been sent.
 
@@ -187,41 +189,57 @@ bearer token.
 
 | Operation | Endpoint |
 | --- | --- |
-| Dispatch review | `POST /tasks` with `Idempotency-Key` |
-| Task index and live native view | `GET /tasks/:id` |
-| Append a message | `POST /tasks/:id/resume` with `Idempotency-Key` |
-| Request native interruption | `POST /tasks/:id/interrupt` with `Idempotency-Key` |
-| Command receipt and native view | `GET /tasks/:id/commands/:commandId` |
-| Stream that view | `GET /tasks/:id/commands/:commandId/events` |
-| Logically close submissions | `POST /tasks/:id/close` |
+| Start or recover current review | `POST /reviews` with `{pr}` |
+| Read operation | `GET /operations/:operation` |
+| Continue retained review | `POST /operations/:operation/continue` |
+| Start independent review | `POST /operations/:operation/restart` |
+| Request native interruption | `POST /operations/:operation/interrupt` |
+| Stream operation | `GET /operations/:operation/events` |
 
-Initial submission remains the PR-review entrypoint:
-`{kind:"review",pr,system?}`. Resume takes `{afterCommandId,message}` and interrupt
-takes `{afterCommandId}`. The anchor identifies caller intent and must belong to
-the task; it is not a run, result, or completion prerequisite. OpenCode retains
-the actual message. Resume never recreates missing session history or resets the
-checkout. The review agent owns all review stages and its response format.
+The caller flow is `pipeline_review({pr})`, then `pipeline_wait({operation})`.
+The returned operation is opaque. GitHub's base repository ID plus PR number
+identifies one current retained review across conversations, repository renames,
+and PR head changes. Recovery of an existing review does not require an open PR
+or a surviving source fork; identifying it still requires accessible GitHub
+metadata. A closed review remains current until explicitly restarted.
 
-The tools are `pipeline_review`, `pipeline_resume`, `pipeline_wait`,
-`pipeline_interrupt`, and `pipeline_close`. Dispatch returns task/command IDs;
-acceptance by Athena is distinct from acknowledgment by OpenCode.
+`pipeline_continue({after})` sends a fixed prompt to recheck the current head,
+findings, and CI in the retained session. It requires the latest operation,
+positively settled native work, an idle session, usable placement, open
+submissions, and no pending or unconfirmed control/message delivery. Native
+permission and form requests must be answered in OpenCode, not by continuation.
 
-Caller receipts preserve the exact request and key before a POST. Accepted
-receipts retain hashes and references, not message bodies. A lost response,
-including a later refused retry, never causes an automatic fresh key. The same
-caller session/PR recovers its existing review; use `afterTaskId` explicitly for
-a fresh task or `afterCommandId` for another message/control request.
+`pipeline_restart({after})` explicitly creates an independent review after settled
+work, atomically closes predecessor submissions, and advances the PR mapping.
+It never interrupts active work or deletes the old checkout or session.
+`pipeline_interrupt({after})` returns the targeted operation and the request's
+delivery status, not a new assistant-response operation. Definitely unsent work
+returns `NotStarted`. There is no caller close or cleanup operation.
 
-Waits observe a particular command and its native session. They do not report a
-verdict or retrieve the assistant's output. Open that session in OpenCode for
-its history. Acknowledged input must have been consumed/cancelled before idle
-can satisfy a target-message wait; idle before admission is not completion.
+All action identities live at the coordinator. Repeat identical arguments after
+a lost response. Anchored retries recover the same accepted successor even after
+later progress; review submission deliberately returns **current** work. There
+are no caller receipt files, idempotency headers, arbitrary continuation messages,
+or platform arguments. The old task-shaped routes are removed.
 
-Waiting uses scoped NDJSON streams with 15-second blank-line heartbeats and
-reconnection. The default wait has no total time budget; a positive `timeoutMs`
-returns the last pending view when its budget expires, and zero reads once.
-Cancelling a waiter only detaches that caller. It does not interrupt work,
-cancel input, release a reservation, or submit a replacement.
+Waiting returns the particular operation's final native assistant text, or a
+failure, interruption, cancellation, no-message, needs-input, or unavailable
+condition. Completed tool content is the exact final message's text parts joined
+with blank lines; earlier tool preambles, reasoning, and tool output are excluded.
+Native history determines attribution, not idle or the latest session message.
+Concurrent user steering and missing history can make attribution unavailable.
+Shutdown remains pending until native recovery settles. Native shell/subagent
+completion notices can extend an operation across foreground turns. Unsupported
+background tools or detached work inside a child session yield unavailable rather
+than an earlier waiting preamble.
+
+Waiting connects directly to scoped NDJSON streams. An immediate blank-line
+heartbeat opens the response before native reconstruction, followed by heartbeats
+every 15 seconds. A healthy subscription has no total time limit. Two minutes of
+consecutive connection failures return unavailable, without implying work failed
+to start. Cancelling a waiter only detaches that caller. It does not interrupt,
+cancel input, release a reservation, or submit replacement work. The `review-pr`
+skill drives this procedure; the review agent owns methodology and verdicts.
 
 ## Credentials, storage and operations
 
@@ -238,9 +256,14 @@ native server, authentication or database. Retained native admission events can 
 input cancelled before it became a visible message; absent evidence never proves
 that an uncertain request failed.
 
-The dispatcher initializes `dispatch_tasks`, `dispatch_commands`, `dispatch_keys`
-and `dispatch_leases`. There is no upgrade or adoption path for older schemas;
-never clear live reservations to manufacture recovery.
+The dispatcher uses `dispatch_tasks`, `dispatch_reviews`, `dispatch_commands`,
+and `dispatch_leases`. Migration 0002 accepts a fresh or empty legacy database
+and **refuses populated legacy state without changing it**. Existing installations
+need an explicit reviewed state migration before deployment; none is shipped
+here. Keep the previous coordinator on the live database until then. Do not clear
+reservations, discard caller receipts, select among duplicate PR tasks, or reset
+delivery uncertainty to make the new version start. Upgrade caller and coordinator
+protocols together only after that state migration is resolved.
 
 Core agent shell and file tools use Capsule. Automatic formatting is disabled for
 explicit workspace Locations because the upstream formatter and its discovery

@@ -4,7 +4,7 @@ import { HttpServerResponse } from 'effect/http'
 import { HttpApiBuilder } from 'effect/http-api'
 import { Authorization, PipelineApi, Unauthorized } from './api'
 import { ConfigurationInvalid, PipelineConfig, readSecret } from './config'
-import { commandEventBody } from './http-events'
+import { operationEventBody } from './http-events'
 import { Tasks } from './tasks/service'
 
 export const authorizationLayer = Layer.effect(
@@ -30,26 +30,23 @@ export const authorizationLayer = Layer.effect(
 
 export const handlersLayer = HttpApiBuilder.group(
 	PipelineApi,
-	'tasks',
+	'reviews',
 	Effect.fn(function* (handlers) {
 		const tasks = yield* Tasks
-		const events = Effect.fn('Pipeline.events')(function* (taskId: string, commandId: string) {
-			const views = yield* tasks.events(taskId, commandId)
-			return HttpServerResponse.stream(commandEventBody(views), {
+		const events = Effect.fn('Pipeline.events')(function* (operation: string) {
+			const views = yield* tasks.events(operation)
+			return HttpServerResponse.stream(operationEventBody(views), {
 				contentType: 'application/x-ndjson',
 				headers: { 'cache-control': 'no-store' },
 			})
 		})
 		return handlers.handleAll({
-			submit: ({ headers, payload }) => tasks.submit(headers['idempotency-key'], payload),
-			resume: ({ params, headers, payload }) =>
-				tasks.resume(params.id, headers['idempotency-key'], payload),
-			interrupt: ({ params, headers, payload }) =>
-				tasks.interrupt(params.id, headers['idempotency-key'], payload),
-			close: ({ params }) => tasks.close(params.id),
-			get: ({ params }) => tasks.get(params.id),
-			getCommand: ({ params }) => tasks.getCommand(params.id, params.commandId),
-			events: ({ params }) => events(params.id, params.commandId),
+			review: ({ payload }) => tasks.review(payload),
+			continue: ({ params }) => tasks.continue(params.operation),
+			restart: ({ params }) => tasks.restart(params.operation),
+			interrupt: ({ params }) => tasks.interrupt(params.operation),
+			get: ({ params }) => tasks.get(params.operation),
+			events: ({ params }) => events(params.operation),
 			health: () => Effect.succeed({ status: 'ok' as const }),
 		})
 	}),

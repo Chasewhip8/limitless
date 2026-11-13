@@ -1,19 +1,7 @@
 import { Effect } from 'effect'
 import { type CommandEvent, InvalidTransition, type StoredCommand } from './command'
-import type { CommandReceipt } from './schema'
 
-export function receipt(command: StoredCommand): CommandReceipt {
-	switch (command.delivery._tag) {
-		case 'Pending':
-			return { ...command, delivery: { _tag: 'Pending', step: command.delivery.step } }
-		case 'Unconfirmed':
-			return { ...command, delivery: { _tag: 'Unconfirmed' } }
-		default:
-			return { ...command, delivery: command.delivery }
-	}
-}
-
-export function deliveryTerminal(command: CommandReceipt): boolean {
+export function deliveryTerminal(command: StoredCommand): boolean {
 	switch (command.delivery._tag) {
 		case 'Pending':
 		case 'Unconfirmed':

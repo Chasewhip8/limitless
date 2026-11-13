@@ -3,68 +3,54 @@ import { Clock, Context, Effect, Layer, Stream } from 'effect'
 import { PipelineConfig } from '../config'
 import { PullRequestUnavailable } from '../github/schema'
 import { GitHub } from '../github/service'
-import type { NativeObservation } from '../worker/schema'
+import type { NativeResult } from '../worker/schema'
 import { OpenCodeWorker } from '../worker/service'
 import { pullRequestSource } from '../worker/source'
-import { type Payload, StoredCommand } from './command'
-import { interruptIntent, resumeIntent, reviewIntent } from './intent'
-import { deliveryTerminal, receipt } from './machine'
-import { pinnedWorker, sessionIdentity } from './placement'
-import { resumePrompt, reviewPrompt } from './prompt'
 import {
-	type CommandView,
-	type InterruptRequest,
-	type ResumeRequest,
-	type ReviewRequest,
-	Task,
-} from './schema'
+	type InterruptReceipt,
+	nativeEvaluationBudgetMs,
+	type OperationReceipt,
+	type OperationState,
+	type OperationView,
+	operationSettled,
+	type ReviewInput,
+} from '../workflow'
+import { type Payload, StoredCommand } from './command'
+import { pinnedWorker, sessionIdentity } from './placement'
+import { continuePrompt, reviewPrompt } from './prompt'
+import { OperationNotFound, Task, TaskConflict } from './schema'
 import { TaskStore } from './store'
 
-function dispatchReceipt(stored: { task: Task; command: StoredCommand }) {
-	return { task: stored.task, command: receipt(stored.command) }
+type StoredOperation = { task: Task; command: StoredCommand }
+
+function operationReceipt({ task, command }: StoredOperation): OperationReceipt {
+	return { operation: command.id, pr: task.request.pr, closed: task.submissions._tag === 'Closed' }
 }
 
-function commandKind(payload: Payload): StoredCommand['kind'] {
-	switch (payload._tag) {
-		case 'Review':
-			return 'review'
-		case 'Resume':
-			return 'resume'
-		case 'Interrupt':
-			return 'interrupt'
+function interruptReceipt(target: StoredOperation, command: StoredCommand): InterruptReceipt {
+	const status = () => {
+		switch (command.delivery._tag) {
+			case 'Pending':
+				return 'Requested'
+			case 'Unconfirmed':
+				return 'DeliveryUnconfirmed'
+			case 'Acknowledged':
+				return 'Acknowledged'
+			default:
+				return 'Rejected'
+		}
 	}
+	return { ...operationReceipt(target), status: status() }
 }
 
-function nativeTarget(command: StoredCommand): string | undefined {
-	switch (command.delivery._tag) {
-		case 'Unconfirmed':
-		case 'Acknowledged':
-			return command.messageId
-		default:
-			return undefined
-	}
+function executionSettled(result: NativeResult): boolean {
+	return result._tag !== 'Pending' && result._tag !== 'Unavailable'
 }
 
-function latestAcknowledgedMessage(commands: ReadonlyArray<StoredCommand>): string | undefined {
-	return commands
-		.filter(
-			(command) => command.delivery._tag === 'Acknowledged' && command.messageId !== undefined,
-		)
-		.at(-1)?.messageId
-}
-
-export function commandViewSettled(view: CommandView): boolean {
-	if (!deliveryTerminal(view.command)) return false
-	if (view.command.delivery._tag !== 'Acknowledged') return true
-	switch (view.observation._tag) {
-		case 'Idle':
-		case 'NeedsInput':
-		case 'InputCancelled':
-			return true
-		default:
-			return false
-	}
-}
+const evaluationDeadline = Effect.timeoutOrElse({
+	duration: nativeEvaluationBudgetMs,
+	orElse: () => TaskConflict.make({ code: 'observation_timeout' }),
+})
 
 const make = Effect.gen(function* () {
 	const store = yield* TaskStore
@@ -74,32 +60,32 @@ const make = Effect.gen(function* () {
 
 	const newCommand = Effect.fn('Tasks.newCommand')(function* (
 		taskId: string,
-		requestHash: string,
 		payload: Payload,
 		afterCommandId?: string,
 	) {
 		const id = yield* Effect.sync(randomUUID)
-		const createdAt = yield* Clock.currentTimeMillis
-		const kind = commandKind(payload)
+		const kind =
+			payload._tag === 'Review' ? 'review' : payload._tag === 'Resume' ? 'resume' : 'interrupt'
 		return StoredCommand.make({
 			id,
 			taskId,
-			createdAt,
+			createdAt: yield* Clock.currentTimeMillis,
 			version: 0,
 			kind,
-			requestHash,
 			...(afterCommandId === undefined ? {} : { afterCommandId }),
 			...(kind === 'interrupt' ? {} : { messageId: `msg_pipeline${id.replaceAll('-', '')}` }),
 			delivery: { _tag: 'Pending', step: kind === 'review' ? 'session' : 'send', payload },
 		})
 	})
 
-	const submit = Effect.fn('Tasks.submit')(function* (key: string, request: ReviewRequest) {
-		const requestHash = reviewIntent(request)
-		const existing = yield* store.findKey(key, requestHash)
-		if (existing !== undefined) return dispatchReceipt(existing)
-
-		const pr = yield* github.resolve(request)
+	const prepareReview = Effect.fn('Tasks.prepareReview')(function* (
+		resolved: Effect.Success<ReturnType<typeof github.resolve>>,
+	) {
+		const pr = resolved.checkout
+		if (pr === undefined)
+			return yield* PullRequestUnavailable.make({
+				message: 'A fresh review requires an open pull request with an available source repository',
+			})
 		const source = yield* pullRequestSource(pr).pipe(
 			Effect.mapError(() =>
 				PullRequestUnavailable.make({
@@ -110,119 +96,272 @@ const make = Effect.gen(function* () {
 		const task = Task.make({
 			id: yield* Effect.sync(randomUUID),
 			createdAt: yield* Clock.currentTimeMillis,
-			request,
+			reviewKey: resolved.key,
+			request: { pr: resolved.url },
 			submissions: { _tag: 'Open' },
 			placement: { _tag: 'Unassigned' },
 		})
-		const command = yield* newCommand(task.id, requestHash, {
+		const command = yield* newCommand(task.id, {
 			_tag: 'Review',
 			pr,
 			source,
 			prompt: reviewPrompt(task.id, pr),
 		})
-		const stored = yield* store.insert(task, command, key)
-		return dispatchReceipt(stored)
+		return { task, command }
 	})
 
-	const resume = Effect.fn('Tasks.resume')(function* (
-		taskId: string,
-		key: string,
-		request: ResumeRequest,
-	) {
-		const requestHash = resumeIntent(taskId, request)
-		const existing = yield* store.findKey(key, requestHash)
-		if (existing !== undefined) return dispatchReceipt(existing)
-
-		const task = yield* store.getTask(taskId)
-		const prompt = resumePrompt(task.request.pr, request.message)
-		const command = yield* newCommand(
-			taskId,
-			requestHash,
-			{ _tag: 'Resume', prompt },
-			request.afterCommandId,
-		)
-		const stored = yield* store.append(taskId, command, key)
-		return dispatchReceipt(stored)
+	const review = Effect.fn('Tasks.review')(function* (input: ReviewInput) {
+		const resolved = yield* github.resolve(input)
+		const existing = yield* store.current(resolved.key)
+		if (existing !== undefined) return operationReceipt(existing)
+		const { task, command } = yield* prepareReview(resolved)
+		const stored = yield* store.insert(task, command)
+		return operationReceipt(stored)
 	})
 
-	const interrupt = Effect.fn('Tasks.interrupt')(function* (
-		taskId: string,
-		key: string,
-		request: InterruptRequest,
-	) {
-		const requestHash = interruptIntent(taskId, request)
-		const existing = yield* store.findKey(key, requestHash)
-		if (existing !== undefined) return dispatchReceipt(existing)
-
-		const command = yield* newCommand(
-			taskId,
-			requestHash,
-			{ _tag: 'Interrupt' },
-			request.afterCommandId,
-		)
-		const stored = yield* store.append(taskId, command, key)
-		return dispatchReceipt(stored)
-	})
-
-	const observe = Effect.fn('Tasks.observe')(function* (task: Task, messageId: string | undefined) {
-		if (task.placement._tag === 'Unassigned')
-			return { _tag: 'NotObserved' } satisfies NativeObservation
+	const placement = Effect.fn('Tasks.placement')(function* (task: Task) {
+		if (task.placement._tag !== 'Assigned')
+			return yield* TaskConflict.make({ code: 'session_unavailable' })
 		const { assignment } = task.placement
 		const worker = pinnedWorker(config.workers, assignment)
-		if (worker === undefined)
-			return {
+		if (worker === undefined) return yield* TaskConflict.make({ code: 'session_unavailable' })
+		return { worker, identity: sessionIdentity(task, assignment) }
+	})
+
+	const requireSettled = Effect.fn('Tasks.requireSettled')(
+		function* ({ task, command }: StoredOperation, action: 'continue' | 'restart') {
+			if (command.delivery._tag === 'Unconfirmed')
+				return yield* TaskConflict.make({ code: 'delivery_unconfirmed' })
+			if (command.delivery._tag === 'Pending')
+				return yield* TaskConflict.make({ code: 'operation_pending' })
+			if (action === 'restart' && command.delivery._tag !== 'Acknowledged') {
+				const { commands } = yield* store.get(task.id)
+				if (
+					!commands.some(
+						(item) => item.kind !== 'interrupt' && item.delivery._tag === 'Acknowledged',
+					)
+				)
+					return
+			}
+			const { worker, identity } = yield* placement(task)
+			const placed = yield* remote.requirePlacement(worker, identity)
+			if (
+				action === 'continue' &&
+				(placed.capsulePhase !== 'ready' || placed.workspaceState !== 'bound')
+			)
+				return yield* TaskConflict.make({ code: 'session_unavailable' })
+			if (command.delivery._tag === 'Acknowledged') {
+				if (command.messageId === undefined)
+					return yield* TaskConflict.make({ code: 'session_unavailable' })
+				const result = yield* remote.result(worker, identity, command.messageId)
+				if (!executionSettled(result)) return yield* TaskConflict.make({ code: 'native_unsettled' })
+			}
+			const observation = yield* remote.observe(worker, identity)
+			if (observation._tag !== 'Idle') return yield* TaskConflict.make({ code: 'native_unsettled' })
+		},
+		Effect.catchTag('WorkerError', () => TaskConflict.make({ code: 'session_unavailable' })),
+	)
+
+	const recoverAccepted = Effect.fn('Tasks.recoverAccepted')(function* <E>(
+		action: 'resume' | 'restart',
+		after: string,
+		error: E,
+	) {
+		const accepted = yield* store.findAction(action, after)
+		if (accepted !== undefined) return operationReceipt(accepted)
+		return yield* Effect.fail(error)
+	})
+
+	const readyForContinuation = Effect.fn('Tasks.readyForContinuation')(function* (after: string) {
+		const anchor = yield* store.checkAnchor(after)
+		yield* requireSettled(anchor, 'continue')
+		return anchor
+	}, evaluationDeadline)
+
+	const prepareRestart = Effect.fn('Tasks.prepareRestart')(function* (after: string) {
+		const anchor = yield* store.checkAnchor(after, { allowClosed: true })
+		yield* requireSettled(anchor, 'restart')
+		const resolved = yield* github.resolve(anchor.task.request)
+		if (resolved.key !== anchor.task.reviewKey)
+			return yield* PullRequestUnavailable.make({
+				message:
+					'The PR URL now identifies a different repository; restore its canonical URL before restarting',
+			})
+		return yield* prepareReview(resolved)
+	}, evaluationDeadline)
+
+	const continueReview = Effect.fn('Tasks.continue')(
+		function* (after: string) {
+			const existing = yield* store.findAction('resume', after)
+			if (existing !== undefined) return operationReceipt(existing)
+			const anchor = yield* readyForContinuation(after)
+			const command = yield* newCommand(
+				anchor.task.id,
+				{
+					_tag: 'Resume',
+					prompt: continuePrompt(anchor.task.request.pr),
+				},
+				after,
+			)
+			const stored = yield* store.append(command)
+			return operationReceipt(stored)
+		},
+		(effect, after) =>
+			effect.pipe(Effect.catch((error) => recoverAccepted('resume', after, error))),
+	)
+
+	const restart = Effect.fn('Tasks.restart')(
+		function* (after: string) {
+			const existing = yield* store.findAction('restart', after)
+			if (existing !== undefined) return operationReceipt(existing)
+			const { task, command } = yield* prepareRestart(after)
+			const stored = yield* store.restart(after, task, command)
+			return operationReceipt(stored)
+		},
+		(effect, after) =>
+			effect.pipe(Effect.catch((error) => recoverAccepted('restart', after, error))),
+	)
+
+	const interrupt = Effect.fn('Tasks.interrupt')(
+		function* (after: string) {
+			const existing = yield* store.findAction('interrupt', after)
+			if (existing !== undefined) {
+				const target = yield* store.getOperation(after)
+				return interruptReceipt(target, existing.command)
+			}
+			const anchor = yield* store.checkAnchor(after, { allowClosed: true })
+			if (anchor.command.delivery._tag === 'Unconfirmed')
+				return yield* TaskConflict.make({ code: 'delivery_unconfirmed' })
+			if (anchor.command.delivery._tag !== 'Acknowledged')
+				return { ...operationReceipt(anchor), status: 'NotStarted' } satisfies InterruptReceipt
+			const command = yield* newCommand(anchor.task.id, { _tag: 'Interrupt' }, after)
+			const stored = yield* store.append(command)
+			return interruptReceipt(anchor, stored.command)
+		},
+		(effect, after) =>
+			effect.pipe(
+				Effect.catch((error) =>
+					Effect.gen(function* () {
+						const accepted = yield* store.findAction('interrupt', after)
+						if (accepted === undefined) return yield* error
+						const target = yield* store.getOperation(after)
+						return interruptReceipt(target, accepted.command)
+					}),
+				),
+			),
+	)
+
+	const nativeState = Effect.fn('Tasks.nativeState')(
+		function* ({ task, command }: StoredOperation) {
+			const { worker, identity } = yield* placement(task)
+			if (command.messageId === undefined)
+				return {
+					_tag: 'Unavailable',
+					message: 'The native prompt reference is missing',
+				} satisfies OperationState
+			const result = yield* remote.result(worker, identity, command.messageId)
+			if (result._tag !== 'Pending') return result
+			const observation = yield* remote.observe(worker, identity, command.messageId)
+			switch (observation._tag) {
+				case 'NeedsInput':
+					return {
+						_tag: 'NeedsInput',
+						permissions: observation.permissionIds.length,
+						forms: observation.formIds.length,
+					} satisfies OperationState
+				case 'Running':
+					return { _tag: 'Running' } satisfies OperationState
+				case 'Unavailable':
+					return observation
+				default:
+					return result
+			}
+		},
+		Effect.catchTag('WorkerError', () =>
+			Effect.succeed({
 				_tag: 'Unavailable',
-				message: 'Restore the pinned worker configuration to observe the native session',
-			} satisfies NativeObservation
-		return yield* remote.observe(worker, sessionIdentity(task, assignment), messageId).pipe(
-			Effect.catchTag('WorkerError', () =>
+				message: 'Native result retrieval is unavailable; retry waiting on this operation',
+			} satisfies OperationState),
+		),
+		Effect.timeoutOrElse({
+			duration: nativeEvaluationBudgetMs,
+			orElse: () =>
 				Effect.succeed({
 					_tag: 'Unavailable',
-					message: 'Native session observation is unavailable',
-				} satisfies NativeObservation),
-			),
-		)
-	})
+					message:
+						'Native result evaluation exceeded its three-minute budget; retry waiting on this operation',
+				} satisfies OperationState),
+		}),
+	)
 
-	const getCommand = Effect.fn('Tasks.getCommand')(function* (taskId: string, commandId: string) {
-		const { task, command } = yield* store.getCommand(taskId, commandId)
-		return {
-			task,
-			command: receipt(command),
-			observation: yield* observe(task, nativeTarget(command)),
-		} satisfies CommandView
-	})
-
-	const get = Effect.fn('Tasks.get')(function* (taskId: string) {
-		const { task, commands } = yield* store.get(taskId)
-		return {
-			task,
-			commands: commands.map(receipt),
-			observation: yield* observe(task, latestAcknowledgedMessage(commands)),
+	const state = Effect.fn('Tasks.state')(function* (stored: StoredOperation) {
+		switch (stored.command.delivery._tag) {
+			case 'Pending':
+				return {
+					_tag: stored.task.placement._tag === 'Unassigned' ? 'Queued' : 'Preparing',
+				} satisfies OperationState
+			case 'Unconfirmed':
+				return { _tag: 'DeliveryUnconfirmed' } satisfies OperationState
+			case 'Rejected':
+				return {
+					_tag: 'Rejected',
+					message: stored.command.delivery.reason.message,
+				} satisfies OperationState
+			case 'CancelledBeforeSend':
+				return { _tag: 'CancelledBeforeSend' } satisfies OperationState
+			case 'Acknowledged':
+				return yield* nativeState(stored).pipe(
+					Effect.catchTag('TaskConflict', () =>
+						Effect.succeed({
+							_tag: 'Unavailable',
+							message: 'Restore the retained worker and native session to read this result',
+						} satisfies OperationState),
+					),
+				)
 		}
 	})
 
-	const events = Effect.fn('Tasks.events')(function* (taskId: string, commandId: string) {
-		yield* store.getCommand(taskId, commandId)
+	const get = Effect.fn('Tasks.get')(function* (operation: string) {
+		const stored = yield* store.getOperation(operation)
+		if (stored.command.kind === 'interrupt') return yield* OperationNotFound.make({ operation })
+		const { task } = stored
+		return {
+			...operationReceipt(stored),
+			...(task.placement._tag === 'Assigned'
+				? {
+						session: {
+							server: task.placement.assignment.workerUrl,
+							id: task.placement.assignment.sessionId,
+						},
+					}
+				: {}),
+			state: yield* state(stored),
+		} satisfies OperationView
+	})
+
+	const events = Effect.fn('Tasks.events')(function* (operation: string) {
+		const { task, command } = yield* store.getOperation(operation)
+		if (command.kind === 'interrupt') return yield* OperationNotFound.make({ operation })
 		return Stream.unwrap(
 			Effect.gen(function* () {
 				const updates = yield* store.subscribeUpdates
-				const read = getCommand(taskId, commandId).pipe(Effect.orDie)
+				const read = get(operation).pipe(Effect.orDie)
 				const initial = yield* read
 				const changes = Stream.fromSubscription(updates).pipe(
-					Stream.filter((id) => id === taskId),
+					Stream.filter((id) => id === task.id),
+					Stream.buffer({ capacity: 1, strategy: 'sliding' }),
 					Stream.mapEffect(() => read),
 				)
 				return Stream.make(initial).pipe(
 					Stream.concat(changes),
 					Stream.changesWith((a, b) => JSON.stringify(a) === JSON.stringify(b)),
-					Stream.takeUntil(commandViewSettled),
+					Stream.takeUntil(operationSettled),
 				)
 			}),
 		)
 	})
 
-	return { submit, resume, interrupt, close: store.close, get, getCommand, events }
+	return { review, continue: continueReview, restart, interrupt, get, events }
 })
 
 export class Tasks extends Context.Service<Tasks, Effect.Success<typeof make>>()(

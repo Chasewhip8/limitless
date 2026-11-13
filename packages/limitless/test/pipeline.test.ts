@@ -3,161 +3,35 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
-import type { Plugin } from '@opencode/plugin/effect'
-import type { SessionContext } from '@opencode/plugin/effect/session'
 import { Agent } from '@opencode/schema/agent'
 import { Tool } from '@opencode/schema/tool'
 import { Deferred, Effect, Fiber, Redacted, Schema } from 'effect'
 import { FetchHttpClient } from 'effect/http'
 import { TestClock } from 'effect/testing'
 import { afterEach, describe, expect, test } from 'vitest'
-import { interruptIntent, resumeIntent, reviewIntent } from '../../pipeline/tasks/intent'
 import {
-	CommandReceipt,
-	type CommandView,
-	type DispatchReceipt,
-	InterruptRequest,
-	ResumeRequest,
-	ReviewRequest,
-	Task,
-} from '../../pipeline/tasks/schema'
-import type { NativeObservation } from '../../pipeline/worker/schema'
-import { makePipelineClient, WaitInput } from '../tools/pipeline/client'
+	canonicalPullRequest,
+	nativeEvaluationBudgetMs,
+	type OperationState,
+	type OperationView,
+} from '../../pipeline/workflow'
+import { makePipelineClient } from '../tools/pipeline/client'
 import { normalizePipelinePluginConfig, readPipelineToken } from '../tools/pipeline/config'
-import { restorePipelineContext } from '../tools/pipeline/index'
-import { type Admission, makeReceipts, Receipt } from '../tools/pipeline/receipts'
-import { pipelineTools } from '../tools/pipeline/tools'
+import { hidePipelineMutations } from '../tools/pipeline/index'
+import { pipelineMutationTools, pipelineTools } from '../tools/pipeline/tools'
 import { testToolContext, testToolExecution } from './execution'
 
 const pr = 'https://github.com/owner/repo/pull/123'
 const token = 'fixture-token-not-a-real-secret-123456789'
-const nativeSessionId = 'ses_native'
-const assignment = {
-	workerId: 'worker',
-	workerUrl: 'https://worker.example',
-	controlDirectory: '/srv/capsule/control',
-	storageId: 'storage-worker',
-	workspaceId: 'wrk_native',
-	directory: '/srv/capsule/checkouts/wrk_native/checkout',
-	sessionId: nativeSessionId,
-}
-
-function makeTask(request: ReviewRequest = { kind: 'review', pr }) {
-	return Task.make({
-		id: randomUUID(),
-		createdAt: 0,
-		request,
-		submissions: { _tag: 'Open' },
-		placement: { _tag: 'Assigned', assignment },
-	})
-}
-
-function makeCommand(
-	taskId: string,
-	kind: CommandReceipt['kind'],
-	requestHash: string,
-	afterCommandId?: string,
-): CommandReceipt {
-	const id = randomUUID()
-	return CommandReceipt.make({
-		id,
-		taskId,
-		createdAt: 0,
-		version: 0,
-		kind,
-		requestHash,
-		...(afterCommandId === undefined ? {} : { afterCommandId }),
-		...(kind === 'interrupt' ? {} : { messageId: `msg_${id}` }),
-		delivery: { _tag: 'Pending', step: 'send' },
-	})
-}
-
-function deliver(command: CommandReceipt, delivery: CommandReceipt['delivery']): CommandReceipt {
-	return { ...command, version: command.version + 1, delivery }
-}
-
-function acknowledged(command: CommandReceipt): CommandReceipt {
-	return deliver(command, {
-		_tag: 'Acknowledged',
-		nativeRef: {
-			sessionId: nativeSessionId,
-			...(command.messageId === undefined ? {} : { messageId: command.messageId }),
-		},
-	})
-}
-
-const idle: NativeObservation = { _tag: 'Idle' }
-const running: NativeObservation = { _tag: 'Running', backgroundJobs: 0 }
-
-type Misroute = 'task' | 'command' | 'relation' | 'placement' | 'nativeSession' | 'nativeMessage'
-
-function misrouted(view: CommandView, field: Misroute): CommandView {
-	const command = acknowledged(view.command)
-	const valid = { ...view, command, observation: idle }
-	switch (field) {
-		case 'task': {
-			const id = randomUUID()
-			return { ...valid, task: { ...view.task, id }, command: { ...command, taskId: id } }
-		}
-		case 'command':
-			return { ...valid, command: { ...command, id: randomUUID() } }
-		case 'relation':
-			return { ...valid, command: { ...command, taskId: randomUUID() } }
-		case 'placement':
-			return { ...valid, task: { ...view.task, placement: { _tag: 'Unassigned' } } }
-		case 'nativeSession':
-			return {
-				...valid,
-				command: deliver(command, {
-					_tag: 'Acknowledged',
-					nativeRef: { sessionId: 'ses_other', messageId: `msg_${command.id}` },
-				}),
-			}
-		case 'nativeMessage':
-			return {
-				...valid,
-				command: deliver(command, {
-					_tag: 'Acknowledged',
-					nativeRef: { sessionId: nativeSessionId, messageId: 'msg_other' },
-				}),
-			}
-	}
-}
-
-function durableStorage() {
-	const values = new Map<string, Schema.Json>()
-	const storage: Plugin.Context['storage'] = {
-		get: (key) => Effect.sync(() => values.get(key)),
-		set: (key, value) =>
-			Effect.sync(() => {
-				values.set(key, JSON.parse(JSON.stringify(value)))
-			}),
-		remove: (key) =>
-			Effect.sync(() => {
-				values.delete(key)
-			}),
-		scan: ({ prefix, after, limit = 100 }) =>
-			Effect.sync(() => {
-				const matches = [...values.entries()]
-					.filter(([key]) => key.startsWith(prefix) && (after === undefined || key > after))
-					.sort(([a], [b]) => a.localeCompare(b))
-				const entries = matches.slice(0, limit).map(([key, value]) => ({ key, value }))
-				const last = entries.at(-1)
-				return {
-					entries,
-					...(matches.length > limit && last !== undefined ? { next: last.key } : {}),
-				}
-			}),
-	}
-	return { storage, values }
-}
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => {
 	for (const close of cleanup.splice(0).reverse()) await close()
 })
 
-function requestSignal() {
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+function signal() {
 	const callbacks = { resolve: () => {} }
 	const promise = new Promise<void>((resolve) => {
 		callbacks.resolve = resolve
@@ -165,66 +39,47 @@ function requestSignal() {
 	return { promise, resolve: () => callbacks.resolve() }
 }
 
-const decodeJson = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, body: string) =>
-	Schema.decodeUnknownSync(Schema.fromJsonString(schema))(body)
+type Recorded = { method: string; path: string; body: string; key: string | undefined }
 
 async function fixture() {
-	const requests: Array<{ method: string; path: string; key: string | undefined; body: string }> =
-		[]
-	const admissions = new Map<string, { body: string; dispatch: DispatchReceipt }>()
-	const commands = new Map<string, CommandReceipt>()
+	const requests: Array<Recorded> = []
+	const operations = new Map<string, OperationView>()
+	const reviews = new Map<string, string>()
+	const successors = new Map<string, string>()
 	const events = new Map<ServerResponse, string>()
-	const task = makeTask()
-	const initial = makeCommand(task.id, 'review', reviewIntent(task.request))
-	commands.set(initial.id, initial)
 	const state = {
-		task,
-		observation: { _tag: 'NotObserved' } as NativeObservation,
-		loseNextAdmission: false,
+		loseNext: false,
+		conflict: undefined as string | undefined,
 		redirect: undefined as string | undefined,
 		readStatus: 200,
+		hold: undefined as Promise<void> | undefined,
+		initialView: true,
 		eventCount: 0,
-		closeCount: 0,
-		onEvents: (_response: ServerResponse, _count: number) => {},
-		onAdmission: () => {},
+		onEvents: (_response: ServerResponse, _count: number, _operation: string) => {},
 		handleRequest: (_method: string, _path: string, _response: ServerResponse) => false,
 	}
-	const view = (commandId: string): CommandView | undefined => {
-		const command = commands.get(commandId)
-		if (command === undefined) return undefined
-		return { task: state.task, command, observation: state.observation }
-	}
-	const admittedCommand = (path: string, body: string) => {
-		if (path === '/tasks') {
-			const request = decodeJson(ReviewRequest, body)
-			state.task = makeTask(request)
-			return makeCommand(state.task.id, 'review', reviewIntent(request))
+	const create = (pullRequest: string, next: OperationState = { _tag: 'Queued' }) => {
+		const view: OperationView = {
+			operation: randomUUID(),
+			pr: pullRequest,
+			closed: false,
+			state: next,
 		}
-		if (path.endsWith('/resume')) {
-			const request = decodeJson(ResumeRequest, body)
-			const hash = resumeIntent(state.task.id, request)
-			return makeCommand(state.task.id, 'resume', hash, request.afterCommandId)
-		}
-		const request = decodeJson(InterruptRequest, body)
-		const hash = interruptIntent(state.task.id, request)
-		return makeCommand(state.task.id, 'interrupt', hash, request.afterCommandId)
+		operations.set(view.operation, view)
+		return view
 	}
-	const frame = (commandId: string) => `${JSON.stringify(view(commandId))}\n`
-	let opened: (() => void) | undefined
-	const eventOpened = new Promise<void>((resolve) => {
-		opened = resolve
-	})
+	const receipt = ({ operation, pr, closed }: OperationView) => ({ operation, pr, closed })
+	const frame = (operation: string) => `${JSON.stringify(operations.get(operation))}\n`
+	const eventOpened = signal()
+
 	const server = createServer(async (request, response) => {
 		const chunks: Array<Buffer> = []
 		for await (const chunk of request) chunks.push(Buffer.from(chunk))
 		const body = Buffer.concat(chunks).toString()
 		const path = request.url ?? '/'
 		const method = request.method ?? 'GET'
-		const key =
-			typeof request.headers['idempotency-key'] === 'string'
-				? request.headers['idempotency-key']
-				: undefined
-		requests.push({ method, path, key, body })
+		const key = request.headers['idempotency-key']
+		requests.push({ method, path, body, key: typeof key === 'string' ? key : undefined })
 		if (state.redirect !== undefined) {
 			response.writeHead(302, { location: state.redirect }).end()
 			return
@@ -234,55 +89,65 @@ async function fixture() {
 			return
 		}
 		if (state.handleRequest(method, path, response)) return
-		const json = (value: unknown, status = 200) =>
-			response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value))
-		if (method === 'POST' && (path === '/tasks' || /\/(resume|interrupt)$/.test(path))) {
-			state.onAdmission()
-			const previous = key === undefined ? undefined : admissions.get(key)
-			if (previous !== undefined) {
-				if (previous.body !== body) {
-					response.writeHead(409).end()
-					return
-				}
-				json(previous.dispatch, 202)
-				return
-			}
-			const command = admittedCommand(path, body)
-			commands.set(command.id, command)
-			const dispatch = { task: state.task, command }
-			admissions.set(key ?? '', { body, dispatch })
-			if (state.loseNextAdmission) {
-				state.loseNextAdmission = false
-				response.destroy()
-				return
-			}
-			json(dispatch, 202)
-			return
-		}
-		if (method === 'POST' && path.endsWith('/close')) {
-			state.closeCount++
-			state.task = { ...state.task, submissions: { _tag: 'Closed' } }
-			json(state.task)
-			return
-		}
-		const commandId = path.split('/')[4] ?? ''
-		if (path.endsWith('/events')) {
-			state.eventCount++
-			response.writeHead(200, { 'content-type': 'application/x-ndjson' })
-			response.write(`\n${frame(commandId)}`)
-			events.set(response, commandId)
-			response.on('close', () => events.delete(response))
-			state.onEvents(response, state.eventCount)
-			opened?.()
-			return
-		}
-		if (state.readStatus !== 200) {
+		if (method === 'POST') await state.hold
+		if (method === 'GET' && state.readStatus !== 200) {
 			response.writeHead(state.readStatus).end()
 			return
 		}
-		const current = view(commandId)
-		if (current === undefined) response.writeHead(404).end()
-		else json(current)
+		const json = (value: unknown, status = 200) =>
+			response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value))
+		const admitted = (value: unknown, status = 202) => {
+			if (!state.loseNext) return json(value, status)
+			state.loseNext = false
+			response.destroy()
+		}
+
+		if (method === 'POST' && path === '/reviews') {
+			const requested = canonicalPullRequest(JSON.parse(body).pr)
+			const current = operations.get(reviews.get(requested) ?? '') ?? create(requested)
+			reviews.set(requested, current.operation)
+			admitted(receipt(current))
+			return
+		}
+		const [, , operation = '', action] = path.split('/')
+		const target = operations.get(operation)
+		if (target === undefined) {
+			json({ _tag: 'OperationNotFound', operation }, 404)
+			return
+		}
+		if (method === 'POST' && state.conflict !== undefined) {
+			json({ _tag: 'TaskConflict', code: state.conflict }, 409)
+			return
+		}
+		if (method === 'POST' && (action === 'continue' || action === 'restart')) {
+			const anchored = `${action}:${operation}`
+			const recorded = operations.get(successors.get(anchored) ?? '')
+			if (recorded !== undefined) {
+				admitted(receipt(recorded))
+				return
+			}
+			const next = create(target.pr)
+			successors.set(anchored, next.operation)
+			reviews.set(target.pr, next.operation)
+			admitted(receipt(next))
+			return
+		}
+		if (method === 'POST' && action === 'interrupt') {
+			admitted({ ...receipt(target), status: 'Requested' })
+			return
+		}
+		if (action === 'events') {
+			state.eventCount++
+			response.writeHead(200, { 'content-type': 'application/x-ndjson' })
+			response.write('\n')
+			if (state.initialView) response.write(frame(operation))
+			events.set(response, operation)
+			response.on('close', () => events.delete(response))
+			state.onEvents(response, state.eventCount, operation)
+			eventOpened.resolve()
+			return
+		}
+		json(target)
 	})
 	await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
 	cleanup.push(
@@ -293,737 +158,594 @@ async function fixture() {
 				server.closeAllConnections()
 			}),
 	)
-	const update = (next: { command?: CommandReceipt; observation?: NativeObservation }) => {
-		if (next.command !== undefined) commands.set(next.command.id, next.command)
-		if (next.observation !== undefined) state.observation = next.observation
+	const update = (operation: string, next: OperationState) => {
+		const view = operations.get(operation)
+		if (view !== undefined) operations.set(operation, { ...view, state: next })
 	}
 	return {
 		state,
 		requests,
-		admissions,
-		commands,
-		initial: { taskId: task.id, commandId: initial.id },
-		url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-		eventOpened,
-		view: (commandId = initial.id) => view(commandId) as CommandView,
+		operations,
+		successors,
+		events,
+		create,
 		frame,
 		update,
-		publish: (next: { command?: CommandReceipt; observation?: NativeObservation }) => {
-			update(next)
-			for (const [response, commandId] of events) response.write(`\n${frame(commandId)}`)
+		eventOpened: eventOpened.promise,
+		url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+		publish: (operation: string, next: OperationState) => {
+			update(operation, next)
+			for (const [response, subscribed] of events) response.write(`\n${frame(subscribed)}`)
 		},
 	}
 }
 
-async function caller(url: string, durable = durableStorage()) {
-	const receipts = await Effect.runPromise(makeReceipts(durable.storage, url))
+async function caller(url: string) {
 	const client = await Effect.runPromise(
-		makePipelineClient({ url, token: Redacted.make(token) }, receipts).pipe(
+		makePipelineClient({ url, token: Redacted.make(token) }).pipe(
 			Effect.provide(FetchHttpClient.layer),
 		),
 	)
-	return { client, receipts, durable, tools: pipelineTools(client) }
+	return { client, tools: pipelineTools(client) }
 }
 
-function context(callId: string, agent = 'limitless') {
+function context(
+	callId: string,
+	agent = 'limitless',
+	progress: Tool.Context['progress'] = () => Effect.void,
+): Tool.Context {
 	return {
 		...testToolContext(testToolExecution('/fixture', 'ses_pipeline')),
 		agent: Agent.ID.make(agent),
 		id: Schema.decodeUnknownSync(Tool.CallID)(callId),
+		progress,
 	}
 }
 
-function acceptedAdmission(admission: Admission | undefined) {
-	if (admission?._tag !== 'Accepted') throw new Error('expected an accepted admission')
-	return admission
-}
+const failure = <A>(effect: Effect.Effect<A, Tool.Error>) => Effect.runPromise(Effect.flip(effect))
+const evaluationResponseDeadlineMs = nativeEvaluationBudgetMs + 15_000
+const routes = (requests: ReadonlyArray<Recorded>) =>
+	requests.map(({ method, path }) => [method, path.replace(/[0-9a-f-]{36}/, ':op')])
+const completed = (text: string): OperationState => ({
+	_tag: 'Completed',
+	message: { id: `msg_${randomUUID()}`, text },
+})
 
-function contextEvent(agent = 'limitless') {
-	const event: Pick<SessionContext, 'sessionID' | 'agent' | 'system' | 'tools'> = {
-		sessionID: context('call_context').sessionID,
-		agent: Agent.ID.make(agent),
-		system: [],
-		tools: {},
-	}
-	return event
-}
-
-describe('durable Pipeline caller admission', () => {
-	test('regenerated call IDs, concurrent requests, and plugin recreation recover one sticky review whose accepted receipt drops the body', async () => {
+describe('Pipeline caller mutations', () => {
+	test('each mutation sends exactly its documented request, without idempotency keys or caller receipts', async () => {
 		const remote = await fixture()
-		const first = await caller(remote.url)
-		const admissionStates: Array<Array<Schema.Json>> = []
-		remote.state.onAdmission = () => {
-			admissionStates.push([...first.durable.values.values()])
-		}
-		const results = await Effect.runPromise(
-			Effect.all(
-				[
-					first.tools.pipeline_review.execute({ pr }, context('call_one')),
-					first.tools.pipeline_review.execute({ pr: `${pr}/` }, context('call_two')),
-				],
-				{ concurrency: 'unbounded' },
+		const { tools } = await caller(remote.url)
+		const review = await Effect.runPromise(
+			tools.pipeline_review.execute(
+				{ pr: 'https://github.com/Owner/Repo/pull/123/' },
+				context('call_review'),
 			),
 		)
-		expect(results[0].output).toMatchObject({ _tag: 'Accepted' })
-		expect(results[1].output).toEqual(results[0].output)
-		expect(remote.admissions.size).toBe(1)
-		expect(admissionStates[0]).toEqual([
-			expect.objectContaining({ _tag: 'Prepared', body: JSON.stringify({ kind: 'review', pr }) }),
-		])
-		const [stored] = [...first.durable.values.values()]
-		expect(stored).toMatchObject({ _tag: 'Accepted', pr, operation: 'review' })
-		expect(Object.keys(stored as object)).not.toEqual(
-			expect.arrayContaining([expect.stringMatching(/^(body|key|path)$/)]),
+		expect(review.output).toEqual({ operation: expect.any(String), pr, closed: false })
+		expect(review.content).toEqual([{ type: 'text', text: JSON.stringify(review.output) }])
+		const first = review.output?.operation ?? ''
+		const continued = await Effect.runPromise(
+			tools.pipeline_continue.execute({ after: first }, context('call_continue')),
+		)
+		const second = continued.output?.operation ?? ''
+		const restarted = await Effect.runPromise(
+			tools.pipeline_restart.execute({ after: second }, context('call_restart')),
+		)
+		const third = restarted.output?.operation ?? ''
+		const interrupted = await Effect.runPromise(
+			tools.pipeline_interrupt.execute({ after: third }, context('call_interrupt')),
 		)
 
-		const accepted = acceptedAdmission(results[0].output)
-		remote.update({ command: acknowledged(remote.view(accepted.commandId).command) })
-		const restarted = await caller(remote.url, first.durable)
-		const recovered = await Effect.runPromise(
-			restarted.tools.pipeline_review.execute({ pr }, context('call_three')),
-		)
-		expect(recovered.output).toEqual(accepted)
-		expect(remote.admissions.size).toBe(1)
-		expect(await Effect.runPromise(restarted.receipts.list('ses_pipeline'))).toHaveLength(1)
+		expect(new Set([first, second, third]).size).toBe(3)
+		expect(interrupted.output).toEqual({ operation: third, pr, closed: false, status: 'Requested' })
+		expect(remote.requests).toEqual([
+			{ method: 'POST', path: '/reviews', body: JSON.stringify({ pr }), key: undefined },
+			{ method: 'POST', path: `/operations/${first}/continue`, body: '', key: undefined },
+			{ method: 'POST', path: `/operations/${second}/restart`, body: '', key: undefined },
+			{ method: 'POST', path: `/operations/${third}/interrupt`, body: '', key: undefined },
+		])
 	})
 
-	test('a lost response leaves a Prepared receipt and recovery reuses its exact key and body after restart', async () => {
+	test('independent callers with no local state share the current review, and anchored retries keep their successor after later work', async () => {
 		const remote = await fixture()
-		const first = await caller(remote.url)
-		remote.state.loseNextAdmission = true
-		const unknown = await Effect.runPromise(first.client.review('session', { pr }))
-		expect(unknown._tag).toBe('AdmissionUnknown')
-		expect([...first.durable.values.values()]).toEqual([
-			expect.objectContaining({ _tag: 'Prepared' }),
-		])
-		const second = await caller(remote.url, first.durable)
-		const result = await Effect.runPromise(second.client.review('session', { pr }))
-		expect(result._tag).toBe('Accepted')
-		expect(remote.admissions.size).toBe(1)
-		expect(remote.requests[1]).toEqual(remote.requests[0])
-		expect([...first.durable.values.values()]).toEqual([
-			expect.objectContaining({ _tag: 'Accepted' }),
-		])
+		const one = await caller(remote.url)
+		const two = await caller(remote.url)
+		const run = <A>(effect: Effect.Effect<A, unknown>) => Effect.runPromise(effect)
+		const initial = await run(one.client.review({ pr }))
+		expect(await run(two.client.review({ pr: `${pr}/` }))).toEqual(initial)
+
+		const successor = await run(one.client.continue({ after: initial.operation }))
+		const later = await run(one.client.continue({ after: successor.operation }))
+		expect(await run(two.client.continue({ after: initial.operation }))).toEqual(successor)
+		expect(await run(two.client.review({ pr }))).toEqual(later)
+		expect(remote.successors.size).toBe(2)
+		expect(remote.requests).toHaveLength(6)
 	})
 
 	test.each([
-		401, 403, 404,
-	])('a %s refusal of a retry after a lost committed response keeps the Prepared receipt for exact recovery', async (status) => {
+		'review',
+		'continue',
+		'restart',
+	] as const)('a lost %s response is admission_unknown with an exact-repeat instruction, and the repeat recovers the committed operation', async (operation) => {
 		const remote = await fixture()
-		const local = await caller(remote.url)
-		remote.state.loseNextAdmission = true
-		expect((await Effect.runPromise(local.client.review('session', { pr })))._tag).toBe(
-			'AdmissionUnknown',
-		)
-		const prepared = [...local.durable.values.values()]
-		expect(prepared).toEqual([expect.objectContaining({ _tag: 'Prepared' })])
-
-		remote.state.handleRequest = (_method, _path, response) => {
-			response.writeHead(status).end()
-			return true
+		const { tools } = await caller(remote.url)
+		const anchor = remote.create(pr).operation
+		const call = () => {
+			if (operation === 'review') return tools.pipeline_review.execute({ pr }, context('call_a'))
+			if (operation === 'continue')
+				return tools.pipeline_continue.execute({ after: anchor }, context('call_a'))
+			return tools.pipeline_restart.execute({ after: anchor }, context('call_a'))
 		}
-		const refused = await Effect.runPromise(Effect.flip(local.client.review('session', { pr })))
-		expect(refused.code).toBe('refused')
-		expect([...local.durable.values.values()]).toEqual(prepared)
+		remote.state.loseNext = true
+		const lost = await failure(call())
+		expect(lost.metadata).toMatchObject({ code: 'admission_unknown' })
+		expect(lost.message).toContain('Repeat this exact tool call with identical arguments')
+		expect(lost.message).toContain('may have started')
+		expect(lost.message).toContain('recover the accepted or current work')
 
-		remote.state.handleRequest = () => false
-		const restarted = await caller(remote.url, local.durable)
-		const recovered = await Effect.runPromise(restarted.client.review('session', { pr }))
-		const [committed] = [...remote.admissions.values()]
-		expect(acceptedAdmission(recovered)).toMatchObject({
-			taskId: committed?.dispatch.task.id,
-			commandId: committed?.dispatch.command.id,
-		})
-		expect(remote.admissions.size).toBe(1)
-		expect(remote.requests).toHaveLength(3)
+		const operationsAfterLoss = remote.operations.size
+		const recovered = await Effect.runPromise(call())
+		expect(remote.operations.size).toBe(operationsAfterLoss)
+		expect(remote.requests).toHaveLength(2)
 		expect(remote.requests[1]).toEqual(remote.requests[0])
-		expect(remote.requests[2]).toEqual(remote.requests[0])
+		if (operation !== 'review')
+			expect(recovered.output?.operation).toBe(remote.successors.get(`${operation}:${anchor}`))
 	})
 
-	test('restored context shows recovery requests for Prepared receipts, only references for Accepted ones, and hides mutations from reviewers', async () => {
+	test.each([
+		'continue',
+		'restart',
+	] as const)('a %s whose readiness takes longer than ten seconds is accepted once, and an identical retry is unchanged', async (action) => {
 		const remote = await fixture()
-		const first = await caller(remote.url)
-		const message = 'Please verify the fix with the retained checkout.'
-		remote.state.loseNextAdmission = true
-		await Effect.runPromise(
-			first.client.resume('ses_pipeline', {
-				...remote.initial,
-				afterCommandId: remote.initial.commandId,
-				message,
-			}),
-		)
-		const restarted = await caller(remote.url, first.durable)
-		const prepared = contextEvent()
-		await Effect.runPromise(restorePipelineContext(restarted.receipts, prepared))
-		const preparedText = JSON.stringify(prepared.system)
-		expect(preparedText).toContain('pipeline_resume')
-		expect(preparedText).toContain(message)
-		expect(preparedText).not.toContain(remote.requests[0]?.key)
-		expect(preparedText).not.toContain(token)
-
-		await Effect.runPromise(
-			restarted.client.resume('ses_pipeline', {
-				taskId: remote.initial.taskId,
-				afterCommandId: remote.initial.commandId,
-				message,
-			}),
-		)
-		const accepted = contextEvent()
-		await Effect.runPromise(restorePipelineContext(restarted.receipts, accepted))
-		const acceptedText = JSON.stringify(accepted.system)
-		const [command] = [...remote.admissions.values()].map(({ dispatch }) => dispatch.command.id)
-		expect(acceptedText).toContain(command)
-		expect(acceptedText).toContain(remote.initial.commandId)
-		expect(acceptedText).not.toContain(message)
-
-		const reviewer = {
-			...contextEvent('review'),
-			tools: {
-				pipeline_review: { description: 'review', input: {} },
-				pipeline_interrupt: { description: 'interrupt', input: {} },
-				pipeline_wait: { description: 'wait', input: {} },
-			},
+		const { client } = await caller(remote.url)
+		const after = remote.create(pr, completed('Done.')).operation
+		const received = signal()
+		const ready = signal()
+		remote.state.hold = ready.promise
+		remote.state.handleRequest = () => {
+			received.resolve()
+			return false
 		}
-		await Effect.runPromise(restorePipelineContext(restarted.receipts, reviewer))
-		expect(Object.keys(reviewer.tools)).toEqual(['pipeline_wait'])
-		expect(reviewer.system).toHaveLength(0)
-	})
-
-	test('sticky review input conflicts, and only an explicit predecessor creates one fresh task', async () => {
-		const remote = await fixture()
-		const local = await caller(remote.url)
-		const first = await Effect.runPromise(local.client.review('session', { pr }))
-		if (first._tag !== 'Accepted') throw new Error('fixture admission failed')
-		const conflict = await Effect.runPromise(
-			Effect.flip(local.client.review('session', { pr, system: 'aarch64-linux' })),
-		)
-		expect(conflict.code).toBe('receipt_conflict')
-		expect(remote.requests).toHaveLength(1)
-		const fresh = await Effect.runPromise(
-			local.client.review('session', { pr, afterTaskId: first.taskId }),
-		)
-		const repeated = await Effect.runPromise(
-			local.client.review('session', { pr, afterTaskId: first.taskId }),
-		)
-		expect(fresh).toEqual(repeated)
-		expect(await Effect.runPromise(local.client.review('session', { pr }))).toEqual(fresh)
-		expect(fresh).not.toMatchObject({ taskId: first.taskId })
-		expect(remote.admissions.size).toBe(2)
-		const invalidPredecessor = await Effect.runPromise(
-			Effect.flip(local.client.review('session', { pr, afterTaskId: randomUUID() })),
-		)
-		expect(invalidPredecessor.code).toBe('receipt_conflict')
-	})
-
-	test('an explicitly fresh Prepared receipt remains the current receipt across restart', async () => {
-		const remote = await fixture()
-		const local = await caller(remote.url)
-		const first = await Effect.runPromise(local.client.review('session', { pr }))
-		if (first._tag !== 'Accepted') throw new Error('fixture admission failed')
-		remote.state.loseNextAdmission = true
-		const fresh = await Effect.runPromise(
-			local.client.review('session', { pr, afterTaskId: first.taskId }),
-		)
-		expect(fresh).toMatchObject({
-			_tag: 'AdmissionUnknown',
-			receipt: { afterTaskId: first.taskId },
-		})
-		const restarted = await caller(remote.url, local.durable)
-		const recovered = await Effect.runPromise(restarted.client.review('session', { pr }))
-		expect(recovered._tag).toBe('Accepted')
-		expect(recovered).not.toMatchObject({ taskId: first.taskId })
-		expect(remote.admissions.size).toBe(2)
-		expect(remote.requests[2]).toEqual(remote.requests[1])
-	})
-
-	test('resume recovers its anchored command across regenerated call IDs and rejects a changed message without another POST', async () => {
-		const remote = await fixture()
-		const local = await caller(remote.url)
-		const input = {
-			taskId: remote.initial.taskId,
-			afterCommandId: remote.initial.commandId,
-			message: 'Please verify the fix.',
-		}
-		remote.state.loseNextAdmission = true
-		const unknown = await Effect.runPromise(
-			local.tools.pipeline_resume.execute(input, context('call_one')),
-		)
-		expect(unknown.output?._tag).toBe('AdmissionUnknown')
-		const restarted = await caller(remote.url, local.durable)
 		const accepted = await Effect.runPromise(
-			restarted.tools.pipeline_resume.execute(input, context('call_two')),
+			Effect.gen(function* () {
+				const admitting = yield* client[action]({ after }).pipe(Effect.forkScoped)
+				yield* Effect.promise(() => received.promise)
+				yield* TestClock.adjust('11 seconds')
+				expect(admitting.pollUnsafe()).toBeUndefined()
+				ready.resolve()
+				return yield* Fiber.join(admitting)
+			}).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 		)
-		expect(acceptedAdmission(accepted.output)).toMatchObject({
-			taskId: input.taskId,
-			receipt: { operation: 'resume', afterCommandId: input.afterCommandId },
-		})
-		expect(
-			(
-				await Effect.runPromise(
-					restarted.tools.pipeline_resume.execute(input, context('call_three')),
-				)
-			).output,
-		).toEqual(accepted.output)
-		const changed = await Effect.runPromise(
-			Effect.flip(
-				restarted.tools.pipeline_resume.execute(
-					{ ...input, message: 'A different instruction' },
-					context('call_four'),
-				),
-			),
-		)
-		expect(changed.metadata).toMatchObject({ code: 'receipt_conflict' })
-		expect(remote.admissions.size).toBe(1)
+		expect(accepted.operation).toBe(remote.successors.get(`${action}:${after}`))
+		expect(await Effect.runPromise(client[action]({ after }))).toEqual(accepted)
+		expect(remote.successors.size).toBe(1)
 		expect(remote.requests).toHaveLength(2)
 		expect(remote.requests[1]).toEqual(remote.requests[0])
 	})
 
-	test('interrupt returns a dispatch receipt rather than a stop claim, and close is a separate logical mutation that deletes nothing', async () => {
+	test('a mutation response beyond the evaluation deadline is admission_unknown', async () => {
 		const remote = await fixture()
-		const local = await caller(remote.url)
-		remote.update({
-			command: acknowledged(remote.view().command),
-			observation: running,
-		})
-		const input = { taskId: remote.initial.taskId, afterCommandId: remote.initial.commandId }
-		const interrupted = await Effect.runPromise(
-			local.tools.pipeline_interrupt.execute(input, context('call_interrupt')),
+		const { client } = await caller(remote.url)
+		const after = remote.create(pr, completed('Done.')).operation
+		const received = signal()
+		remote.state.hold = new Promise(() => {})
+		remote.state.handleRequest = () => {
+			received.resolve()
+			return false
+		}
+		const error = await Effect.runPromise(
+			Effect.gen(function* () {
+				const admitting = yield* Effect.flip(client.continue({ after })).pipe(Effect.forkScoped)
+				yield* Effect.promise(() => received.promise)
+				yield* TestClock.adjust(evaluationResponseDeadlineMs - 1)
+				expect(admitting.pollUnsafe()).toBeUndefined()
+				yield* TestClock.adjust(1)
+				return yield* Fiber.join(admitting)
+			}).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 		)
-		expect(interrupted.output).toMatchObject({
-			_tag: 'Accepted',
-			taskId: input.taskId,
-			receipt: { operation: 'interrupt', afterCommandId: input.afterCommandId },
-		})
-		const { commandId } = acceptedAdmission(interrupted.output)
-		expect(commandId).not.toBe(input.afterCommandId)
-		expect(remote.commands.get(commandId)).toMatchObject({
-			kind: 'interrupt',
-			delivery: { _tag: 'Pending' },
-		})
-		expect(
-			(
-				await Effect.runPromise(
-					local.tools.pipeline_interrupt.execute(input, context('call_interrupt_again')),
-				)
-			).output,
-		).toEqual(interrupted.output)
+		expect(error.code).toBe('admission_unknown')
+		expect(remote.requests).toHaveLength(1)
+	})
 
-		const receipts = [...local.durable.values.entries()]
-		const closed = await Effect.runPromise(
-			local.tools.pipeline_close.execute({ taskId: input.taskId }, context('call_close')),
+	test('a review receipt naming the canonical URL of a renamed repository is accepted', async () => {
+		const remote = await fixture()
+		const { tools } = await caller(remote.url)
+		const canonical = remote.create('https://github.com/new-owner/renamed/pull/123')
+		remote.state.handleRequest = (_method, _path, response) => {
+			const { operation, pr, closed } = canonical
+			response
+				.writeHead(202, { 'content-type': 'application/json' })
+				.end(JSON.stringify({ operation, pr, closed }))
+			return true
+		}
+		const result = await Effect.runPromise(
+			tools.pipeline_review.execute({ pr }, context('call_renamed')),
 		)
-		expect(closed.output).toMatchObject({
-			id: input.taskId,
-			submissions: { _tag: 'Closed' },
-			placement: { _tag: 'Assigned', assignment },
+		expect(result.output).toEqual({
+			operation: canonical.operation,
+			pr: canonical.pr,
+			closed: false,
 		})
-		expect(remote.requests.map(({ method, path }) => ({ method, path }))).toEqual([
-			{ method: 'POST', path: `/tasks/${input.taskId}/interrupt` },
-			{ method: 'POST', path: `/tasks/${input.taskId}/close` },
-		])
-		expect(remote.state.closeCount).toBe(1)
-		expect(remote.state.observation).toEqual(running)
-		expect([...local.durable.values.entries()]).toEqual(receipts)
+		expect(remote.requests[0]?.body).toBe(JSON.stringify({ pr }))
+	})
+
+	test.each([
+		'continue',
+		'restart',
+		'interrupt',
+	] as const)('a %s receipt naming the wrong operation is not reported as admitted', async (route) => {
+		const remote = await fixture()
+		const { client } = await caller(remote.url)
+		const anchor = remote.create(pr).operation
+		remote.state.handleRequest = (_method, _path, response) => {
+			const value = {
+				operation: route === 'interrupt' ? randomUUID() : anchor,
+				pr,
+				closed: false,
+				...(route === 'interrupt' ? { status: 'Requested' } : {}),
+			}
+			response.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify(value))
+			return true
+		}
+		const operation = (() => {
+			if (route === 'continue') return client.continue({ after: anchor })
+			if (route === 'restart') return client.restart({ after: anchor })
+			return client.interrupt({ after: anchor })
+		})()
+		expect((await Effect.runPromise(Effect.flip(operation))).code).toBe('admission_unknown')
+	})
+
+	test('credentialed requests never follow redirects or expose the token in errors', async () => {
+		const destination = await fixture()
+		const remote = await fixture()
+		remote.state.redirect = destination.url
+		const { tools } = await caller(remote.url)
+		const error = await failure(tools.pipeline_review.execute({ pr }, context('call_redirect')))
+		expect(error.metadata).toMatchObject({ code: 'admission_unknown' })
+		expect(destination.requests).toHaveLength(0)
+		expect(JSON.stringify(error)).not.toContain(token)
+	})
+
+	test.each([
+		['operation_pending', 'Call pipeline_wait on it, then repeat this exact call'],
+		['native_unsettled', 'Native settlement or idleness has not been established'],
+		['observation_timeout', 'within its evaluation budget'],
+		['delivery_unconfirmed', 'never resubmit it'],
+		['stale_operation', 'Act on the current operation instead'],
+		['task_closed', 'accepts no further messages'],
+		['session_unavailable', 'native session is unavailable'],
+		['future_code', 'Pipeline state conflicts with this request'],
+	])('a %s conflict explains how to proceed and that this attempt submitted nothing', async (code, guidance) => {
+		const remote = await fixture()
+		const { tools } = await caller(remote.url)
+		remote.state.conflict = code
+		const after = remote.create(pr).operation
+		const error = await failure(
+			tools.pipeline_continue.execute({ after }, context('call_conflict')),
+		)
+		expect(error.metadata).toEqual({ code: 'conflict', conflict: code })
+		expect(error.message).toContain(guidance)
+		expect(error.message).toContain('this attempt submitted nothing new')
+		expect(error.message).toContain('does not prove an earlier attempt was not accepted')
+		expect(remote.operations.size).toBe(1)
+	})
+
+	test('an unknown operation is not_found and a refused credential is refused, not admission_unknown', async () => {
+		const remote = await fixture()
+		const { tools } = await caller(remote.url)
+		const missing = await failure(
+			tools.pipeline_continue.execute({ after: randomUUID() }, context('call_missing')),
+		)
+		expect(missing.metadata).toMatchObject({ code: 'not_found' })
+		const waitMissing = await failure(
+			tools.pipeline_wait.execute({ operation: randomUUID() }, context('call_wait_missing')),
+		)
+		expect(waitMissing.metadata).toMatchObject({ code: 'not_found' })
+
+		const client = await Effect.runPromise(
+			makePipelineClient({ url: remote.url, token: Redacted.make('wrong') }).pipe(
+				Effect.provide(FetchHttpClient.layer),
+			),
+		)
+		const refused = await Effect.runPromise(Effect.flip(client.review({ pr })))
+		expect(refused.code).toBe('refused')
+		expect(refused.message).toContain('does not prove an earlier attempt was not accepted')
+	})
+
+	test('malformed operation references and PR URLs are rejected at the tool schema boundary', async () => {
+		const remote = await fixture()
+		const { tools } = await caller(remote.url)
+		const operation = randomUUID()
+		const cases: Array<[Tool.Info, unknown, boolean]> = [
+			[tools.pipeline_review, { pr }, true],
+			[tools.pipeline_review, { pr: `${pr}/files` }, false],
+			[tools.pipeline_review, { pr: 'https://gitlab.com/owner/repo/pull/1' }, false],
+			[tools.pipeline_review, { pr: 'https://github.com/owner/repo/pull/0' }, false],
+			[tools.pipeline_continue, { after: operation }, true],
+			[tools.pipeline_continue, { after: operation.toUpperCase() }, false],
+			[tools.pipeline_continue, { after: `../${operation}` }, false],
+			[tools.pipeline_restart, { after: 'latest' }, false],
+			[tools.pipeline_interrupt, {}, false],
+			[tools.pipeline_wait, { operation: '' }, false],
+			[tools.pipeline_wait, { operation }, true],
+			[tools.pipeline_wait, { operation: `${operation}/events` }, false],
+		]
+		for (const [tool, input, valid] of cases) {
+			const schema = tool.input as Extract<Tool.ValueSchema, { readonly '~standard': unknown }>
+			const result = await schema['~standard'].validate(input)
+			expect([tool.name, input, result.issues === undefined]).toEqual([tool.name, input, valid])
+		}
 	})
 
 	test.each([
 		'review',
 		'research',
 		'worker',
-	])('denies %s mutations at execution even if tools are visible', async (agent) => {
+	])('%s agents cannot mutate even when tools are visible, but may wait', async (agent) => {
 		const remote = await fixture()
-		const local = await caller(remote.url)
-		const { taskId, commandId } = remote.initial
-		const operations = [
-			local.tools.pipeline_review
-				.execute({ pr }, context('call_review', agent))
-				.pipe(Effect.asVoid),
-			local.tools.pipeline_resume
-				.execute(
-					{ taskId, afterCommandId: commandId, message: 'again' },
-					context('call_resume', agent),
-				)
-				.pipe(Effect.asVoid),
-			local.tools.pipeline_interrupt
-				.execute({ taskId, afterCommandId: commandId }, context('call_interrupt', agent))
-				.pipe(Effect.asVoid),
-			local.tools.pipeline_close
-				.execute({ taskId }, context('call_close', agent))
-				.pipe(Effect.asVoid),
+		const { tools } = await caller(remote.url)
+		const operation = remote.create(pr, completed('Done.')).operation
+		const mutations = [
+			tools.pipeline_review.execute({ pr }, context('call_review', agent)),
+			tools.pipeline_continue.execute({ after: operation }, context('call_continue', agent)),
+			tools.pipeline_restart.execute({ after: operation }, context('call_restart', agent)),
+			tools.pipeline_interrupt.execute({ after: operation }, context('call_interrupt', agent)),
 		]
-		for (const operation of operations)
-			expect((await Effect.runPromise(Effect.flip(operation))).metadata).toMatchObject({
+		for (const mutation of mutations)
+			expect((await failure(Effect.asVoid(mutation))).metadata).toMatchObject({
 				code: 'forbidden',
 			})
 		expect(remote.requests).toHaveLength(0)
-		expect(local.durable.values.size).toBe(0)
-		const read = await Effect.runPromise(
-			local.tools.pipeline_wait.execute(
-				{ taskId, commandId, timeoutMs: 0 },
-				context('call_wait', agent),
-			),
+
+		const waited = await Effect.runPromise(
+			tools.pipeline_wait.execute({ operation }, context('call_wait', agent)),
 		)
-		expect(read.output?._tag).toBe('Pending')
+		expect(waited.content).toEqual([{ type: 'text', text: 'Done.' }])
+		expect(routes(remote.requests)).toEqual([['GET', '/operations/:op/events']])
+	})
+
+	test('session context hides every mutation tool from non-primary agents only', () => {
+		const visible = () =>
+			Object.fromEntries(
+				[...pipelineMutationTools, 'pipeline_wait'].map((name) => [
+					name,
+					{ description: name, input: {} },
+				]),
+			)
+		const reviewer = { agent: Agent.ID.make('review'), tools: visible() }
+		hidePipelineMutations(reviewer)
+		expect(Object.keys(reviewer.tools)).toEqual(['pipeline_wait'])
+		const primary = { agent: Agent.ID.make('limitless'), tools: visible() }
+		hidePipelineMutations(primary)
+		expect(Object.keys(primary.tools)).toHaveLength(pipelineMutationTools.length + 1)
 	})
 })
 
-describe('foreground Pipeline wait', () => {
-	test('the default wait has no total budget and leaves a healthy event body open beyond an hour', async () => {
+describe('Pipeline wait', () => {
+	test('Completed returns exactly the native final message as content, never earlier output or a wrapper', async () => {
+		const remote = await fixture()
+		const { tools } = await caller(remote.url)
+		const anchor = remote.create(pr, completed('Earlier preamble from the previous turn.'))
+		const operation = remote.create(pr, { _tag: 'Queued' }).operation
+		const final = '## Verdict\n\nApprove.  \n\n```ts\nconst exact = "  spacing"\n```\n'
+		remote.state.onEvents = (response) => {
+			remote.update(operation, { _tag: 'Running' })
+			response.write(remote.frame(operation))
+			remote.update(operation, { _tag: 'Pending' })
+			response.write(remote.frame(operation))
+			remote.update(operation, completed(final))
+			response.write(remote.frame(operation))
+		}
+		const progress: Array<string> = []
+		const result = await Effect.runPromise(
+			tools.pipeline_wait.execute(
+				{ operation },
+				context('call_wait', 'limitless', (update) =>
+					Effect.sync(() => {
+						if (update.state !== undefined) progress.push(update.state)
+					}),
+				),
+			),
+		)
+		expect(result.content).toEqual([{ type: 'text', text: final }])
+		expect(JSON.stringify(result.content)).not.toContain(
+			anchor.state._tag === 'Completed' ? anchor.state.message.text : 'unreachable',
+		)
+		expect(result.output).toEqual(remote.operations.get(operation))
+		expect(progress).toEqual(['Queued', 'Running', 'Pending', 'Completed'])
+	})
+
+	test('NDJSON frames decode across arbitrary chunk boundaries and heartbeats', async () => {
 		const remote = await fixture()
 		const { client } = await caller(remote.url)
-		expect(
-			Schema.decodeUnknownSync(WaitInput)({ ...remote.initial, timeoutMs: 3600000 }).timeoutMs,
-		).toBe(3600000)
-		remote.state.onEvents = (response) => {
-			remote.update({ command: acknowledged(remote.view().command), observation: running })
-			response.write(remote.frame(remote.initial.commandId))
+		const operation = remote.create(pr, { _tag: 'Preparing' }).operation
+		remote.state.onEvents = async (response) => {
+			remote.update(operation, { _tag: 'DeliveryUnconfirmed' })
+			const split = remote.frame(operation)
+			for (const piece of [split.slice(0, 7), split.slice(7, 30), split.slice(30)]) {
+				response.write(piece)
+				await delay(5)
+			}
+			response.write('\n \n')
+			remote.update(operation, { _tag: 'Running' })
+			const running = remote.frame(operation)
+			remote.update(operation, { _tag: 'NeedsInput', permissions: 1, forms: 0 })
+			response.write(`${running}\n${remote.frame(operation)}`)
 		}
+		const result = await Effect.runPromise(client.wait({ operation }))
+		expect(result).toMatchObject({ operation, state: { _tag: 'NeedsInput', permissions: 1 } })
+		expect(remote.state.eventCount).toBe(1)
+	})
+
+	test('an already settled initial stream view returns without any JSON read', async () => {
+		const remote = await fixture()
+		const { tools } = await caller(remote.url)
+		const settled: Array<OperationState> = [
+			{ _tag: 'NeedsInput', permissions: 0, forms: 1 },
+			{ _tag: 'Failed', error: { type: 'ProviderError', message: 'quota' } },
+			{ _tag: 'Interrupted', reason: 'user' },
+			{ _tag: 'InputCancelled' },
+			{ _tag: 'CompletedWithoutMessage' },
+			{ _tag: 'Unavailable', message: 'history unreadable' },
+			{ _tag: 'CancelledBeforeSend' },
+			{ _tag: 'Rejected', message: 'session unavailable' },
+		]
+		for (const state of settled) {
+			const operation = remote.create(pr, state).operation
+			const result = await Effect.runPromise(
+				tools.pipeline_wait.execute({ operation }, context('call_wait')),
+			)
+			expect(result.output).toMatchObject({ operation, state })
+			expect(result.content).toEqual([{ type: 'text', text: JSON.stringify(result.output) }])
+		}
+		expect(remote.state.eventCount).toBe(settled.length)
+		expect(new Set(routes(remote.requests).map(([, path]) => path))).toEqual(
+			new Set(['/operations/:op/events']),
+		)
+	})
+
+	test.each([
+		['an ended event body', ''],
+		['a truncated final frame', '{"operation":'],
+	])('%s reconnects the event stream without a JSON read or any submission', async (_name, tail) => {
+		const remote = await fixture()
+		const operation = remote.create(pr, { _tag: 'Running' }).operation
+		remote.state.onEvents = (response, count) => {
+			if (count === 1) {
+				response.end(tail)
+				return
+			}
+			remote.update(operation, completed('Done.'))
+			response.end(remote.frame(operation))
+		}
+		const { client } = await caller(remote.url)
+		const result = await Effect.runPromise(client.wait({ operation }))
+		expect(result).toMatchObject({ state: { _tag: 'Completed' } })
+		expect(routes(remote.requests)).toEqual([
+			['GET', '/operations/:op/events'],
+			['GET', '/operations/:op/events'],
+		])
+	})
+
+	test('a first view that arrives long after the immediate heartbeat still returns the exact final text', async () => {
+		const remote = await fixture()
+		const { tools } = await caller(remote.url)
+		const operation = remote.create(pr, { _tag: 'Running' }).operation
+		const final = 'Verdict: approve.\n'
+		remote.state.initialView = false
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
-				const ready = yield* Deferred.make<void>()
-				const completed = yield* Deferred.make<void>()
-				const waiting = yield* client
-					.wait(remote.initial, (update) => {
-						if (update.status !== 'Acknowledged/Running') return Effect.void
-						return Deferred.succeed(ready, undefined).pipe(Effect.asVoid)
-					})
-					.pipe(
-						Effect.tap(() => Deferred.succeed(completed, undefined)),
-						Effect.forkScoped,
-					)
-				yield* Deferred.await(ready)
-				yield* TestClock.adjust('1 hour')
-				expect(yield* Deferred.isDone(completed)).toBe(false)
-				expect(remote.requests).toHaveLength(2)
-				remote.publish({ observation: idle })
+				const waiting = yield* tools.pipeline_wait
+					.execute({ operation }, context('call_slow'))
+					.pipe(Effect.forkScoped)
+				yield* Effect.promise(() => remote.eventOpened)
+				yield* TestClock.adjust(nativeEvaluationBudgetMs)
+				expect(waiting.pollUnsafe()).toBeUndefined()
+				remote.publish(operation, completed(final))
 				return yield* Fiber.join(waiting)
 			}).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 		)
-		expect(result).toMatchObject({ _tag: 'Observed', view: { observation: idle } })
-		expect(remote.requests.every((request) => request.method === 'GET')).toBe(true)
+		expect(result.content).toEqual([{ type: 'text', text: final }])
+		expect(routes(remote.requests)).toEqual([['GET', '/operations/:op/events']])
 	})
 
-	test('zero timeout reads once and reports Observed only for acknowledged native settlement or dispatch-only finishes', async () => {
+	test.each([
+		['after', true],
+		['before', false],
+	])('cancelling a wait %s its initial view releases the event stream without interrupting or closing', async (_name, initialView) => {
 		const remote = await fixture()
 		const { client } = await caller(remote.url)
-		const input = { ...remote.initial, timeoutMs: 0 }
-		const command = remote.view().command
-		const cases: Array<[CommandReceipt, NativeObservation, string]> = [
-			[command, idle, 'Pending'],
-			[deliver(command, { _tag: 'Unconfirmed' }), idle, 'Pending'],
-			[deliver(command, { _tag: 'Unconfirmed' }), { _tag: 'InputCancelled' }, 'Pending'],
-			[acknowledged(command), running, 'Pending'],
-			[acknowledged(command), { _tag: 'Pending', messageIds: ['msg_queued'] }, 'Pending'],
-			[acknowledged(command), { _tag: 'Unavailable', message: 'worker offline' }, 'Pending'],
-			[acknowledged(command), idle, 'Observed'],
-			[
-				acknowledged(command),
-				{ _tag: 'NeedsInput', permissionIds: ['per_1'], formIds: [] },
-				'Observed',
-			],
-			[acknowledged(command), { _tag: 'InputCancelled' }, 'Observed'],
-			[deliver(command, { _tag: 'CancelledBeforeSend' }), running, 'Observed'],
-			[
-				deliver(command, {
-					_tag: 'Rejected',
-					reason: { code: 'session_unavailable', message: 'gone' },
-				}),
-				{ _tag: 'NotObserved' },
-				'Observed',
-			],
-		]
-		for (const [next, observation, expected] of cases) {
-			remote.update({ command: next, observation })
-			const result = await Effect.runPromise(client.wait(input))
-			expect([next.delivery._tag, observation._tag, result._tag]).toEqual([
-				next.delivery._tag,
-				observation._tag,
-				expected,
-			])
-		}
-		expect(remote.requests).toHaveLength(cases.length)
-		expect(remote.state.eventCount).toBe(0)
-	})
-
-	test('stream updates through Unconfirmed delivery report progress only on changes and ignore heartbeats', async () => {
-		const remote = await fixture()
-		const { client } = await caller(remote.url)
-		const progress: Array<string> = []
-		const waiting = Effect.runPromise(
-			client.wait({ ...remote.initial, timeoutMs: 3000 }, (update) =>
-				Effect.sync(() => {
-					if (update.status !== undefined) progress.push(update.status)
-				}),
-			),
-		)
+		const operation = remote.create(pr, { _tag: 'Running' }).operation
+		remote.state.initialView = initialView
+		const fiber = Effect.runFork(client.wait({ operation }))
 		await remote.eventOpened
-		const command = remote.view().command
-		remote.publish({ observation: { _tag: 'NotObserved' } })
-		remote.publish({ command: deliver(command, { _tag: 'Unconfirmed' }), observation: idle })
-		remote.publish({ command: acknowledged(command), observation: running })
-		remote.publish({ observation: idle })
-		expect(await waiting).toMatchObject({ _tag: 'Observed' })
-		expect(progress).toEqual([
-			'Pending/NotObserved',
-			'Unconfirmed/Idle',
-			'Acknowledged/Running',
-			'Acknowledged/Idle',
-		])
-		expect(remote.requests.map((request) => request.path.endsWith('/events'))).toEqual([
-			false,
-			true,
-		])
-	})
-
-	test('disconnect reconnects with a durable read and does not resubmit', async () => {
-		const remote = await fixture()
-		remote.state.onEvents = (response, count) => {
-			if (count === 1) {
-				response.end()
-				return
-			}
-			remote.update({ command: acknowledged(remote.view().command), observation: idle })
-			response.end(remote.frame(remote.initial.commandId))
-		}
-		const { client } = await caller(remote.url)
-		const result = await Effect.runPromise(client.wait({ ...remote.initial, timeoutMs: 3000 }))
-		expect(result._tag).toBe('Observed')
-		expect(remote.requests.map(({ method, path }) => [method, path.endsWith('/events')])).toEqual([
-			['GET', false],
-			['GET', true],
-			['GET', false],
-			['GET', true],
-		])
-	})
-
-	test('a truncated final NDJSON frame reconnects through a durable read without resubmitting', async () => {
-		const remote = await fixture()
-		remote.state.onEvents = (response, count) => {
-			if (count === 1) {
-				response.end('{"task":')
-				return
-			}
-			remote.update({ command: acknowledged(remote.view().command), observation: idle })
-			response.end(remote.frame(remote.initial.commandId))
-		}
-		const { client } = await caller(remote.url)
-		const result = await Effect.runPromise(client.wait(remote.initial))
-		expect(result._tag).toBe('Observed')
-		expect(remote.requests.map(({ method, path }) => [method, path.endsWith('/events')])).toEqual([
-			['GET', false],
-			['GET', true],
-			['GET', false],
-			['GET', true],
-		])
-	})
-
-	test('timeout and interruption detach their streams without interrupt, close, or admission', async () => {
-		const remote = await fixture()
-		const { client } = await caller(remote.url)
-		remote.update({ command: acknowledged(remote.view().command), observation: running })
-		const fiber = Effect.runFork(client.wait(remote.initial))
-		await remote.eventOpened
+		const [subscription] = remote.events.keys()
+		const released = signal()
+		subscription?.on('close', released.resolve)
 		await Effect.runPromise(Fiber.interrupt(fiber))
-		expect(
-			await Effect.runPromise(client.wait({ ...remote.initial, timeoutMs: 100 })),
-		).toMatchObject({ _tag: 'Pending', view: { observation: running } })
-		expect(remote.requests.every((request) => request.method === 'GET')).toBe(true)
-		expect(remote.state.closeCount).toBe(0)
+		await released.promise
+		expect(remote.events.size).toBe(0)
+		expect(remote.requests.every(({ method }) => method === 'GET')).toBe(true)
 	})
 
-	test('unreadable state is Unavailable, not a failed command or a new admission', async () => {
-		const remote = await fixture()
-		remote.state.readStatus = 503
-		const { client } = await caller(remote.url)
-		const result = await Effect.runPromise(client.wait({ ...remote.initial, timeoutMs: 0 }))
-		expect(result).toMatchObject({ _tag: 'Unavailable', ...remote.initial })
-		expect(remote.requests).toHaveLength(1)
-	})
-})
-
-describe('Pipeline response identity validation', () => {
-	const misroutes: Array<Misroute> = [
-		'task',
-		'command',
-		'relation',
-		'placement',
-		'nativeSession',
-		'nativeMessage',
-	]
-
-	test.each(misroutes)('a read with a misrouted %s is Unavailable', async (field) => {
+	test('a healthy subscription has no total budget', async () => {
 		const remote = await fixture()
 		const { client } = await caller(remote.url)
-		const invalid = misrouted(remote.view(), field)
-		remote.state.handleRequest = (_method, _path, response) => {
-			response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(invalid))
-			return true
-		}
-		expect((await Effect.runPromise(client.wait({ ...remote.initial, timeoutMs: 0 })))._tag).toBe(
-			'Unavailable',
-		)
-	})
-
-	test.each(
-		misroutes,
-	)('cannot observe the requested command using a streamed misrouted %s', async (field) => {
-		const remote = await fixture()
-		const { client } = await caller(remote.url)
-		const invalid = misrouted(remote.view(), field)
-		remote.state.onEvents = (response) => {
-			response.write(`${JSON.stringify(invalid)}\n`)
-		}
-		const progress: Array<string> = []
+		const operation = remote.create(pr, { _tag: 'Running' }).operation
 		const result = await Effect.runPromise(
-			client.wait(remote.initial, (update) =>
-				Effect.sync(() => {
-					if (update.status !== undefined) progress.push(update.status)
-				}),
-			),
+			Effect.gen(function* () {
+				const opened = yield* Deferred.make<void>()
+				remote.state.onEvents = () => Deferred.doneUnsafe(opened, Effect.void)
+				const waiting = yield* client.wait({ operation }).pipe(Effect.forkScoped)
+				yield* Deferred.await(opened)
+				yield* TestClock.adjust('2 hours')
+				expect(waiting.pollUnsafe()).toBeUndefined()
+				remote.publish(operation, completed('Done.'))
+				return yield* Fiber.join(waiting)
+			}).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 		)
-		expect(result).toMatchObject({
-			_tag: 'Unavailable',
-			view: { command: { id: remote.initial.commandId } },
-		})
-		expect(progress).toEqual(['Pending/NotObserved'])
-		expect(remote.requests).toHaveLength(2)
+		expect(result).toMatchObject({ state: { _tag: 'Completed' } })
+		expect(remote.state.eventCount).toBe(1)
 	})
 
-	test.each([
-		'pr',
-		'relation',
-		'hash',
-	] as const)('does not accept a review receipt with a mismatched %s response', async (field) => {
+	test('persistent unavailability returns Unavailable without implying the operation did not start', async () => {
 		const remote = await fixture()
-		const local = await caller(remote.url)
-		const current = remote.view()
-		const invalid = (() => {
-			switch (field) {
-				case 'pr':
-					return {
-						task: {
-							...current.task,
-							request: { kind: 'review', pr: 'https://github.com/other/repo/pull/456' },
-						},
-						command: current.command,
-					}
-				case 'relation':
-					return { task: current.task, command: { ...current.command, taskId: randomUUID() } }
-				case 'hash':
-					return {
-						task: current.task,
-						command: {
-							...current.command,
-							requestHash: reviewIntent({ kind: 'review', pr, system: 'aarch64-linux' }),
-						},
-					}
-			}
-		})()
-		remote.state.handleRequest = (_method, _path, response) => {
-			response.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify(invalid))
-			return true
-		}
-		expect((await Effect.runPromise(local.client.review('session', { pr })))._tag).toBe(
-			'AdmissionUnknown',
-		)
-		expect([...local.durable.values.values()]).toEqual([
-			expect.objectContaining({ _tag: 'Prepared' }),
-		])
-	})
-
-	test.each([
-		'task',
-		'anchor',
-		'kind',
-		'message',
-	] as const)('does not accept a resume receipt with a different %s', async (field) => {
-		const remote = await fixture()
-		const local = await caller(remote.url)
-		const input = {
-			taskId: remote.initial.taskId,
-			afterCommandId: remote.initial.commandId,
-			message: 'continue',
-		}
-		const other = makeTask()
-		const { task } = remote.view()
-		const hash = resumeIntent(input.taskId, input)
-		const dispatch = (() => {
-			switch (field) {
-				case 'task':
-					return {
-						task: other,
-						command: makeCommand(other.id, 'resume', hash, input.afterCommandId),
-					}
-				case 'anchor':
-					return { task, command: makeCommand(input.taskId, 'resume', hash, randomUUID()) }
-				case 'kind':
-					return {
-						task,
-						command: makeCommand(input.taskId, 'interrupt', hash, input.afterCommandId),
-					}
-				case 'message': {
-					const changed = resumeIntent(input.taskId, {
-						...input,
-						message: 'a different instruction',
-					})
-					return {
-						task,
-						command: makeCommand(input.taskId, 'resume', changed, input.afterCommandId),
-					}
+		const { client } = await caller(remote.url)
+		const operation = remote.create(pr, { _tag: 'Running' }).operation
+		remote.state.readStatus = 503
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				const waiting = yield* client.wait({ operation }).pipe(Effect.forkScoped)
+				for (let step = 0; step < 60 && waiting.pollUnsafe() === undefined; step++) {
+					yield* Effect.promise(() => delay(5))
+					yield* TestClock.adjust('5 seconds')
 				}
-			}
-		})()
-		remote.state.handleRequest = (_method, _path, response) => {
-			response.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify(dispatch))
-			return true
-		}
-		expect((await Effect.runPromise(local.client.resume('session', input)))._tag).toBe(
-			'AdmissionUnknown',
+				return yield* Fiber.join(waiting)
+			}).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 		)
-		expect([...local.durable.values.values()]).toEqual([
-			expect.objectContaining({ _tag: 'Prepared' }),
-		])
+		expect(result).toMatchObject({ _tag: 'Unavailable', operation })
+		if (!('_tag' in result) || result._tag !== 'Unavailable')
+			throw new Error('expected Unavailable')
+		expect(result.message).toContain('does not show whether the operation started')
+		expect(remote.requests.length).toBeGreaterThan(2)
+		expect(remote.requests.every(({ method }) => method === 'GET')).toBe(true)
 	})
 
-	test('does not accept an interrupt receipt whose request hash names another intent', async () => {
+	test.each([
+		'initial',
+		'later',
+	])('an %s streamed view for another operation is Unavailable, never a result', async (position) => {
 		const remote = await fixture()
-		const local = await caller(remote.url)
-		const input = { taskId: remote.initial.taskId, afterCommandId: remote.initial.commandId }
-		const changed = interruptIntent(randomUUID(), input)
-		const dispatch = {
-			task: remote.view().task,
-			command: makeCommand(input.taskId, 'interrupt', changed, input.afterCommandId),
-		}
-		remote.state.handleRequest = (_method, _path, response) => {
-			response.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify(dispatch))
-			return true
-		}
-		expect((await Effect.runPromise(local.client.interrupt('session', input)))._tag).toBe(
-			'AdmissionUnknown',
-		)
-		expect([...local.durable.values.values()]).toEqual([
-			expect.objectContaining({ _tag: 'Prepared' }),
-		])
+		const { client } = await caller(remote.url)
+		const operation = remote.create(pr, { _tag: 'Running' }).operation
+		const other = remote.create(pr, completed('Not this operation.')).operation
+		remote.state.initialView = position === 'later'
+		remote.state.onEvents = (response) => response.write(remote.frame(other))
+		const result = await Effect.runPromise(client.wait({ operation }))
+		expect(result).toMatchObject({ _tag: 'Unavailable', operation })
+		expect(JSON.stringify(result)).not.toContain('Not this operation.')
 	})
 })
 
 describe('Pipeline HTTP resource deadlines', () => {
-	test('the ten-second JSON deadline includes a stalled body after successful headers', async () => {
+	test('the JSON deadline exceeds the native evaluation budget and includes a stalled body', async () => {
 		const remote = await fixture()
 		const { client } = await caller(remote.url)
-		const started = requestSignal()
+		const operation = remote.create(pr).operation
+		const started = signal()
 		remote.state.handleRequest = (_method, _path, response) => {
 			response.writeHead(200, { 'content-type': 'application/json' })
-			response.write('{"task":')
+			response.write('{"operation":')
 			started.resolve()
 			return true
 		}
 		const error = await Effect.runPromise(
 			Effect.gen(function* () {
-				const reading = yield* Effect.flip(client.read(remote.initial)).pipe(Effect.forkScoped)
+				const reading = yield* Effect.flip(client.read(operation)).pipe(Effect.forkScoped)
 				yield* Effect.promise(() => started.promise)
-				yield* TestClock.adjust('10 seconds')
+				yield* TestClock.adjust(evaluationResponseDeadlineMs - 1)
+				expect(reading.pollUnsafe()).toBeUndefined()
+				yield* TestClock.adjust(1)
 				return yield* Fiber.join(reading)
 			}).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 		)
@@ -1031,55 +753,50 @@ describe('Pipeline HTTP resource deadlines', () => {
 		expect(JSON.stringify(error)).not.toContain(token)
 	})
 
-	test('a stalled event handshake is aborted at ten seconds and retried through a durable read', async () => {
+	test.each([
+		['handshake', undefined],
+		['404 body', 404],
+		['409 body', 409],
+	] as const)('a stalled event %s is aborted at ten seconds and the stream is retried', async (_part, status) => {
 		const remote = await fixture()
 		const { client } = await caller(remote.url)
-		const started = requestSignal()
-		const closed = requestSignal()
+		const operation = remote.create(pr, { _tag: 'Running' }).operation
+		const started = signal()
+		const closed = signal()
 		remote.state.handleRequest = (_method, path, response) => {
 			if (!path.endsWith('/events')) return false
 			response.on('close', closed.resolve)
+			if (status !== undefined) {
+				response.writeHead(status, { 'content-type': 'application/json' })
+				response.write('{"code":')
+			}
 			started.resolve()
 			return true
 		}
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
-				const waiting = yield* client.wait(remote.initial).pipe(Effect.forkScoped)
+				const waiting = yield* client.wait({ operation }).pipe(Effect.forkScoped)
 				yield* Effect.promise(() => started.promise)
 				yield* TestClock.adjust('10 seconds')
 				yield* Effect.promise(() => closed.promise)
 				remote.state.handleRequest = () => false
 				remote.state.onEvents = (response) => {
-					remote.update({ command: acknowledged(remote.view().command), observation: idle })
-					response.end(remote.frame(remote.initial.commandId))
+					remote.update(operation, completed('Done.'))
+					response.end(remote.frame(operation))
 				}
 				yield* TestClock.adjust(250)
 				return yield* Fiber.join(waiting)
 			}).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
 		)
-		expect(result._tag).toBe('Observed')
-		expect(remote.requests.map(({ method, path }) => [method, path.endsWith('/events')])).toEqual([
-			['GET', false],
-			['GET', true],
-			['GET', false],
-			['GET', true],
+		expect(result).toMatchObject({ state: { _tag: 'Completed' } })
+		expect(routes(remote.requests)).toEqual([
+			['GET', '/operations/:op/events'],
+			['GET', '/operations/:op/events'],
 		])
 	})
 })
 
 describe('Pipeline credential and schema boundary', () => {
-	test('credentialed requests never follow redirects or expose the token in errors or receipts', async () => {
-		const destination = await fixture()
-		const remote = await fixture()
-		remote.state.redirect = destination.url
-		const local = await caller(remote.url)
-		const result = await Effect.runPromise(local.client.review('session', { pr }))
-		expect(result._tag).toBe('AdmissionUnknown')
-		expect(destination.requests).toHaveLength(0)
-		expect(JSON.stringify(result)).not.toContain(token)
-		expect(JSON.stringify([...local.durable.values.values()])).not.toContain(token)
-	})
-
 	test('configuration rejects credentialed/non-origin/insecure URLs and defaults to disabled', async () => {
 		expect(await Effect.runPromise(normalizePipelinePluginConfig({}))).toEqual({ enabled: false })
 		for (const url of [
@@ -1123,17 +840,17 @@ describe('Pipeline credential and schema boundary', () => {
 		)
 	})
 
-	test('all caller tools expose portable provider schemas and receipts remain schema-decodable', async () => {
+	test('all caller tools expose portable provider schemas', async () => {
 		const remote = await fixture()
-		const local = await caller(remote.url)
-		expect(Object.keys(local.tools)).toEqual([
+		const { tools } = await caller(remote.url)
+		expect(Object.keys(tools)).toEqual([
 			'pipeline_review',
-			'pipeline_resume',
+			'pipeline_continue',
+			'pipeline_restart',
 			'pipeline_wait',
 			'pipeline_interrupt',
-			'pipeline_close',
 		])
-		for (const tool of Object.values(local.tools)) {
+		for (const tool of Object.values(tools)) {
 			expect(tool.input['~standard'].jsonSchema.input({ target: 'draft-07' })).toMatchObject({
 				type: 'object',
 			})
@@ -1141,9 +858,5 @@ describe('Pipeline credential and schema boundary', () => {
 				JSON.stringify(tool.output?.['~standard'].jsonSchema.output({ target: 'draft-2020-12' })),
 			).not.toThrow()
 		}
-		await Effect.runPromise(local.client.review('session', { pr }))
-		expect(Schema.decodeUnknownSync(Receipt)([...local.durable.values.values()][0])._tag).toBe(
-			'Accepted',
-		)
 	})
 })

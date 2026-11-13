@@ -1,14 +1,14 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { NodeServices } from '@effect/platform-node'
-import { Effect, Layer, Schema } from 'effect'
+import { Deferred, Effect, Layer, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import { expect, test } from 'vitest'
 import { PipelineConfig } from '../config'
 import { Scheduler } from '../scheduler'
 import { routesLayer } from '../server'
-import { CommandView, DispatchReceipt, Task, TaskView } from '../tasks/schema'
 import { Tasks } from '../tasks/service'
+import { OperationReceipt, OperationView } from '../workflow'
 import { coordinator, review, settings } from './fixtures'
 
 async function harness() {
@@ -26,15 +26,11 @@ async function harness() {
 			Layer.provide(HttpServer.layerServices),
 		),
 	)
-	const request = (url: string, method = 'GET', body?: unknown, key?: string) =>
+	const request = (url: string, method = 'GET', body?: unknown) =>
 		handler(
 			new Request(`http://localhost${url}`, {
 				method,
-				headers: {
-					authorization: `Bearer ${token}`,
-					'content-type': 'application/json',
-					...(key === undefined ? {} : { 'idempotency-key': key }),
-				},
+				headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
 				...(body === undefined ? {} : { body: JSON.stringify(body) }),
 			}),
 		)
@@ -52,114 +48,102 @@ async function harness() {
 	}
 }
 
-const decode =
-	<S extends Schema.ConstraintDecoder<unknown>>(schema: S) =>
-	async (response: Response): Promise<S['Type']> => {
-		const body = await response.json()
-		expect(JSON.stringify(body)).not.toMatch(/runId|afterRunId|"result"/)
-		return Schema.decodeUnknownSync(schema)(body)
-	}
-const receipt = decode(DispatchReceipt)
+const receipt = async (response: Response) =>
+	Schema.decodeUnknownSync(OperationReceipt)(await response.json())
 
-test('every route requires auth and dispatch routes return durable idempotent receipts', async () => {
-	const { handler, request, tick, dispose } = await harness()
+test('authenticated workflow routes recover semantic actions without caller keys and reject obsolete task routes', async () => {
+	const { handler, request, tick, control, dispose } = await harness()
 	try {
 		const id = '11111111-1111-4111-8111-000000000001'
 		for (const [url, method] of [
 			['/health', 'GET'],
-			['/tasks', 'POST'],
-			[`/tasks/${id}`, 'GET'],
-			[`/tasks/${id}/resume`, 'POST'],
-			[`/tasks/${id}/interrupt`, 'POST'],
-			[`/tasks/${id}/close`, 'POST'],
-			[`/tasks/${id}/commands/${id}`, 'GET'],
-			[`/tasks/${id}/commands/${id}/events`, 'GET'],
+			['/reviews', 'POST'],
+			[`/operations/${id}`, 'GET'],
+			[`/operations/${id}/events`, 'GET'],
+			...['continue', 'restart', 'interrupt'].map(
+				(action) => [`/operations/${id}/${action}`, 'POST'] as const,
+			),
 		] as const) {
 			expect((await handler(new Request(`http://localhost${url}`, { method }))).status).toBe(401)
 		}
-		expect((await request('/tasks', 'POST', review())).status).toBe(400)
-
+		expect((await request('/tasks', 'POST', { kind: 'review', ...review() })).status).toBe(404)
+		expect((await request('/reviews', 'POST', { pr: 'not-a-pr' })).status).toBe(400)
 		const responses = await Promise.all([
-			request('/tasks', 'POST', review(), 'first'),
-			request('/tasks', 'POST', review(), 'first'),
+			request('/reviews', 'POST', review()),
+			request('/reviews', 'POST', review()),
 		])
 		expect(responses.map((response) => response.status)).toEqual([202, 202])
-		const [first, duplicate] = await Promise.all(responses.map(receipt))
-		expect(duplicate).toEqual(first)
-		if (first === undefined) throw new Error('Missing submission')
-		expect(
-			(await request('/tasks', 'POST', { ...review(), system: 'aarch64-linux' }, 'first')).status,
-		).toBe(409)
-
-		const base = `/tasks/${first.task.id}`
+		const first = await receipt(responses[0])
+		expect(await receipt(responses[1])).toEqual(first)
+		expect(Object.keys(first).sort()).toEqual(['closed', 'operation', 'pr'])
+		const base = `/operations/${first.operation}`
+		expect((await request(`${base}/continue`, 'POST')).status).toBe(409)
 		await tick()
-		const resumeBody = { afterCommandId: first.command.id, message: 'Continue.' }
-		const resumed = await receipt(await request(`${base}/resume`, 'POST', resumeBody, 'next'))
-		const again = await receipt(await request(`${base}/resume`, 'POST', resumeBody, 'next'))
-		expect(again.command.id).toBe(resumed.command.id)
-		expect(resumed.command).toMatchObject({
-			kind: 'resume',
-			afterCommandId: first.command.id,
-			delivery: { _tag: 'Pending', step: 'send' },
-		})
-
-		const closed = await decode(Task)(await request(`${base}/close`, 'POST'))
-		expect(closed.submissions._tag).toBe('Closed')
-		expect((await request(`${base}/resume`, 'POST', resumeBody, 'late')).status).toBe(409)
-		const interrupt = await request(
-			`${base}/interrupt`,
-			'POST',
-			{ afterCommandId: first.command.id },
-			'stop',
-		)
-		expect(interrupt.status).toBe(202)
-
-		const view = await decode(TaskView)(await request(base))
-		expect(view.commands.map((command) => [command.kind, command.delivery._tag])).toEqual([
-			['review', 'Acknowledged'],
-			['resume', 'CancelledBeforeSend'],
-			['interrupt', 'Pending'],
-		])
-		const command = await decode(CommandView)(await request(`${base}/commands/${first.command.id}`))
-		expect(command.observation._tag).toBe('Running')
-		expect((await request(`${base}/commands/${id}`)).status).toBe(404)
-		expect(
-			(await request(`/tasks/${id}/resume`, 'POST', { ...resumeBody, afterCommandId: id }, 'x'))
-				.status,
-		).toBe(404)
+		expect((await request(`${base}/continue`, 'POST')).status).toBe(409)
+		control.observation = { _tag: 'Idle' }
+		control.result = {
+			_tag: 'Completed',
+			message: { id: 'msg_final', text: 'Exact native response\n\nSecond part.' },
+		}
+		const resumed = await receipt(await request(`${base}/continue`, 'POST'))
+		expect(resumed.operation).not.toBe(first.operation)
+		expect(await receipt(await request(`${base}/continue`, 'POST'))).toEqual(resumed)
+		expect((await request(`${base}/close`, 'POST')).status).toBe(404)
+		expect((await request(`/operations/${resumed.operation}/close`, 'POST')).status).toBe(404)
+		expect(await receipt(await request('/reviews', 'POST', review()))).toEqual(resumed)
+		expect((await request(`/operations/${id}`)).status).toBe(404)
+		expect((await request('/operations/invalid')).status).toBe(400)
 	} finally {
 		await dispose()
 	}
 })
 
-test('command events stream NDJSON views until the acknowledged command is observed idle', async () => {
+test('NDJSON carries the native result, not merely idle, and reconnecting retains the operation result', async () => {
 	const { request, tick, control, dispose } = await harness()
 	try {
-		const first = await receipt(await request('/tasks', 'POST', review(), 'first'))
-		const url = `/tasks/${first.task.id}/commands/${first.command.id}/events`
+		const first = await receipt(await request('/reviews', 'POST', review()))
+		const url = `/operations/${first.operation}/events`
 		const response = await request(url)
 		expect(response.headers.get('content-type')).toContain('application/x-ndjson')
 		const reader = response.body?.getReader()
 		if (reader === undefined) throw new Error('Missing event stream')
 		const decoder = new TextDecoder()
-		let text = decoder.decode((await reader.read()).value, { stream: true })
+		let text = ''
+		while (text.trim() === '') text += decoder.decode((await reader.read()).value, { stream: true })
 		await tick()
 		control.observation = { _tag: 'Idle' }
+		control.result = {
+			_tag: 'Completed',
+			message: { id: 'msg_final', text: 'Native final message.' },
+		}
 		await tick()
 		for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read())
 			text += decoder.decode(chunk.value, { stream: true })
 		const views = text
 			.split('\n')
-			.filter((line) => line !== '')
-			.map((line) => Schema.decodeUnknownSync(CommandView)(JSON.parse(line)))
-		expect(views[0]?.command.delivery._tag).toBe('Pending')
-		expect(views.at(-1)).toMatchObject({
-			command: { delivery: { _tag: 'Acknowledged' } },
-			observation: { _tag: 'Idle' },
-		})
+			.filter(Boolean)
+			.map((line) => Schema.decodeUnknownSync(OperationView)(JSON.parse(line)))
+		expect(views[0]?.state._tag).toBe('Queued')
+		expect(views.at(-1)).toMatchObject({ operation: first.operation, state: control.result })
+		expect((await (await request(url)).text()).trim().split('\n')).toHaveLength(1)
+	} finally {
+		await dispose()
+	}
+})
 
-		const reconnect = (await (await request(url)).text()).trim().split('\n')
-		expect(reconnect).toHaveLength(1)
+test('event transport opens before slow native reconstruction and cancellation releases that read', async () => {
+	const { request, tick, control, runtime, dispose } = await harness()
+	try {
+		const first = await receipt(await request('/reviews', 'POST', review()))
+		await tick()
+		control.resultGate = await runtime.runPromise(Deferred.make<void>())
+		const response = await request(`/operations/${first.operation}/events`)
+		const reader = response.body?.getReader()
+		if (reader === undefined) throw new Error('Missing event stream')
+		expect(new TextDecoder().decode((await reader.read()).value)).toBe('\n')
+		await runtime.runPromise(Deferred.await(control.resultStarted))
+		await reader.cancel()
+		expect(control.resultsInterrupted).toBe(1)
 	} finally {
 		await dispose()
 	}

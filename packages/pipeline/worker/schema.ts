@@ -43,6 +43,24 @@ export const NativeObservation = Schema.Union([
 })
 export type NativeObservation = typeof NativeObservation.Type
 
+export const NativeResult = Schema.Union([
+	Schema.TaggedStruct('Pending', {}),
+	Schema.TaggedStruct('Completed', {
+		message: Schema.Struct({ id: Schema.String, text: Schema.String }),
+	}),
+	Schema.TaggedStruct('Failed', {
+		error: Schema.Struct({ type: Schema.String, message: Schema.String }),
+	}),
+	Schema.TaggedStruct('Interrupted', { reason: Schema.String }),
+	Schema.TaggedStruct('InputCancelled', {}),
+	Schema.TaggedStruct('CompletedWithoutMessage', {}),
+	Schema.TaggedStruct('Unavailable', { message: Schema.String }),
+]).annotate({
+	description:
+		'The outcome of one admitted native input, read from durable session history. Pending covers queued input, live execution, a shutdown awaiting native recovery, and background work the input launched that has not yet reported back. Unavailable means the final response cannot be attributed to this input.',
+})
+export type NativeResult = typeof NativeResult.Type
+
 export class WorkerError extends Schema.TaggedError<WorkerError>()('WorkerError', {
 	code: Schema.Literals(['unavailable', 'incompatible', 'ownership', 'protocol']),
 	message: Schema.String,

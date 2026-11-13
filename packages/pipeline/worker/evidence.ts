@@ -6,7 +6,7 @@ import {
 	SessionMessage,
 } from '@opencode/client/effect'
 import { Effect, Option, Stream } from 'effect'
-import { nativeRequest } from './client'
+import { failure, nativeRequest, RequestDeadline } from './client'
 
 export const location = (directory: string) => ({ directory: AbsolutePath.make(directory) })
 
@@ -29,22 +29,64 @@ export const deliveredMessage = Effect.fn('OpenCodeWorker.deliveredMessage')(fun
 		)
 })
 
+type LogInput = Parameters<OpenCodeClient['experimental']['session']['log']>[0]
+type LogItem = Stream.Success<ReturnType<OpenCodeClient['experimental']['session']['log']>>
+export type DurableEvent = Exclude<LogItem, { readonly type: 'log.synced' }>
+export type LogSeq = NonNullable<LogInput['after']>
+
+const replayDeadline = '2 minutes'
+
+/**
+ * Folds the session's finite durable log after `after` until `visit` returns a value. Without a value, the
+ * replay must reach its sync marker, whose sequence is the watermark for a later incremental replay, so
+ * absence is never inferred from a partial or truncated replay.
+ */
+export const replayLog = Effect.fn('OpenCodeWorker.replayLog')(function* <A>(
+	client: OpenCodeClient,
+	sessionID: Session.ID,
+	visit: (event: DurableEvent) => A | undefined,
+	after?: LogSeq,
+) {
+	let found: A | undefined
+	let synced: { readonly seq?: LogSeq | undefined } | undefined
+	yield* client.experimental.session
+		.log({ sessionID, follow: false, ...(after === undefined ? {} : { after }) })
+		.pipe(
+			Stream.runForEachWhile((item) =>
+				Effect.sync(() => {
+					if (item.type === 'log.synced') {
+						synced = item
+						return false
+					}
+					found = visit(item)
+					return found === undefined
+				}),
+			),
+			nativeRequest,
+			Effect.provideService(RequestDeadline, replayDeadline),
+		)
+	if (found !== undefined) return { found: Option.some(found), seq: undefined }
+	if (synced === undefined)
+		return yield* failure(
+			'unavailable',
+			'The native session history replay ended before it was complete',
+		)
+	return { found: Option.none<A>(), seq: synced.seq ?? after }
+})
+
 export const admissionInJournal = Effect.fn('OpenCodeWorker.admissionInJournal')(function* (
 	client: OpenCodeClient,
 	sessionID: Session.ID,
 	messageId: string,
 ) {
-	return yield* client.experimental.session.log({ sessionID, follow: false }).pipe(
-		Stream.take(100_001),
-		Stream.filter(
-			(event) =>
-				event.type === 'session.inbox.enqueued' &&
-				event.data.sessionID === sessionID &&
-				event.data.inboxID === messageId,
-		),
-		Stream.runHead,
-		nativeRequest,
+	const { found } = yield* replayLog(client, sessionID, (event) =>
+		event.type === 'session.inbox.enqueued' &&
+		event.data.sessionID === sessionID &&
+		event.data.inboxID === messageId
+			? event
+			: undefined,
 	)
+	return found
 })
 
 export const wasCancelled = Effect.fn('OpenCodeWorker.wasCancelled')(function* (
@@ -52,16 +94,12 @@ export const wasCancelled = Effect.fn('OpenCodeWorker.wasCancelled')(function* (
 	sessionID: Session.ID,
 	messageId: string,
 ) {
-	const event = yield* client.experimental.session.log({ sessionID, follow: false }).pipe(
-		Stream.take(100_001),
-		Stream.filter(
-			(event) =>
-				event.type === 'session.inbox.cancelled' &&
-				event.data.sessionID === sessionID &&
-				event.data.inboxID === messageId,
-		),
-		Stream.runHead,
-		nativeRequest,
+	const { found } = yield* replayLog(client, sessionID, (event) =>
+		event.type === 'session.inbox.cancelled' &&
+		event.data.sessionID === sessionID &&
+		event.data.inboxID === messageId
+			? event
+			: undefined,
 	)
-	return Option.isSome(event)
+	return Option.isSome(found)
 })

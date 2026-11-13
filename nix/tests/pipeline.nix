@@ -422,7 +422,14 @@ pkgs.runCommand "pipeline-check"
       assert.equal((await fetch(`''${base}/health`, {
         headers: { Authorization: "Bearer incorrect" },
       })).status, 401, "Health must reject incorrect auth");
-      assert.equal((await fetch(`''${base}/tasks/00000000-0000-4000-8000-000000000000`, { headers })).status, 404);
+      const unknownOperation = `''${base}/operations/00000000-0000-4000-8000-000000000000`;
+      assert.equal((await fetch(unknownOperation, { headers })).status, 404);
+      assert.equal((await fetch(unknownOperation)).status, 401, "Operations must require auth");
+      assert.equal((await fetch(`''${base}/reviews`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pr: "https://github.com/owner/repo/pull/1" }),
+      })).status, 401, "Reviews must require auth");
       assert((await stat(database)).size > 0, "Packaged SQLite schema was not initialized");
       child.kill("SIGTERM");
       const deadline = AbortSignal.timeout(10000);

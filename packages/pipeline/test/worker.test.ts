@@ -548,3 +548,24 @@ test('interrupt returns only a native receipt and neither cancels inbox items no
 		backgroundJobs: 0,
 	})
 })
+
+test('a finished background job keeps the session running until its notice is admitted', async () => {
+	const f = fixture()
+	f.state.jobs = [
+		{
+			kind: 'shell',
+			id: 'shl_checks',
+			sessionID: identity.sessionId,
+			status: 'completed',
+			time: { started: 0, completed: 1 },
+			shellID: 'shl_checks',
+			command: 'make check',
+		},
+	]
+	expect(await f.run((service) => service.observe(worker, identity))).toEqual({
+		_tag: 'Running',
+		backgroundJobs: 1,
+	})
+	f.state.jobs = []
+	expect(await f.run((service) => service.observe(worker, identity))).toEqual({ _tag: 'Idle' })
+})

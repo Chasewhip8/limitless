@@ -1,222 +1,224 @@
-# Pipeline dispatch model
+# Pipeline review workflow model
 
 ## Scope
 
-This model covers the clean Capsule integration approved on 2026-11-12: Athena
-owns dispatch and routing, Capsule owns retained source and the execution
-environment, and OpenCode owns workspaces, sessions, execution and history. The
-baseline is the helper-based model validated on 2026-11-11; its source digest was
-`4d45a97cdd71f858e92023afad46ce26aa669a869e9de14ae8495e0b8dea4a81`.
+This pass covers the retained review interface approved on 2026-11-13: PR-only
+submission, fixed continuation, coordinator-owned recovery across conversations,
+and operation-specific native final responses. It examines the working tree based
+on `bf2deec658d034a46bbc5c7506a2b0af7849facb`, including uncommitted workflow changes.
+Validation of this pass is recorded below; it does not describe the live fleet.
 
-The implementation is the current working tree on commit `2fef97e`, including
-uncommitted Capsule and Pipeline changes. Its 122-file source digest is
-`f940f6d6b91cad7f1a24b4d4f2912dac06fac7a1257b29eed4dee52999a7ce64`.
-The digest hashes sorted relative paths, a NUL, file bytes and another NUL. Inputs
-are:
+The historical pre-removal 49-file source digest is
+`e0458e09cbc71ee72c1d9bc058aec5d79bdc449112ff86bc6dbf5726bd45a6e2`.
+It hashes sorted relative paths, NUL, file bytes, NUL for `.ts`/`.json` files
+beneath `packages/pipeline` and `packages/limitless/tools/pipeline`, plus
+`packages/limitless/test/pipeline.test.ts`, `nix/tests/{pipeline.nix,pipeline-runtime.mjs,home.nix}`,
+`skills/review-pr/SKILL.md`, and root `package.json`, `bun.lock`, `flake.nix`,
+`flake.lock`, `tsconfig.json`. Documentation is excluded from that digest.
 
-- `.ts`/`.json` beneath `packages/pipeline`, `packages/capsule` and
-  `packages/limitless/tools/pipeline`, excluding `node_modules`;
-- `packages/limitless/index.ts`, `packages/limitless/package.json` and
-  `packages/limitless/test/pipeline.test.ts`;
-- Nix modules `home`, `capsule`, `pipeline`, `opencode` and `service`;
-- Nix packages `capsule`, `pipeline`, `limitless`, `opencode`, `opencode-bun`,
-  plus the `opencode-capsule.ts` bridge;
-- Nix checks `capsule`, `pipeline`, `opencode-capsule` and their
-  `validate-capsule.mjs`, `pipeline-runtime.mjs`, `validate-opencode-capsule.mjs`
-  fixtures; all `nix/patches/opencode-*.patch` files;
-- root `flake.nix`, `flake.lock`, `package.json`, `bun.lock` and `tsconfig.json`.
+The previous Capsule integration baseline was validated on 2026-11-12 against
+122 source files with digest
+`f940f6d6b91cad7f1a24b4d4f2912dac06fac7a1257b29eed4dee52999a7ce64` and filtered
+snapshot `/nix/store/zzcrls7lfzzxrvld2grfhziyrav7yc1n-source`. Its 359 tests and
+three host runners passed. That evidence remains historical for Capsule source,
+runtime and host composition; this pass does not remap those subsystems.
 
-Documentation is excluded so recording validation does not change the digest.
-Every input matches the checked filtered source snapshot
-`/nix/store/zzcrls7lfzzxrvld2grfhziyrav7yc1n-source`.
-
-The native host is OpenCode 2.2.7 at
-`fedc6f208aa2bd54c1019227214568083f6380ad`, with the repository's
-[Capsule composition patch](../../../nix/patches/opencode-capsule.patch), event
-persistence and password-file patches. Stock 2.2.7 HTTP sessions do not expose
-workspace placement; the Capsule RPC captures the host's actual Core services.
-
-The user's clean-cutover decision removes legacy helper protocols, old-manifest
-adoption and conversion paths. Genuine borrowed `prepare` remains a Capsule
-operation. No live data is deleted or upgraded by this change.
-
-Automatic cleanup, review-result storage, verdict parsing and guaranteed process
-drainage inferred from native idle remain outside scope. Capsule routes core
-agent shell/file operations; PTYs, client filesystem endpoints and watchers are
-not relocated. Host-side automatic formatting is disabled for explicit workspace
-Locations before its probes can run.
+The native dependency is OpenCode 2.2.7, revision
+`fedc6f208aa2bd54c1019227214568083f6380ad`, with the repository's Capsule
+composition, durable-event and password-file patches. Native source inspection
+on 2026-11-13 established the result-association constraints below. Automatic
+cleanup, verdict interpretation, live provider behavior, and proof of global OS
+writer termination remain outside scope.
 
 ## Model
 
-[`tasks/machine.ts`](../../../packages/pipeline/tasks/machine.ts) defines dispatch
-transitions. Capsule's lifecycle and native execution evolve independently.
+### Identity and ownership
 
-| Machine | Meaning |
+| Entity | Identity and authority |
 | --- | --- |
-| Task submissions | Open accepts messages; Closed refuses future messages and cancels those not yet sent. It does not stop native execution or purge a Capsule. |
-| Placement | Unassigned or pinned to a worker origin, control Location, storage fingerprint, workspace ID, session ID and directory. Assignment is not execution status. |
-| Delivery | Pending owns session preparation and send. Unconfirmed records that a native write may have been sent. Acknowledged records positive native evidence. CancelledBeforeSend and Rejected concern dispatch only. |
-| Reservation | A coordinator-owned advisory session budget. Unresolved delivery holds it; native idle can release it without asserting OS process termination. |
-| Caller receipt | Prepared exact request/key becomes Accepted hashes/references after Athena acknowledges. This is not native execution completion. |
-| Capsule | Source intent, runtime phase, generation and optional managed-source provenance. Source preparation has its own retained ledger and per-ID writer lock. |
-| Native workspace | Provider and opaque binding, independent of the session referencing it. Destroying the workspace does not erase that session. |
+| Current review | GitHub base repository ID plus PR number maps to one retained task, shared across callers. Restart advances this mapping. |
+| Operation | Existing command UUID, passed opaquely by callers. Initial review and continuation are message operations; interrupt is an internal control command. |
+| Retained task | Worker origin, control Location, storage fingerprint, workspace, session and checkout. Open/Closed controls submissions, not native execution. |
+| Delivery | Pending, Unconfirmed, Acknowledged, Rejected or CancelledBeforeSend. Owned by Athena's outbox. |
+| Native execution | OpenCode owns queued prompts, steps, background jobs, input requests, history and responses. Athena reads these; it stores no copied verdict or transcript. |
+| Capsule | Owns source preparation, runtime phase, workspace binding and execution leases. Identity proof is distinct from executable readiness. |
 
-### Preparation and placement
+[`workflow.ts`](../../../packages/pipeline/workflow.ts) defines the public view;
+[`tasks/store.ts`](../../../packages/pipeline/tasks/store.ts) owns durable
+identity and transactions. The command UUID indexes its task directly, without
+another token or caller receipt subsystem. Deduplication depends on retaining
+coordinator records; restoring an older backup can invalidate it.
 
-The coordinator persists deterministic workspace/session IDs and the exact source
-spec before calling `prepareSession`. PR-to-source translation belongs to
-[`worker/source.ts`](../../../packages/pipeline/worker/source.ts); Capsule knows
-repositories, refs and commits, not PR semantics.
+### Workflow transitions
 
-The initial review moves from Pending `session` to Pending `send`. Resume and
-interrupt start at `send`; neither prepares missing resources. Preparation uses
-the host's fixed control Location and is idempotent for identical input:
+The service in [`tasks/service.ts`](../../../packages/pipeline/tasks/service.ts)
+checks native conditions outside SQL transactions. The store rechecks durable
+conditions when committing. Native idleness is not an atomic fence against a
+different native client writing directly into the session.
 
-1. Check storage identity and any existing session. A matching session takes a
-   read-only validation path, not another setup run.
-2. Refuse an operator-stopped or purged Capsule. Reserve the native workspace with
-   provider `capsule`, rejecting a conflicting provider before source setup.
-3. Create/resume Capsule's source and environment under its existing lifecycle
-   rules. The host disables stopped-state resumption; Capsule checks that policy
-   under its exclusive lifecycle lock, not only at host preflight. The `creating`
-   manifest binds the source intent before provisioning.
-4. Attach the prepared Capsule through the native workspace provider.
-5. Create the Core session with both the actual directory and workspace ID, then
-   validate the returned persisted session. Core may have adopted an existing ID
-   before checking the supplied creation arguments.
+| Action | Preconditions and commit | Recovery |
+| --- | --- | --- |
+| Review PR | Resolve GitHub identity. Return its current task's latest message operation, including closed or failed work. If absent, require an open PR and usable source; atomically insert task, first command and current mapping. | Always returns current work, which may have advanced. Existing work does not need fresh-checkout eligibility. |
+| Continue after operation | Current task's latest operation; open submissions; settled native predecessor, idle native session, ready/bound retained placement; no Pending or Unconfirmed command. Insert the fixed prompt once. | Unique resume/anchor pair returns its original successor before checking conditions, including after later progress. Failed prechecks recheck accepted actions to close concurrent-retry races. |
+| Restart after operation | Current/latest anchor, settled native work and no outstanding delivery. Definitively unsent work without earlier acknowledged prompts needs no invented native result. Resolve fresh source, then atomically close predecessor, insert successor and advance mapping. | Successor's initial command retains the restart anchor. Retry never advances twice. Old resources remain. |
+| Interrupt after operation | Current/latest anchor, including closed tasks. Definitely unsent input returns NotStarted; Unconfirmed blocks. Otherwise insert one control command. | Same anchor returns its request status. The target remains the waitable message operation, not the interrupt command. |
 
-These steps are not one transaction. Retained phases and repeated exact identities
-provide recovery across their commit boundaries. See
-[`host/service.ts`](../../../packages/capsule/src/host/service.ts),
-[`Capsule service`](../../../packages/capsule/src/service.ts) and the
-[native bridge](../../../nix/packages/opencode-capsule.ts).
+Continue/restart races have one transactional winner. An
+accepted control command also blocks a later action until its delivery settles.
+No action accepts arbitrary caller text. The reviewer owns its methodology;
+[`tasks/prompt.ts`](../../../packages/pipeline/tasks/prompt.ts) supplies only the
+fixed start/continue instructions and original authorization boundary.
 
-### Identity is not readiness
+### Delivery and retained resources
 
-`getSession` proves the session ID, caller owner, native workspace identity and
-directory against a retained Capsule manifest. A present native workspace must
-have the expected provider and matching non-null binding. An absent row or null
-binding is reported as an observation, never recreated. A missing Capsule
-manifest or conflicting ownership is refused.
+[`tasks/machine.ts`](../../../packages/pipeline/tasks/machine.ts) remains the
+authoritative delivery machine. Pending changes to Unconfirmed **before** a
+native write. A native prompt ID and exact body are durable before that boundary.
+Only positive acknowledgment or exact retained admission evidence clears
+Unconfirmed; idle, missing history, timeout and restart cannot requeue it.
+Acknowledgment removes the outgoing body from Athena.
 
-The response reports `capsulePhase` and `workspaceState` (`bound`, `unprovisioned`
-or `absent`). These are live observations, not new Pipeline-persisted execution
-states. The two predicates are distinct:
+A lost interrupt reply has no native exact command receipt and may remain
+Unconfirmed indefinitely. There is no force-resolution API.
+Advisory reservations remain held through uncertainty; observing native idle
+can release scheduling capacity but does not establish process drainage.
 
-- Review/resume admission requires phase `ready` and workspace `bound`.
-- Interrupt, exact admission reconciliation and history observation require
-  retained identity only. They remain valid after stop or purge, including after
-  native workspace destruction while its session and Capsule tombstone remain.
+The scheduler still prepares through Capsule's idempotent `prepareSession` RPC.
+Message admission requires ready/bound placement. Interruption and history only
+require retained identity, so stopped/purged Capsules and an explicitly removed
+native workspace row do not force session recreation. Scoped per-task passes
+keep slow preparation from serializing unrelated controls.
 
-Capsule inspection reads an atomically published manifest without taking an
-execution lease, so a blocked teardown hook does not block control validation.
-The snapshot never authorizes execution: connect and every spawn acquire leases
-and recheck phase. Stop may race an admission preflight; a prompt already
-attempted still follows the Unconfirmed rules below.
+### Native response association
 
-### Dispatch uncertainty
+The accepted queued prompt ID is the lower anchor. Native 2.2.7 has no universal
+prompt-to-final-response ID: one execution terminal describes a busy period,
+which can contain several queued prompts. Background completion can also wake
+another busy period after a foreground success. Queue versus steer is scheduling,
+not proof of causal ownership.
 
-- Pending changes to Unconfirmed transactionally **before** prompt or interrupt
-  delivery. Unconfirmed never returns to Pending because input is missing, the
-  Capsule stopped, or the native session appears idle.
-- Prompt responses, native inbox entries, delivered messages and retained original
-  admission events provide positive acknowledgment. Cancellation of an original
-  input does not authorize reusing its message ID.
-- A lost interrupt response has no corresponding exact receipt. It remains
-  Unconfirmed and blocks later commands for that task; investigation may be
-  necessary indefinitely. There is no force-resolution endpoint.
-- Acknowledgment removes Athena's outgoing body. Hashes, command IDs and native
-  references preserve idempotency; content and outputs remain in OpenCode.
-- Target-message waits do not report idle until the acknowledged input has been
-  consumed or cancelled. Native status is a current observation, not a permanent
-  task outcome or review verdict.
-- Logical close never clears delivery uncertainty, interrupts work, stops a
-  Capsule, or deletes source/history.
+[`worker/result.ts`](../../../packages/pipeline/worker/result.ts) folds durable
+history rather than selecting the latest assistant message. The result reader
+must distinguish the target's own delivery, successfully settled final assistant
+step, independent later input, and attributable native continuations. Text parts
+of that final message are joined with `\n\n`; reasoning, tool output, failed
+partial text and earlier preambles are excluded. A proven final assistant message
+without text is CompletedWithoutMessage; missing final-step evidence is unavailable.
 
-### Scheduling and process ownership
+Historical target completion takes precedence over later session activity.
+Unresolved targets may expose current native input requests. Permission/form
+answers remain in OpenCode. Missing history, incompatible evidence and ambiguous
+steering must remain unavailable, never fabricate completion or authorize replay.
+Finite log replay proves absence only after `log.synced`; the old 100,001-event
+absence cutoff is removed. Shutdown preserves a native recovery claim and cannot
+authorize continuation or restart merely because the process appears idle.
 
-The production scheduler has scoped per-task reconciliation, coalescing wake-ups
-while a pass is active. A long preparation therefore does not serialize unrelated
-task controls. Placement claims and SQL capacity/version checks still arbitrate
-the advisory budget. Preparation has a 15-minute full-response deadline;
-ordinary native operations use 15 seconds. These are request budgets, not model
-execution timeouts. See [`scheduler.ts`](../../../packages/pipeline/scheduler.ts)
-and [`worker/client.ts`](../../../packages/pipeline/worker/client.ts).
+Native shell and subagent launches are tracked by tool-result identities and
+matched to their synthetic completion notices. Outstanding notifications prevent
+success; a delivered notice requires a subsequent settled reviewer step. Completed
+jobs awaiting notification still count as native activity. Unknown tools or
+notices, ambiguous repeated launches, and detached/nested work found in a child
+session (including one named by a failed tool call) yield unavailable. A final
+step must not require local-tool or output-limit continuation. Recovery followed
+by another input before a new step is unavailable rather than a preamble result.
 
-Capsule lifecycle mutation takes an exclusive lease; commands take shared leases.
-The source engine separately holds one exclusive per-ID lock outside its source
-directory. The parent retains it between commands, and Git writers inherit the
-same locked description through the short-lived Node launcher. Source writers
-can therefore keep stop/purge busy after a creator dies. The removed root lock
-served only the old helper interlock and has no current role.
+A successful busy period with no outstanding obligations supplies a candidate.
+Independent input can close the historical interval. For the current operation,
+empty inbox, inactive session and empty background-job snapshots are followed by
+incremental replay: new durable events are folded before deciding. Five unstable
+snapshot/replay attempts return Pending, not a guessed success. These are native
+causal checks, not a prose-based verdict parser. Arbitrary plugins that hide
+detached work from native metadata remain outside the supported contract.
+
+### Observation and caller recovery
+
+The authenticated API exposes `/reviews` and `/operations/:operation`; old
+task-shaped mutation routes are removed. Caller tools have no local receipt
+storage, request hashes, random HTTP keys or receipt-context injection. Mutation
+filtering and execution-time primary-agent authorization remain separate guards.
+
+Wait connects directly to scoped NDJSON views, with an immediate heartbeat before
+the initial native read and periodic heartbeats thereafter. Healthy waits have no
+total timeout; connection failure recovery is bounded. Native evaluations and
+readonly continuation/restart preflights have a three-minute total budget, before
+any mutation. Caller JSON response deadlines exceed it by fifteen seconds.
+A disconnect only detaches the observer,
+never interrupts, releases capacity or resubmits. Completed tool content is native
+text, with a structured operation view retained separately. Unknown admission
+requires repeating exact tool arguments; a later refusal does not prove an
+earlier request was never accepted.
 
 ## Evidence
 
 | Claim | Basis and status | Reliance / next |
 | --- | --- | --- |
-| Delivery uncertainty is monotonic and blocks replay/followups. | Supported by typed transitions, SQL transactions and scheduler restart/lost-response tests. | Dispatch idempotency, not exactly-once model or tool effects. |
-| A negative native read cannot fence an earlier request. | Supported by pinned admission semantics and the earlier admission-rewind counterexample. | Keep Unconfirmed rather than requeueing. |
-| Preparation and session adoption preserve exact placement. | Supported by Capsule host tests, the native composition check and packaged Pipeline fixture. | Validate actual Core workspace placement, not descriptive metadata or an ordinary directory. |
-| Control and history survive runtime stop/purge. | Supported by host/worker/scheduler tests and the native fixture stopping during a blocked model request, then interrupting; purging and removing the workspace row preserve history without recreation. | Ownership proof stays separate from message-admission readiness. |
-| Slow preparation does not starve another task's interrupt. | Supported by the production-run-loop scheduler regression; serializing the loop makes it fail. | Scoped per-task work and service shutdown cancellation. |
-| Source exclusion survives process death without permanent child retention. | Supported by Node/Bun death, cancellation, descriptor-reuse and reclamation tests. | One per-ID inherited lock; no old-helper root coordination. |
-| Agent file/shell work uses Capsule and avoids host formatting. | Supported by native shell namespace/private-home checks, host-file denial, genuine agent writes, and workspace/local formatter controls. | Narrow core-agent boundary; not all native APIs or plugins. |
-| Athena has no execution/result journal. | Supported by the current four-table schema and payload-removal tests. | Native OpenCode remains the content/execution store. |
-| Native idle and interrupt acknowledgment do not establish global process drainage. | The pinned native contract and the user's accepted limitation remain applicable. Capsule adds command leases, not a claim about all Docker/host writers. | No automatic archive/delete or writer handoff. |
+| Fixed actions need no caller receipt ledger. | Supported by transactional PR/action identities and store concurrency/restart tests. | Retain coordinator records; backup rollback is outside this guarantee. |
+| Native readiness cannot be replaced by dispatch acknowledgment. | Supported by tasks tests covering pending, failed, unavailable, suspended, needs-input and ready/bound conditions. | Continue and restart stay blocked without positive settlement. |
+| Delivery uncertainty remains monotonic. | Supported by unchanged transitions and updated scheduler lost-response/lease tests. | No automatic native-send replay. |
+| A successful native busy period need not finish the review. | Supported by pinned native source and tests for background completion, terminal jobs awaiting notification, notice/read races, shutdown recovery and unsupported child work. The earlier first-terminal interpretation is contradicted. | Only positively attributable native chains return final text. |
+| Native response text can be retrieved without storing it at Athena. | Supported by result unit tests, API exact-text projections and the passing packaged host fixture. | Unsupported or ambiguous native causal chains remain unavailable. |
+| Populated legacy state is preserved, not guessed. | Supported by migration-refusal tests comparing schema, rows and migration records before/after. | Deployment blocked until an explicit reviewed state migration exists. |
 
-Repeat with `nix develop -c bun run ci`, then run the host-only runners
-`nix run .#checks.x86_64-linux.opencode-capsule`,
-`nix run .#checks.x86_64-linux.pipeline`, and
-`nix run .#checks.x86_64-linux.capsule`. Untracked source files require a filtered
+Rerun with `nix develop -c bun run ci`, then the host-only Pipeline runner
+`nix run .#checks.x86_64-linux.pipeline`. Untracked files require a filtered
 `path:<copy>` flake excluding `.git`, `.limitless`, `node_modules`, build-info and
-result links; never stage files merely to expose them to Nix.
+result links; do not stage merely to expose files to Nix. The fixture isolates
+HOME/XDG/database, Git remotes, model and credentials. It cannot establish live
+GitHub authentication, provider reliability or review quality.
 
-The native fixtures use isolated HOME/XDG/database paths, synthetic credentials,
-canonical GitHub URLs redirected to a loopback Git daemon, input-free Nix flakes
-and a fake model. Coordinator GitHub metadata is simulated. They establish
-orchestration and execution placement, not live GitHub authentication, provider
-availability or review quality. Fixtures close processes/connections in cleanup.
-The Pipeline fixture retains its reported directory on failure for diagnosis;
-the Capsule and native-host fixtures remove theirs even on failure.
+On 2026-11-13, independent final review approved the change after regressions fixed
+recovery preambles, repeated helper obligations, failed-child detached work, slow
+readiness evaluation, and stalled HTTP error bodies. The 125-test Pipeline/caller
+suite passed before the last error-body fix; all 46 caller tests passed afterward,
+including both added regressions. Final aggregate validation passed all **395 tests
+across 36 files**, and both typechecks passed. Initial host-load timeouts in two
+unchanged Capsule tests passed on isolated and aggregate reruns.
 
-Final validation on 2026-11-12 passed lint, both typechecks, all 359 tests across
-33 files, the x86_64 Linux flake checks, and all requested package builds. The
-three packaged host runners (`capsule`, `opencode-capsule`, `pipeline`) passed
-against the matching source snapshot. Pipeline's native fixture reported seven
-model calls and confirmed sandboxed execution, restart/resume, interruption after
-stop, retained history after purge and workspace-row removal, and logical close.
-Independent final review cleared the implementation after the atomic no-resume,
-declared control-address and caller-bundle boundary fixes.
-
-ARM Linux's Pipeline check and OpenCode derivations, and ARM macOS's OpenCode
-derivation, evaluated successfully but were not runtime-tested. Intel macOS
-evaluation is blocked by the unchanged Nixpkgs pin, which has dropped
-`x86_64-darwin`; this is not a Capsule integration regression. Live GitHub,
-Docker/OrbStack and fleet rollout were not exercised.
-
-The 2026-11-11 baseline's 264-test/helper integration result remains historical
-evidence for that earlier design, not validation of the current native Capsule
-boundary.
+All x86_64 Linux flake checks, requested package builds and the packaged Pipeline
+host runner passed on `/tmp/opencode/pipeline-review-final.SLS63c`. The runner made
+seven fake-model calls and verified exact results, fixed continuation, interruption,
+stop/purge retention and logical close. The final caller-only error-body timeout
+fix was then included in `/tmp/opencode/pipeline-review-verified.6PbJ91`, which
+again passed all x86_64 Linux flake checks and package builds and matches the
+49-file digest above. Other platforms and live services were not exercised.
 
 ## Checks
 
+### Caller close removal follow-up
+
+Interrupt is now the only caller stop control. The close tool, client method,
+public endpoint and Tasks service method are removed; cleanup belongs to future
+Pipeline service work. Internal closed-submission state remains for restart.
+Review uses `openai/gpt-6.1-sol#max`.
+
+The updated 49-file digest using the scope above is
+`d0c97a0e78ada06664de8f82a31ae6ab36dea23a158f071a8b2c2d373ed13db8`.
+The agent model file is outside this digest. Follow-up validation passed 367 tests
+with 28 environment-dependent tests skipped, both typechecks, and Biome. Focused
+caller/API/service coverage passed 57 tests, including absence of the close route.
+The native runner now checks retention after interruption, but was not rerun.
+Nix development-shell entry timed out; Nix and Markdown lint tools were unavailable
+in the ambient shell. Earlier full-build/native evidence above predates this
+follow-up and is not a validation of its changed source.
+
 | Check | Status |
 | --- | --- |
-| Coverage | Applied to dispatch, placement, host RPC, source/runtime ownership, native binding and caller receipts. PTY/client filesystem relocation and live-provider authentication are outside scope. |
-| Transitions | Applied to preparation/retry, positive acknowledgment, lost replies, pre-send cancellation, stopped/purged controls, resume, close and host restart. |
-| Boundaries | Applied to write-ahead intent, idempotent resource preparation, per-task concurrency, atomic snapshots and inherited writer locks. |
-| Evidence | Applied: source, fake-port/unit tests and real native-process fixtures are distinguished. The final 122-file digest matches the source used for aggregate/package/host validation. Cross-platform evaluation and live-provider gaps are stated above. |
-| Comparison | Applied: helper preparation and ordinary-directory sessions are replaced by Capsule-owned preparation and explicit native workspace placement. |
+| Coverage | Applied to review identity, actions, outbox, caller authorization and response attribution. Capsule internals retain their previous baseline. |
+| Transitions | Applied to concurrent creation/actions, lost responses, stale anchors, logical close, independent restart, native settlement and supported background causal chains. |
+| Boundaries | Applied to SQL commit/recovery, native write-ahead uncertainty and disconnect behavior. No native cross-client execution fence is claimed. |
+| Evidence | Applied: final aggregate tests, typechecks, lint, Linux flake/package checks, packaged native integration and independent review passed. Exact source digest and the caller-only follow-up are identified above. |
+| Comparison | Applied: workflow identity moved to coordinator; result retrieval added; native busy-period versus final-response distinction corrected. |
 
 ## Changes
 
-Compared with the 2026-11-11 helper baseline, checkout preparation is folded into
-the idempotent session-preparation operation. Source and runtime lifecycle belong
-to Capsule; Pipeline no longer owns a helper protocol or filesystem-status DTO.
-Native workspace placement returns through the Capsule composition boundary,
-without restoring the former run gates, result ledger or verdict protocol.
+Compared with the 2026-11-12 Capsule baseline, review identity is global rather
+than caller-scoped. Fixed anchored actions replace arbitrary resume requests,
+caller hashes/keys and injected receipt context. The stored command UUID is the
+public opaque operation. Restart requires current/latest anchors to
+protect newer work. Waiting retrieves native results rather than equating idle
+with an observed end of work.
 
-The unchanged distinction is dispatch versus execution: Pipeline records what it
-intends to send and what it can positively confirm, while OpenCode owns actual
-execution and history. The new distinction is retained session identity versus
-current executable readiness. Neither is a migration or adoption mechanism.
+The native background-completion limitation is a correction in understanding,
+not a new upstream guarantee. Capsule placement and outbox uncertainty remain
+separate from execution completion. Migration 0002 refuses populated legacy
+databases; this implementation neither upgrades nor mutates the live deployment.

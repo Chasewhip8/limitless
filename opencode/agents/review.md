@@ -1,7 +1,7 @@
 ---
 description: Reviews pull request designs, consolidates and validates tests, and delivers an approved or failed verdict.
 mode: primary
-model: openai/gpt-6-astra#xhigh
+model: openai/gpt-6.1-sol#max
 color: "#B2DFDB"
 permissions:
     - action: subagent

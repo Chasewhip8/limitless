@@ -1,13 +1,13 @@
 import { Effect, Fiber, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { expect, test } from 'vitest'
-import { commandEventBody } from '../http-events'
+import { operationEventBody } from '../http-events'
 
-test('idle event bodies heartbeat every 15 seconds without querying task state', async () => {
+test('event bodies open immediately and heartbeat every 15 seconds while the first view is unavailable', async () => {
 	const lines = await Effect.runPromise(
 		Effect.gen(function* () {
-			const body = yield* commandEventBody(Stream.never).pipe(
-				Stream.take(2),
+			const body = yield* operationEventBody(Stream.never).pipe(
+				Stream.take(3),
 				Stream.runCollect,
 				Effect.forkChild,
 			)
@@ -18,10 +18,10 @@ test('idle event bodies heartbeat every 15 seconds without querying task state',
 		}).pipe(Effect.provide(TestClock.layer())),
 	)
 	expect(lines.early).toBeUndefined()
-	expect(lines.bytes.map((bytes) => new TextDecoder().decode(bytes))).toEqual(['\n', '\n'])
+	expect(lines.bytes.map((bytes) => new TextDecoder().decode(bytes))).toEqual(['\n', '\n', '\n'])
 })
 
 test('settled event bodies stop their heartbeat instead of keeping the response open', async () => {
-	const bytes = await Effect.runPromise(commandEventBody(Stream.empty).pipe(Stream.runCollect))
-	expect(bytes).toEqual([])
+	const bytes = await Effect.runPromise(operationEventBody(Stream.empty).pipe(Stream.runCollect))
+	expect(bytes.map((bytes) => new TextDecoder().decode(bytes))).toEqual(['\n'])
 })

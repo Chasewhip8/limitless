@@ -2,6 +2,7 @@ import type { HostInfo, SessionPlacement } from '@limitless/capsule/rpc'
 import { Deferred, Effect, Layer, ManagedRuntime, Queue, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { PipelineConfig, type PipelineSettings } from '../config'
+import { PullRequestUnavailable } from '../github/schema'
 import { GitHub } from '../github/service'
 import { schedulerLayer } from '../scheduler'
 import type { PullRequest, ReviewRequest } from '../tasks/schema'
@@ -9,6 +10,7 @@ import { tasksLayer } from '../tasks/service'
 import { taskStoreLayer } from '../tasks/store'
 import {
 	type NativeObservation,
+	type NativeResult,
 	type SessionIdentity,
 	type Worker,
 	WorkerError,
@@ -53,7 +55,6 @@ export const host: HostInfo = {
 	checkoutRoot: '/tmp/opencode/pipeline-test-checkouts',
 }
 export const review = (pr = 1): ReviewRequest => ({
-	kind: 'review',
 	pr: `https://github.com/test/repo/pull/${pr}`,
 })
 
@@ -69,6 +70,12 @@ export function fakeWorker() {
 		readinessNotifies: false,
 		unreachable: false,
 		observation: { _tag: 'Running', backgroundJobs: 0 } as NativeObservation,
+		result: { _tag: 'Pending' } as NativeResult,
+		resultGate: null as Deferred.Deferred<void> | null,
+		resultStarted: Effect.runSync(Deferred.make<void>()),
+		resultsInterrupted: 0,
+		githubClosed: false,
+		githubUnavailable: false,
 		/** The native write happens, but its reply is lost. */
 		loseAdmitReply: false,
 		/** The native write never happens and the reply is lost. */
@@ -165,6 +172,21 @@ export function fakeWorker() {
 				yield* reachable()
 				return control.observation
 			}),
+		result: (_worker, session, messageId) =>
+			Effect.gen(function* () {
+				calls.push({ operation: 'result', session, messageId })
+				yield* reachable()
+				yield* Deferred.succeed(control.resultStarted, undefined)
+				if (control.resultGate !== null)
+					yield* Deferred.await(control.resultGate).pipe(
+						Effect.onInterrupt(() =>
+							Effect.sync(() => {
+								control.resultsInterrupted++
+							}),
+						),
+					)
+				return control.result
+			}),
 		watch: () => Stream.fromQueue(changes).pipe(Stream.map(() => undefined)),
 	})
 	return { calls, sessions, inbox, control, remote, changes }
@@ -176,7 +198,23 @@ export function coordinator(overrides: Partial<PipelineSettings> = {}, database 
 		taskStoreLayer(database),
 		Layer.succeed(PipelineConfig, { ...settings, ...overrides }),
 		Layer.succeed(OpenCodeWorker, native.remote),
-		Layer.succeed(GitHub, GitHub.of({ resolve: () => Effect.succeed(pullRequest) })),
+		Layer.succeed(
+			GitHub,
+			GitHub.of({
+				resolve: (request) =>
+					Effect.gen(function* () {
+						if (native.control.githubUnavailable)
+							return yield* PullRequestUnavailable.make({ message: 'Synthetic GitHub outage' })
+						const number = Number(new URL(request.pr).pathname.split('/')[4])
+						const url = `https://github.com/test/repo/pull/${number}`
+						return {
+							key: `1:${number}`,
+							url,
+							checkout: native.control.githubClosed ? undefined : { ...pullRequest, url, number },
+						}
+					}),
+			}),
+		),
 		TestClock.layer(),
 	)
 	const runtime = ManagedRuntime.make(

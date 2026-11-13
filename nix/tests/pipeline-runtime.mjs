@@ -31,8 +31,9 @@ import { PipelineConfig, PipelineSettings } from '../../packages/pipeline/config
 import { GitHub } from '../../packages/pipeline/github/service.ts'
 import { Scheduler, schedulerLayer } from '../../packages/pipeline/scheduler.ts'
 import { newAssignment, sessionIdentity } from '../../packages/pipeline/tasks/placement.ts'
+import { continuePrompt } from '../../packages/pipeline/tasks/prompt.ts'
 import { Tasks, tasksLayer } from '../../packages/pipeline/tasks/service.ts'
-import { taskStoreLayer } from '../../packages/pipeline/tasks/store.ts'
+import { TaskStore, taskStoreLayer } from '../../packages/pipeline/tasks/store.ts'
 import { OpenCodeWorker, openCodeWorkerLayer } from '../../packages/pipeline/worker/service.ts'
 import { pullRequestSource } from '../../packages/pipeline/worker/source.ts'
 
@@ -132,6 +133,8 @@ const sandboxProofMarker = 'PIPELINE_SANDBOX_PROOF_OK'
 const agentNote = 'agent-note.txt'
 const agentNoteText = 'written by the agent inside its Capsule\n'
 const stopMarker = 'PIPELINE_RUNTIME_STOP_FIXTURE'
+const toolPreamble = 'Fixture preamble before reading; never a final response.'
+const finalText = (sessionId, step) => `Fixture free-form review text ${step} for ${sessionId}.`
 const firstPrompt = `${sandboxMarker}: read the fixture file, probe the sandbox, and reply.`
 const repository = 'fixture/repository'
 const fixtureUrl = `https://github.com/${repository}.git`
@@ -285,8 +288,9 @@ await writeFile(
 )
 assert(!(await readFile(hostConfigFile, 'utf8')).includes(githubToken))
 
-// Loopback model: one genuine tool step per session, then free-form assistant text. The first
-// adapter prompt also probes the Capsule sandbox through native read, write, and shell tools.
+// Loopback model: one genuine tool step per session, with preamble text, then free-form assistant
+// text. The first adapter prompt also probes the Capsule sandbox through native read, write, and
+// shell tools.
 const modelRequests = []
 const releaseFirst = deferred()
 const firstStarted = deferred()
@@ -368,13 +372,16 @@ async function modelResponse(body, headers, response) {
 		}
 		const read = toolCall(readCallId, 'read', { path: readFileName, offset: 1, limit: 20 })
 		const calls = sandboxed ? [read, ...sandboxCalls(body)] : [read]
-		return { tool_calls: calls.map((call, index) => ({ index, ...call })) }
+		return {
+			preamble: toolPreamble,
+			tool_calls: calls.map((call, index) => ({ index, ...call })),
+		}
 	}
 	const results = toolResults(messages, readCallId)
 	assert.equal(results.length, 1, 'The conversation must contain exactly one genuine read result')
 	assert(JSON.stringify(results[0].content).includes(readMarker))
 	if (sandboxed) checkSandboxResults(messages)
-	return { content: `Fixture free-form review text ${sessionRequests.length} for ${sessionId}.` }
+	return { content: finalText(sessionId, sessionRequests.length) }
 }
 
 const provider = createServer(async (request, response) => {
@@ -382,7 +389,7 @@ const provider = createServer(async (request, response) => {
 		assert.equal(request.url, '/v1/chat/completions')
 		let text = ''
 		for await (const chunk of request) text += chunk
-		const delta = await modelResponse(JSON.parse(text), request.headers, response)
+		const { preamble, ...delta } = await modelResponse(JSON.parse(text), request.headers, response)
 		if (response.destroyed) return
 		const chunk = (delta, finish_reason = null) => ({
 			id: 'chatcmpl_pipeline_fixture',
@@ -394,6 +401,7 @@ const provider = createServer(async (request, response) => {
 		response.writeHead(200, { 'content-type': 'text/event-stream' })
 		for (const value of [
 			chunk({ role: 'assistant' }),
+			...(preamble === undefined ? [] : [chunk({ content: preamble })]),
 			chunk(delta),
 			chunk({}, delta.tool_calls ? 'tool_calls' : 'stop'),
 		])
@@ -757,6 +765,14 @@ async function waitForObservation(worker, identity, messageId, accepted) {
 	}
 }
 
+/** The exact final text of one admitted prompt, excluding its tool step's preamble. */
+async function expectResult(worker, identity, messageId, step) {
+	const result = await call(adapter.result(worker, identity, messageId))
+	assert.equal(result._tag, 'Completed', `Unexpected native result ${JSON.stringify(result)}`)
+	assert.match(result.message.id, /^msg_/)
+	assert.equal(result.message.text, finalText(identity.sessionId, step))
+}
+
 async function expectUnknownSession(worker, info) {
 	const taskId = randomUUID()
 	const identity = sessionIdentity({ id: taskId }, newAssignment(worker, info, taskId))
@@ -873,6 +889,9 @@ async function verifyAdapter() {
 		sessionId: identity.sessionId,
 		messageId: firstMessage,
 	})
+	assert.deepEqual(await call(adapter.result(worker, identity, firstMessage)), {
+		_tag: 'Pending',
+	})
 	releaseFirst.resolve()
 	await waitForObservation(worker, identity, firstMessage, ['Idle'])
 	assert.ifError(providerFailure)
@@ -883,6 +902,9 @@ async function verifyAdapter() {
 	await assert.rejects(stat(formatterMarker), { code: 'ENOENT' }, 'A host formatter ran')
 	assert.equal(await readFile(join(capsuleHome, 'pipeline-home-marker'), 'utf8'), 'capsule')
 	await assert.rejects(stat(join(home, 'pipeline-home-marker')), { code: 'ENOENT' })
+
+	phase = 'exact native result of the initial admission'
+	await expectResult(worker, identity, firstMessage, 2)
 
 	phase = 'read-only reconciliation of the initial admission'
 	assert.deepEqual(await call(adapter.findAdmission(worker, identity, firstMessage, firstPrompt)), {
@@ -897,6 +919,7 @@ async function verifyAdapter() {
 	assert.deepEqual(await call(adapter.observe(worker, identity, unknownMessage)), {
 		_tag: 'NotObserved',
 	})
+	assert.equal((await call(adapter.result(worker, identity, unknownMessage)))._tag, 'Unavailable')
 	const conflict = await rejected(
 		adapter.findAdmission(worker, identity, firstMessage, `${firstPrompt} changed`),
 	)
@@ -919,6 +942,7 @@ async function verifyAdapter() {
 		sessionId: identity.sessionId,
 		messageId: firstMessage,
 	})
+	await expectResult(worker, identity, firstMessage, 2)
 	await expectUnknownSession(worker, info)
 
 	phase = 'resume in the same native session and Capsule checkout'
@@ -934,6 +958,8 @@ async function verifyAdapter() {
 	assert.deepEqual(enqueued(afterResume), [firstMessage, resumeMessage])
 	assert.equal(count(afterResume, 'session.created'), 1)
 	assert.equal(count(afterResume, 'session.execution.succeeded'), 2)
+	await expectResult(worker, identity, resumeMessage, 3)
+	await expectResult(worker, identity, firstMessage, 2)
 
 	phase = 'operator stops the Capsule while its native turn waits on the model'
 	assert.deepEqual(await lifecycle(identity), ['setup'])
@@ -977,6 +1003,11 @@ async function verifyAdapter() {
 	assert.deepEqual(enqueued(stopped), [firstMessage, resumeMessage, stopMessage])
 	assert.equal(count(stopped, 'session.execution.interrupted'), 1)
 	assert.equal(sessionRequests(identity.sessionId).length, 4)
+	assert.deepEqual(await call(adapter.result(worker, identity, stopMessage)), {
+		_tag: 'Interrupted',
+		reason: 'user',
+	})
+	await expectResult(worker, identity, resumeMessage, 3)
 	assert.ifError(providerFailure)
 	assert.equal((await readJson(capsuleManifestFile(identity.workspaceId))).phase, 'stopped')
 	assert.deepEqual(await lifecycle(identity), ['setup', 'stop'])
@@ -1040,14 +1071,20 @@ async function expectRetainedHistory(worker, identity, messages) {
 	assert.deepEqual(enqueued(history), messages)
 	assert.equal(count(history, 'session.created'), 1)
 	assert.equal(count(history, 'session.execution.interrupted'), 1)
+	assert.deepEqual(await call(adapter.result(worker, identity, messages.at(-1))), {
+		_tag: 'Interrupted',
+		reason: 'user',
+	})
+	await expectResult(worker, identity, messages[0], 2)
 	const session = await client().session.get({ sessionID: identity.sessionId })
 	assert.equal(session.location.directory, identity.directory)
 }
 
 async function verifyCoordinator(worker, info, movedSha) {
-	phase = 'coordinator submit through production tasks, scheduler, and adapter'
+	phase = 'coordinator review through production tasks, scheduler, and adapter'
 	const database = join(directory, 'coordinator.sqlite')
 	const pr = pullRequest(movedSha)
+	const resolved = { key: `${pr.repositoryId}:${pr.number}`, url: pr.url, checkout: pr }
 	const settings = Schema.decodeUnknownSync(PipelineSettings)({
 		host: '127.0.0.1',
 		port: 4848,
@@ -1065,96 +1102,99 @@ async function verifyCoordinator(worker, info, movedSha) {
 		NodeHttpClient.layerNodeHttp,
 	)
 	const services = Layer.mergeAll(
-		tasksLayer.pipe(Layer.provide(Layer.succeed(GitHub, { resolve: () => Effect.succeed(pr) }))),
+		tasksLayer.pipe(
+			Layer.provide(Layer.succeed(GitHub, { resolve: () => Effect.succeed(resolved) })),
+		),
 		schedulerLayer,
 	).pipe(Layer.provide(openCodeWorkerLayer), Layer.provideMerge(infrastructure))
 
 	const program = Effect.gen(function* () {
 		const tasks = yield* Tasks
+		const store = yield* TaskStore
 		const scheduler = yield* Scheduler
 		yield* scheduler.run.pipe(Effect.forkScoped)
-		const settle = Effect.fn('PipelineRuntime.settle')(function* (taskId, commandId) {
-			const events = yield* tasks.events(taskId, commandId)
+		const settle = Effect.fn('PipelineRuntime.settle')(function* (operation) {
+			const events = yield* tasks.events(operation)
 			const latest = yield* Stream.runLast(events)
 			assert(Option.isSome(latest))
-			assert.equal(latest.value.command.delivery._tag, 'Acknowledged')
-			assert.equal(latest.value.observation._tag, 'Idle')
+			assert.deepEqual(yield* tasks.get(operation), latest.value)
 			return latest.value
 		})
+		const expectCompleted = (view, sessionId, step) => {
+			assert.equal(view.state._tag, 'Completed', `Unexpected state ${JSON.stringify(view.state)}`)
+			assert.equal(view.state.message.text, finalText(sessionId, step))
+		}
 
-		const request = { kind: 'review', pr: pr.url }
-		const first = yield* tasks.submit('fixture-review', request)
-		assert.deepEqual((yield* tasks.submit('fixture-review', request)).command.id, first.command.id)
-		const taskId = first.task.id
-		const reviewed = yield* settle(taskId, first.command.id)
-		assert.equal(reviewed.task.submissions._tag, 'Open')
-		assert.equal(reviewed.task.placement._tag, 'Assigned')
-		const { assignment } = reviewed.task.placement
-		assert.deepEqual(assignment, newAssignment(worker, info, taskId))
-		assert.deepEqual(reviewed.command.delivery.nativeRef, {
-			sessionId: assignment.sessionId,
-			messageId: first.command.messageId,
+		const first = yield* tasks.review({ pr: pr.url })
+		assert.deepEqual(first, { operation: first.operation, pr: pr.url, closed: false })
+		assert.deepEqual(yield* tasks.review({ pr: pr.url }), first)
+		const reviewed = yield* settle(first.operation)
+		const { task, command: review } = yield* store.getOperation(first.operation)
+		assert.equal(task.placement._tag, 'Assigned')
+		const { assignment } = task.placement
+		assert.deepEqual(assignment, newAssignment(worker, info, task.id))
+		assert.deepEqual(review.delivery, {
+			_tag: 'Acknowledged',
+			nativeRef: { sessionId: assignment.sessionId, messageId: review.messageId },
 		})
+		assert.deepEqual(reviewed.session, { server: worker.url, id: assignment.sessionId })
+		expectCompleted(reviewed, assignment.sessionId, 2)
 		const initialRequests = sessionRequests(assignment.sessionId)
 		assert.equal(initialRequests.length, 2, 'Initial review makes one read and one text step')
+		assert(conversation(initialRequests[0]).includes(`Pipeline task: ${task.id}.`))
 		assert.equal(git('-C', assignment.directory, 'rev-parse', 'HEAD'), movedSha)
 
-		phase = 'coordinator resume after native acknowledgement and idle'
-		const resumeText = 'PIPELINE_COORDINATOR_RESUME_FIXTURE: continue this conversation.'
-		const resume = yield* tasks.resume(taskId, 'fixture-resume', {
-			afterCommandId: first.command.id,
-			message: resumeText,
-		})
-		const resumed = yield* settle(taskId, resume.command.id)
-		assert.deepEqual(resumed.task.placement, reviewed.task.placement)
+		phase = 'coordinator fixed continuation after the settled native result'
+		const continued = yield* tasks.continue(first.operation)
+		assert.notEqual(continued.operation, first.operation)
+		assert.deepEqual(yield* tasks.continue(first.operation), continued)
+		const resumed = yield* settle(continued.operation)
+		const { command: resume } = yield* store.getOperation(continued.operation)
+		assert.deepEqual(resumed.session, reviewed.session)
+		expectCompleted(resumed, assignment.sessionId, 3)
+		assert.deepEqual(yield* tasks.get(first.operation), reviewed, 'Each operation keeps its result')
 		const allRequests = sessionRequests(assignment.sessionId)
-		assert.equal(allRequests.length, 3, 'Resume makes one more step in the same session')
-		for (const text of [`Pipeline task: ${taskId}.`, readMarker, resumeText])
+		assert.equal(allRequests.length, 3, 'Continuation makes one more step in the same session')
+		const fixedPrompt = JSON.stringify(continuePrompt(pr.url)).slice(1, -1)
+		for (const text of [`Pipeline task: ${task.id}.`, readMarker, fixedPrompt])
 			assert(conversation(allRequests[2]).includes(text), `Retained conversation lacks ${text}`)
 		const history = yield* Effect.promise(() => journal(assignment.sessionId))
-		assert.deepEqual(enqueued(history), [first.command.messageId, resume.command.messageId])
+		assert.deepEqual(enqueued(history), [review.messageId, resume.messageId])
 		assert.equal(count(history, 'session.created'), 1)
 
-		phase = 'logical close retains the Capsule and native session'
+		phase = 'interrupt retains the Capsule and native session'
 		yield* Effect.promise(() =>
 			writeFile(join(assignment.directory, 'unpublished.txt'), 'coordinator unpublished work\n'),
 		)
-		const closed = yield* tasks.close(taskId)
-		assert.equal(closed.submissions._tag, 'Closed')
-		const refused = yield* tasks
-			.resume(taskId, 'fixture-after-close', { afterCommandId: resume.command.id, message: 'x' })
-			.pipe(Effect.flip)
-		assert.equal(refused.code, 'task_closed')
 		yield* scheduler.tick()
-		const interrupt = yield* tasks.interrupt(taskId, 'fixture-interrupt', {
-			afterCommandId: resume.command.id,
-		})
-		const interrupted = yield* settle(taskId, interrupt.command.id)
-		assert.deepEqual(interrupted.command.delivery.nativeRef, { sessionId: assignment.sessionId })
-		yield* scheduler.tick()
-		const view = yield* tasks.get(taskId)
-		assert.equal(view.task.submissions._tag, 'Closed')
-		assert.deepEqual(
-			view.commands.map((command) => command.delivery._tag),
-			['Acknowledged', 'Acknowledged', 'Acknowledged'],
-		)
-		assert.equal(view.observation._tag, 'Idle')
-		return { task: view.task, assignment, first, resume }
+		const deadline = Date.now() + 60000
+		for (;;) {
+			const receipt = yield* tasks.interrupt(continued.operation)
+			assert.deepEqual({ ...receipt, status: undefined }, { ...continued, status: undefined })
+			if (receipt.status === 'Acknowledged') break
+			assert.equal(receipt.status, 'Requested', `Unexpected interrupt ${receipt.status}`)
+			assert(Date.now() < deadline, 'The interrupt request was never acknowledged')
+			yield* scheduler.tick()
+			yield* Effect.sleep('50 millis')
+		}
+		const view = yield* tasks.get(continued.operation)
+		assert.deepEqual(view, resumed, 'An idle interrupt keeps the result')
+		return { task, assignment, operations: [first.operation, continued.operation] }
 	}).pipe(Effect.scoped, Effect.timeout('8 minutes'))
 
 	const coordinator = ManagedRuntime.make(services)
 	try {
 		const result = await coordinator.runPromise(program)
 		const source = await runtime.runPromise(pullRequestSource(pr))
-		await verifyRetainedAfterClose(worker, result, source, database)
+		await verifyRetainedAfterInterrupt(worker, result, source, database)
 		return result
 	} finally {
 		await coordinator.dispose()
 	}
 }
 
-async function verifyRetainedAfterClose(worker, { task, assignment, first, resume }, source, db) {
-	phase = 'closed task retains its Capsule, native session, and only dispatch state'
+async function verifyRetainedAfterInterrupt(worker, { task, assignment, operations }, source, db) {
+	phase = 'interrupted task retains its Capsule, native session, and only dispatch state'
 	const identity = sessionIdentity(task, assignment)
 	await stat(join(assignment.directory, '.git'))
 	assert.equal(
@@ -1170,14 +1210,17 @@ async function verifyRetainedAfterClose(worker, { task, assignment, first, resum
 	const coordinator = new DatabaseSync(db, { readOnly: true })
 	try {
 		const commands = coordinator
-			.prepare('SELECT id, record FROM dispatch_commands WHERE task_id = ? ORDER BY position')
+			.prepare('SELECT id, kind, record FROM dispatch_commands WHERE task_id = ? ORDER BY position')
 			.all(task.id)
-			.map((row) => JSON.parse(row.record))
 		assert.deepEqual(
-			commands.map((command) => command.id),
-			[first.command.id, resume.command.id, commands[2].id],
+			commands.map((command) => [command.id, command.kind]),
+			[
+				[operations[0], 'review'],
+				[operations[1], 'resume'],
+				[commands[2].id, 'interrupt'],
+			],
 		)
-		for (const command of commands) {
+		for (const command of commands.map((row) => JSON.parse(row.record))) {
 			assert.equal(command.delivery._tag, 'Acknowledged')
 			assert(!('payload' in command.delivery), 'Acknowledged commands must drop their payload')
 		}
@@ -1187,12 +1230,14 @@ async function verifyRetainedAfterClose(worker, { task, assignment, first, resum
 			'Idle native sessions must release dispatch capacity',
 		)
 		const stored = JSON.stringify(
-			['dispatch_tasks', 'dispatch_commands', 'dispatch_keys'].map((table) =>
+			['dispatch_tasks', 'dispatch_reviews', 'dispatch_commands'].map((table) =>
 				coordinator.prepare(`SELECT * FROM ${table}`).all(),
 			),
 		)
-		assert(!stored.includes('Fixture free-form review text'), 'Native outputs stay in OpenCode')
-		assert(!stored.includes('PIPELINE_COORDINATOR_RESUME_FIXTURE'), 'Sent prompts are dropped')
+		for (const output of ['Fixture free-form review text', toolPreamble])
+			assert(!stored.includes(output), 'Native outputs stay in OpenCode')
+		for (const prompt of ['using your review agent instructions', 'Continue the review of'])
+			assert(!stored.includes(prompt), 'Sent prompts are dropped')
 	} finally {
 		coordinator.close()
 	}
@@ -1247,11 +1292,13 @@ try {
 					sandboxed: true,
 					restarted: true,
 					resumed: true,
+					exactResults: true,
+					continued: true,
 					interrupted: true,
 					stoppedInterrupted: true,
 					purgedRetained: true,
 					workspaceAbsentRetained: true,
-					closedRetained: true,
+					interruptRetained: true,
 				}),
 			)
 			passed = true

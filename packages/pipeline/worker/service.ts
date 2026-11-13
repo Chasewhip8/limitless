@@ -9,9 +9,11 @@ import {
 	matchesPrompt,
 	wasCancelled,
 } from './evidence'
+import { readResult } from './result'
 import type {
 	NativeObservation,
 	NativeReference,
+	NativeResult,
 	SessionIdentity,
 	Worker,
 	WorkerError,
@@ -230,7 +232,8 @@ const make = Effect.gen(function* () {
 		const jobs = yield* client.experimental.job
 			.list({ sessionID, descendants: true })
 			.pipe(nativeRequest)
-		const backgroundJobs = jobs.filter((job) => job.status === 'running').length
+		// A finished job stays listed until its completion notice is admitted, which wakes the session again.
+		const backgroundJobs = jobs.length
 		if (active[sessionID] !== undefined || backgroundJobs > 0)
 			return { _tag: 'Running', backgroundJobs }
 		if (inbox.length > 0) return { _tag: 'Pending', messageIds: inbox.map((item) => item.id) }
@@ -239,6 +242,17 @@ const make = Effect.gen(function* () {
 		if (delivered?.id === messageId && delivered.type === 'user') return { _tag: 'Idle' }
 		if (yield* wasCancelled(client, sessionID, messageId)) return { _tag: 'InputCancelled' }
 		return { _tag: 'NotObserved' }
+	}, Effect.mapError(translateError))
+
+	/** Reads the settled outcome of exactly this admitted input from durable history; live input requests stay with `observe`. */
+	const result = Effect.fn('OpenCodeWorker.result')(function* (
+		worker: Worker,
+		identity: SessionIdentity,
+		messageId: string,
+	): Effect.fn.Return<NativeResult, WorkerError> {
+		const client = yield* connect(worker)
+		yield* provePlacement(client, worker, identity)
+		return yield* readResult(client, Session.ID.make(identity.sessionId), messageId)
 	}, Effect.mapError(translateError))
 
 	const watch = (worker: Worker) =>
@@ -280,6 +294,7 @@ const make = Effect.gen(function* () {
 		findAdmission,
 		interrupt,
 		observe,
+		result,
 		watch,
 	}
 })
