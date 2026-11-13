@@ -837,7 +837,9 @@ The Linux T3 desktop runs in an AppImage sandbox, so it hands links and **Open i
 targets such as Zed's remote `zed://ssh/…` links to a private `xdg-open`. This
 starts the pinned `xdg-open` as a transient systemd user service, outside the
 sandbox. The handler therefore uses the user manager's environment, and opened
-editors keep running after T3 closes. The desktop therefore requires a running
+editors keep running after T3 closes. T3 replaces its PATH with your login shell's
+at startup, so the package patches T3's bundled environment publication to keep
+this opener first. The desktop therefore requires a running
 systemd user manager; without one, links fail rather than open inside the sandbox.
 Your desktop session must also export its display and `XDG_DATA_DIRS` to the user
 manager, as most sessions do.
