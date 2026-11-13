@@ -10,9 +10,6 @@ export const Payload = Schema.Union([
 ])
 export type Payload = typeof Payload.Type
 
-export const pipelineMessageId = (commandId: string) =>
-	`msg_pipeline${commandId.replaceAll('-', '')}`
-
 export const StoredCommand = Schema.Struct({
 	id: CommandId,
 	taskId: TaskId,

@@ -118,9 +118,6 @@ pkgs.stdenvNoCC.mkDerivation {
     runHook preInstallCheck
     "$out/bin/pipeline" --help > help.txt
     grep -qE '^ +serve +' help.txt
-    "$out/bin/pipeline" legacy --help > legacy-help.txt
-    grep -qE '^ +inspect +' legacy-help.txt
-    grep -qE '^ +migrate +' legacy-help.txt
     # Workspaces belong to the native OpenCode host; the retired helper protocol stays gone.
     for command in protocol workspace; do
       if "$out/bin/pipeline" "$command" > /dev/null 2>&1; then

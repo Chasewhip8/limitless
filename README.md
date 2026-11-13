@@ -485,10 +485,9 @@ purge; only message admission requires execution readiness.
 
 Build `.#pipeline` on Linux and enable `programs.limitless.pipeline` through the
 Home Manager module. See [Pipeline setup and operation](docs/pipeline.md) for
-authentication, fleet configuration, the API, and retention behavior. Ordinary
-startup refuses populated legacy databases without mutation; convert them with
-`pipeline legacy migrate` and a reviewed plan, as described in
-[legacy state migration](docs/pipeline.md#legacy-state-migration).
+authentication, fleet configuration, the API, and retention behavior. Populated
+legacy databases are refused without mutation; deployment needs an explicit
+reviewed state migration before switching coordinator and caller protocols.
 
 The separately approved native event journal supports positive admission
 recovery. Its storage cost and operational limitations are documented under

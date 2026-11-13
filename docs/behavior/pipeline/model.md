@@ -157,7 +157,7 @@ earlier request was never accepted.
 | Delivery uncertainty remains monotonic. | Supported by unchanged transitions and updated scheduler lost-response/lease tests. | No automatic native-send replay. |
 | A successful native busy period need not finish the review. | Supported by pinned native source and tests for background completion, terminal jobs awaiting notification, notice/read races, shutdown recovery and unsupported child work. The earlier first-terminal interpretation is contradicted. | Only positively attributable native chains return final text. |
 | Native response text can be retrieved without storing it at Athena. | Supported by result unit tests, API exact-text projections and the passing packaged host fixture. | Unsupported or ambiguous native causal chains remain unavailable. |
-| Populated legacy state is preserved, not guessed. | Startup refuses conversion; explicit migration tests cover snapshot guards, backups, preservation and reopening. | Migration requires a reviewed mapping and stopped coordinator; unsupported state remains refused. |
+| Populated legacy state is preserved, not guessed. | Supported by migration-refusal tests comparing schema, rows and migration records before/after. | Deployment blocked until an explicit reviewed state migration exists. |
 
 Rerun with `nix develop -c bun run ci`, then the host-only Pipeline runner
 `nix run .#checks.x86_64-linux.pipeline`. Untracked files require a filtered
@@ -220,10 +220,5 @@ with an observed end of work.
 
 The native background-completion limitation is a correction in understanding,
 not a new upstream guarantee. Capsule placement and outbox uncertainty remain
-separate from execution completion. Ordinary startup refuses populated legacy
-databases. The subsequent `pipeline legacy migrate` command supports explicitly
-reviewed, fully acknowledged Capsule-backed review chains, with a snapshot guard,
-backup, atomic conversion and retained legacy receipt data. See the
-[migration procedure](../../pipeline.md#legacy-state-migration). Its independent
-review approved the supplied single-review inventory; all 94 Pipeline tests passed.
-The historical validation snapshots above predate this migration implementation.
+separate from execution completion. Migration 0002 refuses populated legacy
+databases; this implementation neither upgrades nor mutates the live deployment.

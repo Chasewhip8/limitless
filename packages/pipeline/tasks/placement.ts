@@ -3,18 +3,16 @@ import type { HostInfo } from '@limitless/capsule/rpc'
 import type { SessionIdentity, Worker } from '../worker/schema'
 import { Assignment, type Task } from './schema'
 
-export const pipelineWorkspaceId = (taskId: string) => `wrk_pipeline${taskId.replaceAll('-', '')}`
-export const pipelineSessionId = (taskId: string) => `ses_pipeline${taskId.replaceAll('-', '')}`
-
 export function newAssignment(worker: Worker, host: HostInfo, taskId: string): Assignment {
-	const workspaceId = pipelineWorkspaceId(taskId)
+	const id = taskId.replaceAll('-', '')
+	const workspaceId = `wrk_pipeline${id}`
 	return Assignment.make({
 		workerId: worker.id,
 		workerUrl: worker.url,
 		controlDirectory: worker.controlDirectory,
 		storageId: host.storageId,
 		workspaceId,
-		sessionId: pipelineSessionId(taskId),
+		sessionId: `ses_pipeline${id}`,
 		directory: path.join(host.checkoutRoot, workspaceId, 'checkout'),
 	})
 }
