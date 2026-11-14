@@ -65,7 +65,10 @@
           }
           // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
             opencode-desktop = self.packages.${system}.opencode-desktop;
-            t3-desktop = self.packages.${system}.t3-desktop;
+            t3-desktop = import ./nix/tests/t3-desktop.nix {
+              inherit pkgs;
+              package = self.packages.${system}.t3-desktop;
+            };
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             pipeline = import ./nix/tests/pipeline.nix { inherit pkgs self; };
