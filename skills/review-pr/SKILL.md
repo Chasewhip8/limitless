@@ -9,8 +9,9 @@ The reviewer keeps the PR in draft while assessing the design, improving the tes
 
 ## Procedure
 
-1. **Start.** Explain the review flow to the user, then use `pipeline_review` with the PR's GitHub URL to obtain its current review operation.
-2. **Wait.** Use `pipeline_wait` for the result and address any reported blockers.
-3. **Fix.** When authorized, fix valid findings on the PR branch using `commit-and-pr`. Explain disputed findings with evidence.
-4. **Recheck.** After fixes, a repaired failure, or a request to continue the review, use `pipeline_continue` and wait for its result.
-5. **Finish.** Summarize the review outcome, fixes made, and any unresolved findings or blockers.
+1. **Prepare base.** Fetch the PR's latest remote base and head. If behind, rebase, resolve conflicts, validate if needed, and push with `--force-with-lease` against the fetched head.
+2. **Start.** Explain the review flow to the user, then use `pipeline_review` with the PR's GitHub URL to obtain its current review operation.
+3. **Wait.** Use `pipeline_wait` for the result and address any reported blockers.
+4. **Fix.** When authorized, fix valid findings on the PR branch using `commit-and-pr`. Explain disputed findings with evidence.
+5. **Recheck.** After fixes, rebasing, a repaired failure, or a request to continue, repeat **Prepare base**, then use `pipeline_continue` and wait for its result.
+6. **Finish.** Summarize the review outcome, fixes made, and any unresolved findings or blockers.
