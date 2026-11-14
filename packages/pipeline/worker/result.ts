@@ -9,11 +9,14 @@ type Verdict = NativeResult | Completion
 type End = NativeResult | { readonly _tag: 'Candidate'; readonly completion: Completion }
 
 type Owner = 'target' | 'foreign'
+/** The calls sharing one background job, all answered by its one completion notice from `notice`. */
+type Obligation = { readonly notice: string; readonly owners: Set<Owner> }
 type InboxItem = {
 	readonly type: string
 	delivery: string
 	/** A background completion notice: `shell:<shellID>`, `subagent:<childID>`, or `unknown` for another source. */
 	readonly notice: string | undefined
+	readonly cancelled: boolean
 }
 
 const unavailable = (message: string) => ({ _tag: 'Unavailable', message }) satisfies NativeResult
@@ -24,15 +27,28 @@ type Metadata = { readonly [key: string]: unknown } | undefined
 const launchesBackground = (metadata: Metadata) =>
 	metadata?.status === 'running' || typeof metadata?.jobID === 'string'
 
+const inboxKey = (inboxID: string) => `inbox:${inboxID}`
+
 /**
  * Background work a tool result launched. Only the native shell and subagent tools carry the identities their
- * completion notices repeat; any other background launch is unsupported.
+ * completion notices repeat; any other background launch is unsupported. A subagent launch is keyed by its job
+ * generation's `notificationID`, the inbox ID of that generation's notice, which joined calls share. Only
+ * `nix/patches/opencode-subagent-generations.patch` reports it, and that patch also makes a generation's
+ * notice cover every follow-up joined to it; durable history alone cannot prove that coverage. History without
+ * the ID keys the child that every generation shares.
  */
 const backgroundLaunch = (name: string | undefined, metadata: Metadata) => {
 	if (!launchesBackground(metadata)) return undefined
-	if (name === 'shell' && typeof metadata?.shellID === 'string') return `shell:${metadata.shellID}`
-	if (name === 'subagent' && typeof metadata?.sessionID === 'string')
-		return `subagent:${metadata.sessionID}`
+	if (name === 'shell' && typeof metadata?.shellID === 'string') {
+		const notice = `shell:${metadata.shellID}`
+		return { key: notice, notice, exact: false }
+	}
+	if (name === 'subagent' && typeof metadata?.sessionID === 'string') {
+		const notice = `subagent:${metadata.sessionID}`
+		if (typeof metadata.notificationID === 'string')
+			return { key: inboxKey(metadata.notificationID), notice, exact: true }
+		return { key: notice, notice, exact: false }
+	}
 	return 'unsupported'
 }
 
@@ -48,6 +64,13 @@ const completionNotice = (metadata: Metadata) => {
 }
 
 /**
+ * A cancelled subagent's generation ends at the interrupt, but input admitted while the interrupt settles still
+ * runs in a successor execution that no notice covers.
+ */
+const cancelledSubagent = (metadata: Metadata) =>
+	metadata?.source === 'subagent' && metadata.state === 'cancelled'
+
+/**
  * Folds durable session history into the outcome of one delivered input. OpenCode records no link from an
  * input to its execution, so the operation opens at the target's delivery and follows positive causal
  * evidence only:
@@ -57,14 +80,14 @@ const completionNotice = (metadata: Metadata) => {
  * - A shutdown suspends the operation for native recovery rather than ending it.
  * - The final step must positively end the turn: a step with locally executed tools or an output-limit
  *   stop is always continued natively, so its text is a preamble, not a response.
- * - Steered user input, foreign or unattributed notices, unsupported background launches, and independent
- *   input while obligations remain make the final response unattributable.
+ * - Steered user input, foreign or unattributed notices, cancelled helpers, unsupported background launches,
+ *   and independent input while obligations remain make the final response unattributable.
  * A success with no obligations becomes a candidate that the next independent delivery confirms, or that
  * the caller confirms against live native state at the end of the replay.
  */
 const foldResult = (messageId: string) => {
 	const inbox = new Map<string, InboxItem>()
-	const outstanding = new Map<string, Owner[]>()
+	const outstanding = new Map<string, Obligation>()
 	const toolNames = new Map<string, string>()
 	const children = new Set<string>()
 	let phase: 'before' | 'running' | 'waiting' | 'candidate' = 'before'
@@ -78,7 +101,7 @@ const foldResult = (messageId: string) => {
 		| undefined
 	let candidate: Completion | undefined
 
-	const obligations = () => [...outstanding.values()].some((owners) => owners.includes('target'))
+	const obligations = () => [...outstanding.values()].some(({ owners }) => owners.has('target'))
 
 	// https://github.com/anomalyco/opencode/blob/v2.2.7/packages/core/src/session/runner/step.ts
 	// https://github.com/anomalyco/opencode/blob/v2.2.7/packages/core/src/session/runner/publish-llm-event.ts
@@ -120,17 +143,22 @@ const foldResult = (messageId: string) => {
 		return settle()
 	}
 
-	const resolveNotice = (key: string) => {
-		const owners = outstanding.get(key)
-		const owner = owners?.shift()
-		if (owners?.length === 0) outstanding.delete(key)
+	/** A notice answers the job generation its inbox ID names, or else a launch whose history lacks that ID. */
+	const resolveNotice = (inboxID: string, notice: string): Owner | undefined => {
+		const key = outstanding.has(inboxKey(inboxID)) ? inboxKey(inboxID) : notice
+		const obligation = outstanding.get(key)
+		if (obligation === undefined) return undefined
+		outstanding.delete(key)
+		const owner = obligation.owners.has('target') ? 'target' : 'foreign'
+		if (owner === 'target' && obligation.notice !== notice)
+			block('A background notice named another source than the job it answers')
 		return owner
 	}
 
 	const delivered = (id: string): Verdict | undefined => {
 		const item = inbox.get(id)
 		if (phase === 'before') {
-			if (item?.notice !== undefined && item.notice !== 'unknown') resolveNotice(item.notice)
+			if (item?.notice !== undefined && item.notice !== 'unknown') resolveNotice(id, item.notice)
 			if (id !== messageId) return undefined
 			phase = 'running'
 			if (item?.delivery !== 'queue') ambiguous = true
@@ -138,12 +166,16 @@ const foldResult = (messageId: string) => {
 		}
 		if (item === undefined || item.type === 'compaction' || item.type === 'move') return undefined
 		if (item.notice !== undefined) {
-			const owner = item.notice === 'unknown' ? undefined : resolveNotice(item.notice)
+			const owner = item.notice === 'unknown' ? undefined : resolveNotice(id, item.notice)
 			if (phase === 'candidate')
 				return owner === 'foreign'
 					? independent()
 					: unavailable('An unattributed background notice arrived after this turn’s response')
 			if (owner === 'target') {
+				if (item.cancelled)
+					block(
+						'A background helper of this turn was cancelled, and its interrupted work may still continue',
+					)
 				step = undefined
 				phase = 'running'
 			} else ambiguous = true
@@ -179,24 +211,36 @@ const foldResult = (messageId: string) => {
 	}
 
 	/**
-	 * Calling a running subagent again joins its job, whose one completion notice cannot be matched to both
-	 * calls; a call after it finished starts another generation whose notice cannot be told apart.
+	 * Calling a running subagent again joins its job, whose one notice answers every joined call, and a call
+	 * after it finished starts a generation with its own notice. Without the notice's inbox ID in the launch,
+	 * neither can be told apart from an outstanding launch of the same child.
 	 */
 	const launched = (event: Extract<DurableEvent, { type: 'session.tool.success' }>) => {
 		const owner: Owner = phase === 'running' ? 'target' : 'foreign'
-		const key = backgroundLaunch(toolNames.get(event.data.id), event.data.metadata)
-		if (key === undefined) return
-		if (key === 'unsupported') {
+		const launch = backgroundLaunch(toolNames.get(event.data.id), event.data.metadata)
+		if (launch === undefined) return
+		if (launch === 'unsupported') {
 			if (owner === 'target')
 				block('This turn launched background work whose completion cannot be attributed to it')
 			return
 		}
-		if (outstanding.has(key)) {
+		const joined = outstanding.get(launch.key)
+		if (joined !== undefined && launch.exact) {
+			joined.owners.add(owner)
+			return
+		}
+		if (joined !== undefined || indistinct(launch)) {
 			if (owner === 'target')
 				block('This turn relaunched a background helper whose notices cannot be told apart')
 			return
 		}
-		outstanding.set(key, [owner])
+		outstanding.set(launch.key, { notice: launch.notice, owners: new Set([owner]) })
+	}
+
+	/** Whether this launch's child also has an outstanding launch keyed the other way. */
+	const indistinct = ({ notice, exact }: { readonly notice: string; readonly exact: boolean }) => {
+		if (exact) return outstanding.has(notice)
+		return [...outstanding.values()].some((obligation) => obligation.notice === notice)
 	}
 
 	const execution = (event: DurableEvent): Verdict | undefined => {
@@ -256,6 +300,7 @@ const foldResult = (messageId: string) => {
 					type: item.type,
 					delivery: item.delivery,
 					notice: item.type === 'synthetic' ? completionNotice(item.payload.metadata) : undefined,
+					cancelled: item.type === 'synthetic' && cancelledSubagent(item.payload.metadata),
 				})
 				return undefined
 			}

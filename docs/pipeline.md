@@ -229,7 +229,9 @@ with blank lines; earlier tool preambles, reasoning, and tool output are exclude
 Native history determines attribution, not idle or the latest session message.
 Concurrent user steering and missing history can make attribution unavailable.
 Shutdown remains pending until native recovery settles. Native shell/subagent
-completion notices can extend an operation across foreground turns. Unsupported
+completion notices can extend an operation across foreground turns; subagent
+notices match the job generation whose notice ID the call reported, so follow-ups
+to a running helper share its notice. Unsupported
 background tools or detached work inside a child session yield unavailable rather
 than an earlier waiting preamble.
 

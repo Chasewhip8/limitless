@@ -1,0 +1,915 @@
+diff --git a/packages/core/src/session/execution.ts b/packages/core/src/session/execution.ts
+--- a/packages/core/src/session/execution.ts
++++ b/packages/core/src/session/execution.ts
+@@ -1,6 +1,6 @@
+ export * as SessionExecution from "./execution.js"
+ 
+-import { Cause, Context, Effect, Exit, Layer } from "effect"
++import { Cause, Context, Effect, Exit, Layer, type Scope } from "effect"
+ import { Bus } from "../bus.js"
+ import { Database } from "../database/database.js"
+ import { Job } from "../job.js"
+@@ -37,6 +37,13 @@ export interface Interface {
+   ) => Effect.Effect<boolean>
+   /** Resolves once this process owns no active execution for the Session. Returns immediately when idle and never starts work. */
+   readonly awaitIdle: (sessionID: SessionSchema.ID) => Effect.Effect<void>
++  /**
++   * Records the Session's execution exits in this process until the scope closes, when the implementation tracks
++   * them. The returned read gives the latest exit while the Session is idle.
++   */
++  readonly observe?: (
++    sessionID: SessionSchema.ID,
++  ) => Effect.Effect<Effect.Effect<Exit.Exit<void, SessionRunner.RunError> | undefined>, never, Scope.Scope>
+ }
+ 
+ /** Routes execution from a Session ID to its selected instance's runner. */
+@@ -169,6 +176,7 @@ export const layer = Layer.effect(
+       resume: coordinator.run,
+       wake: coordinator.wake,
+       awaitIdle: coordinator.awaitIdle,
++      observe: coordinator.observe,
+     })
+   }),
+ )
+diff --git a/packages/core/src/session/execution/restart.ts b/packages/core/src/session/execution/restart.ts
+--- a/packages/core/src/session/execution/restart.ts
++++ b/packages/core/src/session/execution/restart.ts
+@@ -12,6 +12,7 @@ import { SessionStore } from "../store.js"
+ import { ImageNotice } from "../../image/notice.js"
+ import { ShellResult } from "../../shell/result.js"
+ import { SubagentCompletion } from "../subagent-completion.js"
++import { SubagentJob } from "../subagent-job.js"
+ 
+ const CONTINUE_AFTER_SERVER_RESTART =
+   "The server restarted while you were working. Continue from where you left off without repeating completed work."
+@@ -72,6 +73,7 @@ export const layer = (options?: Options) =>
+       const bus = yield* Bus.Service
+       const jobs = yield* Job.Service
+       const sessions = yield* Session.Service
++      const subagents = yield* SubagentJob.Service
+       const scope = yield* Effect.scope
+       const maxAttempts = options?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
+ 
+@@ -194,23 +196,8 @@ export const layer = (options?: Options) =>
+           return
+         }
+ 
+-        yield* jobs.start({
+-          id: background.id,
+-          type: "subagent",
+-          title: recovery.description,
+-          notificationID: background.notificationID,
+-          recovery,
+-          run: execution.resume(recovery.childSessionID).pipe(
+-            Effect.andThen(store.context(recovery.childSessionID)),
+-            Effect.map((messages) => {
+-              const assistant = messages.findLast(
+-                (message) =>
+-                  message.type === "assistant" && message.time.completed !== undefined && message.error === undefined,
+-              )
+-              return SubagentCompletion.text(assistant)
+-            }),
+-          ),
+-        })
++        // Follow-ups join recovered generations through the same coordination as live ones.
++        yield* subagents.start(recovery, background.notificationID)
+         yield* jobs.background(background.id)
+         yield* jobs.wait({ id: background.id }).pipe(
+           Effect.flatMap((result) => (result.info ? notify(result.info) : Effect.void)),
+@@ -264,5 +251,5 @@ export const layer = (options?: Options) =>
+ export const node = makeGlobalNode({
+   service: Service,
+   layer: layer(),
+-  deps: [SessionStore.node, SessionExecution.node, Bus.node, Job.node, Session.node],
++  deps: [SessionStore.node, SessionExecution.node, Bus.node, Job.node, Session.node, SubagentJob.node],
+ })
+diff --git a/packages/core/src/session/run-coordinator.ts b/packages/core/src/session/run-coordinator.ts
+--- a/packages/core/src/session/run-coordinator.ts
++++ b/packages/core/src/session/run-coordinator.ts
+@@ -22,6 +22,11 @@ export interface Coordinator<Key, E, Reason = never> {
+   readonly interrupt: (key: Key, reason?: Reason) => Effect.Effect<boolean>
+   /** Resolves once no execution is active for the key. Returns immediately when already idle and never starts work. */
+   readonly awaitIdle: (key: Key) => Effect.Effect<void>
++  /**
++   * Records the key's execution exits until the scope closes. The returned read gives the latest exit while the key
++   * is idle, or undefined while it is active or before an execution settled under observation.
++   */
++  readonly observe: (key: Key) => Effect.Effect<Effect.Effect<Exit.Exit<void, E> | undefined>, never, Scope.Scope>
+ }
+ 
+ /**
+@@ -64,6 +69,8 @@ export const make = <Key, E, Reason = never>(options: {
+ }): Effect.Effect<Coordinator<Key, E, Reason>, never, Scope.Scope> =>
+   Effect.gen(function* () {
+     const executions = new Map<Key, Execution<E, Reason>>()
++    const observers = new Map<Key, number>()
++    const outcomes = new Map<Key, Exit.Exit<void, E>>()
+     const fork = yield* FiberSet.makeRuntime<never, void, never>()
+ 
+     const loop = (key: Key, execution: Execution<E, Reason>, force: boolean): Effect.Effect<void, E> =>
+@@ -86,6 +93,7 @@ export const make = <Key, E, Reason = never>(options: {
+         stopping: false,
+       }
+       executions.set(key, execution)
++      outcomes.delete(key)
+       // The leading yield lets `owner` be assigned before the drain can settle, and keeps
+       // failing self-waking executions from growing the stack across successor starts.
+       // Drains start one tick after wake; callers observe progress through events or run.
+@@ -110,7 +118,10 @@ export const make = <Key, E, Reason = never>(options: {
+     // during failure or interruption cleanup) starts a fresh execution for the remaining work.
+     const settle = (key: Key, execution: Execution<E, Reason>, exit: Exit.Exit<void, E>) => {
+       if (execution.pendingWake) start(key, false, execution.pendingWake)
+-      else executions.delete(key)
++      else {
++        executions.delete(key)
++        if (observers.has(key)) outcomes.set(key, exit)
++      }
+       Deferred.doneUnsafe(execution.done, exit)
+     }
+ 
+@@ -170,5 +181,23 @@ export const make = <Key, E, Reason = never>(options: {
+         return Deferred.await(execution.done).pipe(Effect.ignoreCause, Effect.andThen(awaitIdle(key)))
+       })
+ 
+-    return { active: Effect.sync(() => new Set(executions.keys())), isActive, run, wake, interrupt, awaitIdle }
++    const observe = (key: Key) =>
++      Effect.acquireRelease(
++        Effect.sync(() => {
++          observers.set(key, (observers.get(key) ?? 0) + 1)
++          return Effect.sync(() => outcomes.get(key))
++        }),
++        () =>
++          Effect.sync(() => {
++            const remaining = (observers.get(key) ?? 1) - 1
++            if (remaining > 0) {
++              observers.set(key, remaining)
++              return
++            }
++            observers.delete(key)
++            outcomes.delete(key)
++          }),
++      )
++
++    return { active: Effect.sync(() => new Set(executions.keys())), isActive, run, wake, interrupt, awaitIdle, observe }
+   })
+diff --git a/packages/core/src/session/subagent-job.ts b/packages/core/src/session/subagent-job.ts
+--- a/packages/core/src/session/subagent-job.ts
++++ b/packages/core/src/session/subagent-job.ts
+@@ -1,24 +1,39 @@
+ export * as SubagentJob from "./subagent-job.js"
+ 
+-import { Context, Effect, Layer, Scope } from "effect"
++import { Cause, Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
+ import { Node } from "@opencode/util/effect/app-node"
+ import type { LayerNode } from "@opencode/util/effect/layer-node"
+ import { Job } from "../job.js"
+ import { Session } from "../session.js"
++import { SessionExecution } from "./execution.js"
++import type { SessionRunner } from "./runner/index.js"
++import type { SessionMessage } from "./message.js"
++import type { SessionSchema } from "./schema.js"
+ import { SubagentCompletion } from "./subagent-completion.js"
+ 
+ type Recovery = Extract<Job.Recovery, { kind: "subagent" }>
+ 
+ export interface Interface {
+-  start: (recovery: Recovery) => Effect.Effect<Job.Info>
+-  background: (recovery: Recovery) => Effect.Effect<void>
++  /**
++   * Starts a job generation for the child, or joins the running one. Call it after admitting and waking the
++   * child's input: a joined generation completes only once no execution of the child remains active, and a
++   * generation already settling is never joined, so its completion covers every input admitted before the
++   * call. `notificationID` restores a recovered generation's notice.
++   */
++  start: (recovery: Recovery, notificationID?: SessionMessage.ID) => Effect.Effect<Job.Info>
++  background: (recovery: Recovery) => Effect.Effect<Job.Info | undefined>
+   notify: (recovery: Recovery, startedAt: number) => Effect.Effect<void>
++  /** Children whose generation has decided its outcome while its job has not yet completed. */
++  settling: Effect.Effect<ReadonlySet<SessionSchema.ID>>
+ }
+ 
+ export class Service extends Context.Service<Service, Interface>()("@opencode/SubagentJob") {}
+ 
+-const make: Effect.Effect<Interface, never, Session.Service | Job.Service | Scope.Scope> = Effect.gen(function* () {
++type Requirements = Session.Service | SessionExecution.Service | Job.Service | Scope.Scope
++
++const make: Effect.Effect<Interface, never, Requirements> = Effect.gen(function* () {
+   const sessions = yield* Session.Service
++  const execution = yield* SessionExecution.Service
+   const jobs = yield* Job.Service
+   const scope = yield* Scope.Scope
+   // Jobs and their completion observers outlive the plugin that launched them.
+@@ -26,6 +41,10 @@ const make: Effect.Effect<Interface, never, Session.Service | Job.Service | Scop
+   const context = yield* Effect.context<never>()
+   // One observer per job generation, including continuations of the same child.
+   const notifications = new Set<string>()
++  // A child's generation that decided its outcome before its job completed; `lock` orders joins against that
++  // decision. Each generation clears only its own marker, once its job completes.
++  const closing = new Map<SessionSchema.ID, object>()
++  const lock = yield* Semaphore.make(1)
+ 
+   const notify = Effect.fn("SubagentJob.notify")(function* (recovery: Recovery, startedAt: number) {
+     const key = `${recovery.childSessionID}:${startedAt}`
+@@ -43,36 +62,114 @@ const make: Effect.Effect<Interface, never, Session.Service | Job.Service | Scop
+     )
+   })
+ 
++  // Interruption ends a generation: a user interrupt cancels its job, and shutdown leaves it to restart recovery.
++  const interrupted = (exit: Exit.Exit<void, unknown>) => Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
++
++  /**
++   * Awaits the child's executions until none is active, never starting work after the first. A follow-up admitted
++   * after an execution ended, even one that failed, runs in a successor whose outcome becomes the generation's.
++   */
++  const settle = Effect.fnUntraced(function* (
++    childID: SessionSchema.ID,
++    generation: object,
++    outcome: Effect.Effect<Exit.Exit<void, SessionRunner.RunError> | undefined>,
++    first: Exit.Exit<void, SessionRunner.RunError>,
++  ) {
++    if (interrupted(first)) return first
++    while (true) {
++      const settled = yield* lock.withPermit(
++        Effect.gen(function* () {
++          if (yield* execution.isActive(childID)) return undefined
++          closing.set(childID, generation)
++          return (yield* outcome) ?? first
++        }),
++      )
++      if (settled !== undefined) return settled
++      yield* execution.awaitIdle(childID)
++    }
++  })
++
++  /** Keeps the generation's marker, set on every exit, until its job completes; then only this generation's is cleared. */
++  const release = (childID: SessionSchema.ID, generation: object) =>
++    lock.withPermit(Effect.sync(() => closing.set(childID, generation))).pipe(
++      Effect.andThen(
++        jobs.wait({ id: childID }).pipe(
++          Effect.andThen(
++            lock.withPermit(
++              Effect.sync(() => {
++                if (closing.get(childID) === generation) closing.delete(childID)
++              }),
++            ),
++          ),
++          Effect.forkIn(scope, { startImmediately: true }),
++        ),
++      ),
++    )
++
++  const unobserved = Effect.succeed(Effect.succeed(undefined))
++
++  const run = (childID: SessionSchema.ID) =>
++    Effect.suspend(() => {
++      const generation = {}
++      return Effect.gen(function* () {
++        const outcome = yield* execution.observe?.(childID) ?? unobserved
++        const exit = yield* settle(childID, generation, outcome, yield* Effect.exit(execution.resume(childID)))
++        yield* exit
++        const messages = yield* sessions.messages({ sessionID: childID, order: "desc", limit: 20 })
++        const assistant = messages.find(
++          (message) =>
++            message.type === "assistant" && message.time.completed !== undefined && message.error === undefined,
++        )
++        return SubagentCompletion.text(assistant)
++      }).pipe(
++        Effect.scoped,
++        Effect.onExit(() => release(childID, generation)),
++      )
++    })
++
++  const start = Effect.fn("SubagentJob.start")(function* (recovery: Recovery, notificationID?: SessionMessage.ID) {
++    const childID = recovery.childSessionID
++    while (true) {
++      const started = yield* lock.withPermit(
++        Effect.gen(function* () {
++          if (closing.has(childID)) {
++            if ((yield* jobs.get(childID))?.status === "running") return undefined
++            closing.delete(childID)
++          }
++          return yield* jobs
++            .start({
++              id: childID,
++              type: "subagent",
++              title: recovery.description,
++              metadata: {},
++              recovery,
++              ...(notificationID ? { notificationID } : {}),
++              run: run(childID),
++            })
++            .pipe(Effect.setContext(context))
++        }),
++      )
++      if (started) return started
++      yield* jobs.wait({ id: childID })
++    }
++  })
++
+   return Service.of({
+-    start: (recovery: Recovery) =>
+-      jobs
+-        .start({
+-          id: recovery.childSessionID,
+-          type: "subagent",
+-          title: recovery.description,
+-          metadata: {},
+-          recovery,
+-          run: Effect.gen(function* () {
+-            yield* sessions.resume(recovery.childSessionID)
+-            const messages = yield* sessions.messages({ sessionID: recovery.childSessionID, order: "desc", limit: 20 })
+-            const assistant = messages.find(
+-              (message) =>
+-                message.type === "assistant" && message.time.completed !== undefined && message.error === undefined,
+-            )
+-            return SubagentCompletion.text(assistant)
+-          }),
+-        })
+-        .pipe(Effect.setContext(context)),
++    start,
+     background: Effect.fn("SubagentJob.background")(function* (recovery: Recovery) {
+       const info = yield* jobs.background(recovery.childSessionID)
+       if (info) yield* notify(recovery, info.started_at)
++      return info
+     }),
+     notify,
++    settling: Effect.sync(() => new Set(closing.keys())),
+   })
+ })
+ 
++export const layer = Layer.effect(Service, make)
++
+ export const node: LayerNode.Provider<Service, never, typeof Node.tags.values.global> = Node.makeGlobalNode({
+   service: Service,
+-  layer: Layer.effect(Service, make),
+-  deps: [Session.node, Job.node],
++  layer,
++  deps: [Session.node, SessionExecution.node, Job.node],
+ })
+diff --git a/packages/core/src/tool/plugin/subagent.ts b/packages/core/src/tool/plugin/subagent.ts
+--- a/packages/core/src/tool/plugin/subagent.ts
++++ b/packages/core/src/tool/plugin/subagent.ts
+@@ -16,9 +16,12 @@ import { SubagentJob } from "../../session/subagent-job.js"
+ 
+ export const name = "subagent"
+ 
+-const backgroundResult = (sessionID: SessionSchema.ID) => ({
++// The shared notificationID is the completion notice's parent inbox ID: calls that join a running
++// job report the same one, and each new job generation reports a new one.
++const backgroundResult = (sessionID: SessionSchema.ID, info: Job.Info | undefined) => ({
+   sessionID,
+   status: "running" as const,
++  ...(info?.notificationID ? { notificationID: info.notificationID } : {}),
+   output: [
+     `The subagent is working in the background (sessionID: ${sessionID}). You will be notified automatically when it finishes.`,
+     "DO NOT sleep, poll for progress, ask the subagent for status, or duplicate this subagent's work; avoid working with the same files or topics it is using.",
+@@ -226,10 +229,7 @@ export const Plugin = {
+               }
+               yield* subagents.start(recovery)
+ 
+-              if (background) {
+-                yield* subagents.background(recovery)
+-                return backgroundResult(child.id)
+-              }
++              if (background) return backgroundResult(child.id, yield* subagents.background(recovery))
+ 
+               const result = yield* jobs.block({ id: child.id, sessionID: context.sessionID }).pipe(
+                 Effect.onInterrupt(() =>
+@@ -240,7 +240,7 @@ export const Plugin = {
+               )
+               if (result?.type === "backgrounded") {
+                 yield* subagents.notify(recovery, result.info.started_at)
+-                return backgroundResult(child.id)
++                return backgroundResult(child.id, result.info)
+               }
+               // Failure surfaces keep the sessionID visible so the model can continue the child.
+               if (result?.info.status === "error")
+@@ -253,15 +253,20 @@ export const Plugin = {
+                 sessionID: child.id,
+                 status: "completed" as const,
+                 output: result?.info.output ?? SubagentCompletion.NO_TEXT,
++                notificationID: undefined,
+               }
+             }).pipe(
+-              Effect.map((output) => ({
++              Effect.map(({ notificationID, ...output }) => ({
+                 output,
+                 content:
+                   output.status === "completed"
+                     ? `<subagent sessionID="${output.sessionID}" state="completed">\n${output.output}\n</subagent>`
+                     : output.output,
+-                metadata: { sessionID: output.sessionID, status: output.status },
++                metadata: {
++                  sessionID: output.sessionID,
++                  status: output.status,
++                  ...(notificationID ? { notificationID } : {}),
++                },
+               })),
+             ),
+         }),
+diff --git a/packages/core/test/session-execution.test.ts b/packages/core/test/session-execution.test.ts
+--- a/packages/core/test/session-execution.test.ts
++++ b/packages/core/test/session-execution.test.ts
+@@ -22,6 +22,7 @@ import { SessionMessage } from "@opencode/core/session/message"
+ import { SessionRunner } from "@opencode/core/session/runner/index"
+ import { SessionInboxTable, SessionTable } from "@opencode/core/session/sql"
+ import { SessionStore } from "@opencode/core/session/store"
++import { SubagentJob } from "@opencode/core/session/subagent-job"
+ import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, LayerMap, Scope } from "effect"
+ import { eq } from "drizzle-orm"
+ import { testEffect } from "./lib/effect"
+@@ -1415,6 +1416,7 @@ function buildExecution(
+     )
+     return yield* Layer.buildWithScope(
+       SessionRestart.layer(options).pipe(
++        Layer.provideMerge(SubagentJob.layer),
+         Layer.provideMerge(sessionLayer),
+         Layer.provideMerge(Layer.fresh(SessionExecution.layer)),
+         Layer.provide(Layer.succeed(Database.Service, database)),
+diff --git a/packages/core/test/session-run-coordinator.test.ts b/packages/core/test/session-run-coordinator.test.ts
+--- a/packages/core/test/session-run-coordinator.test.ts
++++ b/packages/core/test/session-run-coordinator.test.ts
+@@ -662,6 +662,39 @@ describe("SessionRunCoordinator", () => {
+     }),
+   )
+ 
++  it.effect("records exits only while observed and releases them with the last observer", () =>
++    Effect.gen(function* () {
++      const coordinator = yield* SessionRunCoordinator.make<string, string>({
++        drain: (key) => (key === "failing" ? Effect.fail("drain failed") : Effect.void),
++      })
++      const read = (key: string) => Effect.scoped(coordinator.observe(key).pipe(Effect.flatMap((outcome) => outcome)))
++      const keys = Array.from({ length: 1000 }, (_, index) => `session ${index}`)
++
++      yield* Effect.forEach(keys, (key) => coordinator.run(key), { discard: true })
++      expect(yield* Effect.forEach(keys, read)).toEqual(keys.map(() => undefined))
++
++      yield* Effect.scoped(
++        Effect.gen(function* () {
++          const outer = yield* coordinator.observe("failing")
++          yield* Effect.scoped(
++            Effect.gen(function* () {
++              const inner = yield* coordinator.observe("failing")
++              yield* coordinator.run("failing").pipe(Effect.exit)
++              expect(yield* inner).toEqual(Exit.fail("drain failed"))
++            }),
++          )
++          // Another observer keeps the record; a new execution replaces it.
++          expect(yield* outer).toEqual(Exit.fail("drain failed"))
++          const started = yield* coordinator.run("failing").pipe(Effect.forkChild)
++          yield* Effect.yieldNow
++          expect(yield* outer).toBeUndefined()
++          yield* Fiber.join(started).pipe(Effect.exit)
++        }),
++      )
++      expect(yield* read("failing")).toBeUndefined()
++    }),
++  )
++
+   it.effect("trampolines synchronous self-waking execution", () =>
+     Effect.gen(function* () {
+       const limit = 20_000
+diff --git a/packages/core/test/tool-subagent.test.ts b/packages/core/test/tool-subagent.test.ts
+--- a/packages/core/test/tool-subagent.test.ts
++++ b/packages/core/test/tool-subagent.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect } from "bun:test"
+-import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
++import { Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
+ import { LanguageModel } from "@opencode/ai/effect"
+ import { OpenAIChat } from "@opencode/ai/protocols"
+ import { TestLLM } from "@opencode/ai/testing"
+@@ -28,6 +28,8 @@ import { SessionExecution } from "@opencode/core/session/execution"
+ import { SessionRestart } from "@opencode/core/session/execution/restart"
+ import { SessionInbox } from "@opencode/core/session/inbox"
+ import { SessionMessage } from "@opencode/core/session/message"
++import { SessionRunCoordinator } from "@opencode/core/session/run-coordinator"
++import type { SessionRunner } from "@opencode/core/session/runner/index"
+ import { SessionRunnerModel } from "@opencode/core/session/runner/model"
+ import { SessionStore } from "@opencode/core/session/store"
+ import { SubagentJob } from "@opencode/core/session/subagent-job"
+@@ -140,6 +142,7 @@ const nodes = LayerNode.group([
+   Job.node,
+   Session.node,
+   SessionExecution.node,
++  SubagentJob.node,
+   LocationServiceMap.node,
+ ])
+ const replacements = [
+@@ -175,6 +178,109 @@ const completionIt = testEffect(
+   ]),
+ )
+ 
++/**
++ * Test-held pauses around the real run coordinator. Drains of `child` answer `response <n>` once released, or
++ * fail when listed in `failing`; one-shot hooks run after a job's resume returns, after its activity check, and
++ * in an execution's settlement.
++ */
++const coordinated = {
++  child: undefined as Session.ID | undefined,
++  drains: 0,
++  resumes: 0,
++  failing: new Set<number>(),
++  gates: new Map<string, Deferred.Deferred<void>>(),
++  afterResume: [] as Effect.Effect<void>[],
++  afterCheck: [] as Effect.Effect<void>[],
++  afterSettle: [] as Effect.Effect<void>[],
++  signal(name: string) {
++    let gate = this.gates.get(name)
++    if (gate === undefined) this.gates.set(name, (gate = Deferred.makeUnsafe<void>()))
++    return gate
++  },
++  reset(child: Session.ID) {
++    Object.assign(this, {
++      child,
++      drains: 0,
++      resumes: 0,
++      failing: new Set(),
++      gates: new Map(),
++      afterResume: [],
++      afterCheck: [],
++      afterSettle: [],
++    })
++  },
++}
++const once = (hooks: Effect.Effect<void>[]) => Effect.suspend(() => hooks.shift() ?? Effect.void)
++const release = (name: string) => Deferred.succeed(coordinated.signal(name), undefined)
++const held = (name: string) => Deferred.await(coordinated.signal(name))
++const reached = (name: string) => held(name).pipe(Effect.timeout("2 seconds"))
++
++const coordinatedExecutionNode = makeGlobalNode({
++  service: SessionExecution.Service,
++  layer: Layer.effect(
++    SessionExecution.Service,
++    Effect.gen(function* () {
++      const bus = yield* Bus.Service
++      const coordinator = yield* SessionRunCoordinator.make<Session.ID, SessionRunner.RunError>({
++        drain: (sessionID) =>
++          Effect.gen(function* () {
++            if (sessionID !== coordinated.child) return
++            const index = ++coordinated.drains
++            Deferred.doneUnsafe(coordinated.signal(`drain ${index}`), Exit.void)
++            yield* Deferred.await(coordinated.signal(`release ${index}`))
++            if (coordinated.failing.has(index))
++              return yield* new SessionRunnerModel.ModelNotSelectedError({ sessionID })
++            const assistantMessageID = SessionMessage.ID.create()
++            yield* bus.publish(SessionEvent.Step.Started, {
++              sessionID,
++              assistantMessageID,
++              agent: Agent.ID.make("reviewer"),
++              model: childModel,
++              started: 0,
++            })
++            yield* bus.publish(SessionEvent.Text.Started, { sessionID, assistantMessageID, ordinal: 0 })
++            yield* bus.publish(SessionEvent.Text.Ended, {
++              sessionID,
++              assistantMessageID,
++              ordinal: 0,
++              text: `response ${index}`,
++            })
++            yield* bus.publish(SessionEvent.Step.Ended, {
++              sessionID,
++              assistantMessageID,
++              finish: "stop",
++              cost: Money.USD.zero,
++              tokens,
++            })
++          }),
++        settled: (sessionID) => (sessionID === coordinated.child ? once(coordinated.afterSettle) : Effect.void),
++      })
++      return SessionExecution.Service.of({
++        active: coordinator.active,
++        isActive: (sessionID) => coordinator.isActive(sessionID).pipe(Effect.tap(() => once(coordinated.afterCheck))),
++        resume: (sessionID) =>
++          Effect.suspend(() => {
++            Deferred.doneUnsafe(coordinated.signal(`resume ${++coordinated.resumes}`), Exit.void)
++            return coordinator.run(sessionID).pipe(Effect.andThen(once(coordinated.afterResume)))
++          }),
++        wake: (sessionID) => coordinator.wake(sessionID),
++        interrupt: (sessionID) => coordinator.interrupt(sessionID),
++        awaitIdle: coordinator.awaitIdle,
++        observe: coordinator.observe,
++      })
++    }),
++  ),
++  deps: [Bus.node],
++})
++const coordinatedIt = testEffect(
++  AppNodeBuilder.build(nodes, [
++    SessionExecution.node.replace(coordinatedExecutionNode),
++    Global.node.replace(tempGlobalLayer),
++    offlineModels,
++    PluginSupervisor.node.replace(subagentPluginSupervisor),
++  ]),
++)
++
+ const withSubagent = (location: Location.Ref) =>
+   Effect.gen(function* () {
+     const locations = yield* LocationServiceMap.Service
+@@ -214,6 +320,56 @@ const withSubagent = (location: Location.Ref) =>
+     ).pipe(Effect.provide(locations.get(location)))
+   })
+ 
++const notificationOf = (result: { readonly status: string; readonly metadata?: unknown }) =>
++  Schema.decodeUnknownSync(Schema.Struct({ notificationID: SessionMessage.ID }))(result.metadata).notificationID
++
++/** A child of a fresh parent, driven by the real coordinator, with the parent's next `count` notices. */
++const coordinatedChild = (directory: string, count: number) =>
++  Effect.gen(function* () {
++    const sessions = yield* Session.Service
++    const location = Location.Ref.make({ directory: AbsolutePath.make(directory) })
++    const parent = yield* sessions.create({ location, model: parentModel })
++    const child = yield* sessions.create({
++      parentID: parent.id,
++      title: "review",
++      agent: Agent.ID.make("reviewer"),
++      model: childModel,
++    })
++    coordinated.reset(child.id)
++    yield* withSubagent(parent.location)
++    const locations = yield* LocationServiceMap.Service
++    const registry = yield* Tool.Service.pipe(Effect.provide(locations.get(parent.location)))
++    const bus = yield* Bus.Service
++    const notices = yield* bus.subscribe(SessionEvent.InboxEnqueued).pipe(
++      Stream.filter((event) => event.data.sessionID === parent.id && event.data.item.type === "synthetic"),
++      Stream.map((event) => {
++        const text = event.data.item.type === "synthetic" ? event.data.item.payload.text : ""
++        return {
++          id: event.data.inboxID,
++          state: /state="(\w+)"/.exec(text)?.[1],
++          text: /\n(.*)\n<\/subagent>/.exec(text)?.[1],
++        }
++      }),
++      Stream.take(count),
++      Stream.runCollect,
++      Effect.map((items) => Array.from(items)),
++      Effect.timeout("5 seconds"),
++      Effect.forkScoped({ startImmediately: true }),
++    )
++    const followUp = (id: string) =>
++      executeTool(registry, {
++        sessionID: parent.id,
++        ...toolIdentity,
++        call: {
++          type: "tool-call",
++          id,
++          name: SubagentTool.name,
++          input: { agent: "reviewer", description: "follow up", prompt: id, sessionID: child.id, background: true },
++        },
++      }).pipe(Effect.timeout("2 seconds"))
++    return { followUp, notices }
++  })
++
+ describe("SubagentTool", () => {
+   completionIt.live("admits one durable completion across live delivery and restart replay", () =>
+     tmpdirScoped().pipe(
+@@ -630,6 +786,233 @@ describe("SubagentTool", () => {
+     ),
+   )
+ 
++  it.live("joined follow-ups report their job's notice ID and a new job generation reports another", () =>
++    tmpdirScoped().pipe(
++      Effect.flatMap((dir) =>
++        Effect.gen(function* () {
++          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
++          const sessions = yield* Session.Service
++          const parent = yield* sessions.create({ location, model: parentModel })
++          const child = yield* sessions.create({
++            parentID: parent.id,
++            title: "review",
++            agent: Agent.ID.make("reviewer"),
++            model: childModel,
++          })
++          yield* withSubagent(parent.location)
++          const locations = yield* LocationServiceMap.Service
++          const registry = yield* Tool.Service.pipe(Effect.provide(locations.get(parent.location)))
++          const jobs = yield* Job.Service
++          const bus = yield* Bus.Service
++          const gate = yield* Deferred.make<void>()
++          yield* jobs.start({
++            id: child.id,
++            type: SubagentTool.name,
++            recovery: {
++              kind: "subagent",
++              parentSessionID: parent.id,
++              childSessionID: child.id,
++              agent: "reviewer",
++              description: "review",
++            },
++            run: Deferred.await(gate).pipe(Effect.as("done")),
++          })
++          const notice = () =>
++            bus.subscribe(SessionEvent.InboxEnqueued).pipe(
++              Stream.filter((event) => event.data.sessionID === parent.id && event.data.item.type === "synthetic"),
++              Stream.map((event) => event.data.inboxID),
++              Stream.take(1),
++              Stream.runCollect,
++              Effect.forkScoped({ startImmediately: true }),
++            )
++          const followUp = (id: string) =>
++            executeTool(registry, {
++              sessionID: parent.id,
++              ...toolIdentity,
++              call: {
++                type: "tool-call",
++                id,
++                name: SubagentTool.name,
++                input: {
++                  agent: "reviewer",
++                  description: "follow up",
++                  prompt: id,
++                  sessionID: child.id,
++                  background: true,
++                },
++              },
++            }).pipe(Effect.timeout("2 seconds"))
++
++          const first = yield* notice()
++          const launched = yield* followUp("call-launch")
++          const joined = yield* followUp("call-join")
++          const notificationID = launched.status === "completed" ? launched.metadata?.notificationID : undefined
++          expect(notificationID).toEqual(expect.any(String))
++          expect(joined).toMatchObject({ metadata: { sessionID: child.id, status: "running", notificationID } })
++          yield* Deferred.succeed(gate, undefined)
++          expect(Array.from(yield* Fiber.join(first).pipe(Effect.timeout("2 seconds")))).toEqual([notificationID])
++
++          const second = yield* notice()
++          const relaunched = yield* followUp("call-relaunch")
++          const next = relaunched.status === "completed" ? relaunched.metadata?.notificationID : undefined
++          expect(next).toEqual(expect.any(String))
++          expect(next).not.toBe(notificationID)
++          expect(Array.from(yield* Fiber.join(second).pipe(Effect.timeout("2 seconds")))).toEqual([next])
++        }),
++      ),
++    ),
++  )
++
++  coordinatedIt.live("a follow-up admitted after the child's execution settled extends the joined generation", () =>
++    tmpdirScoped().pipe(
++      Effect.flatMap((dir) =>
++        Effect.gen(function* () {
++          const { followUp, notices } = yield* coordinatedChild(dir.path, 1)
++          coordinated.afterResume.push(release("resumed").pipe(Effect.andThen(held("continue"))))
++
++          const launched = yield* followUp("call-launch")
++          yield* reached("resume 1")
++          yield* release("release 1")
++          yield* reached("resumed")
++          // The first execution settled, but its generation has not yet read the final response.
++          const joined = yield* followUp("call-join")
++          yield* reached("drain 2")
++          yield* release("continue")
++          yield* release("release 2")
++
++          const notificationID = notificationOf(launched)
++          expect(notificationOf(joined)).toBe(notificationID)
++          expect(yield* Fiber.join(notices)).toEqual([{ id: notificationID, state: "completed", text: "response 2" }])
++          expect(coordinated.resumes).toBe(1)
++        }),
++      ),
++    ),
++  )
++
++  coordinatedIt.live("a follow-up admitted while the generation settles starts the next generation", () =>
++    tmpdirScoped().pipe(
++      Effect.flatMap((dir) =>
++        Effect.gen(function* () {
++          const { followUp, notices } = yield* coordinatedChild(dir.path, 2)
++          coordinated.afterCheck.push(release("checked").pipe(Effect.andThen(held("continue"))))
++
++          const launched = yield* followUp("call-launch")
++          yield* reached("resume 1")
++          yield* release("release 1")
++          // The generation found the child idle and is settling on the first response.
++          yield* reached("checked")
++          const following = yield* followUp("call-follow").pipe(Effect.forkScoped)
++          yield* reached("drain 2")
++          yield* release("continue")
++          const followed = yield* Fiber.join(following)
++          yield* reached("resume 2")
++          yield* release("release 2")
++
++          const first = notificationOf(launched)
++          const second = notificationOf(followed)
++          expect(second).not.toBe(first)
++          expect(yield* Fiber.join(notices)).toEqual([
++            { id: first, state: "completed", text: "response 1" },
++            { id: second, state: "completed", text: "response 2" },
++          ])
++        }),
++      ),
++    ),
++  )
++
++  coordinatedIt.live("a follow-up admitted while a failed execution settles is covered by its successor", () =>
++    tmpdirScoped().pipe(
++      Effect.flatMap((dir) =>
++        Effect.gen(function* () {
++          const { followUp, notices } = yield* coordinatedChild(dir.path, 1)
++          coordinated.failing.add(1)
++          coordinated.afterSettle.push(release("settling").pipe(Effect.andThen(held("continue"))))
++
++          const launched = yield* followUp("call-launch")
++          yield* reached("resume 1")
++          yield* release("release 1")
++          // The first execution failed; its settlement holds the follow-up's wake for a successor.
++          yield* reached("settling")
++          const joined = yield* followUp("call-join")
++          yield* release("continue")
++          yield* reached("drain 2")
++          yield* release("release 2")
++
++          const notificationID = notificationOf(launched)
++          expect(notificationOf(joined)).toBe(notificationID)
++          expect(yield* Fiber.join(notices)).toEqual([{ id: notificationID, state: "completed", text: "response 2" }])
++          expect(coordinated.drains).toBe(2)
++        }),
++      ),
++    ),
++  )
++
++  coordinatedIt.live("a failed execution without follow-ups reports its error without running the child again", () =>
++    tmpdirScoped().pipe(
++      Effect.flatMap((dir) =>
++        Effect.gen(function* () {
++          const { followUp, notices } = yield* coordinatedChild(dir.path, 1)
++          coordinated.failing.add(1)
++
++          const launched = yield* followUp("call-launch")
++          yield* reached("resume 1")
++          yield* release("release 1")
++
++          expect(yield* Fiber.join(notices)).toEqual([
++            { id: notificationOf(launched), state: "error", text: expect.any(String) },
++          ])
++          expect(coordinated.drains).toBe(1)
++          expect(coordinated.resumes).toBe(1)
++        }),
++      ),
++    ),
++  )
++
++  it.live("settled generations of many children leave no settling markers", () =>
++    tmpdirScoped().pipe(
++      Effect.flatMap((dir) =>
++        Effect.gen(function* () {
++          const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
++          const sessions = yield* Session.Service
++          const parent = yield* sessions.create({ location, model: parentModel })
++          yield* withSubagent(parent.location)
++          const locations = yield* LocationServiceMap.Service
++          const registry = yield* Tool.Service.pipe(Effect.provide(locations.get(parent.location)))
++          const bus = yield* Bus.Service
++          const subagents = yield* SubagentJob.Service
++          const count = 25
++          const notices = yield* bus.subscribe(SessionEvent.InboxEnqueued).pipe(
++            Stream.filter((event) => event.data.sessionID === parent.id && event.data.item.type === "synthetic"),
++            Stream.take(count),
++            Stream.runCollect,
++            Effect.forkScoped({ startImmediately: true }),
++          )
++
++          yield* Effect.forEach(
++            Array.from({ length: count }, (_, index) => index),
++            (index) =>
++              executeTool(registry, {
++                sessionID: parent.id,
++                ...toolIdentity,
++                call: {
++                  type: "tool-call",
++                  id: `call-background-${index}`,
++                  name: SubagentTool.name,
++                  input: { agent: "reviewer", description: `review ${index}`, prompt: "review", background: true },
++                },
++              }),
++          )
++          expect(Array.from(yield* Fiber.join(notices).pipe(Effect.timeout("5 seconds")))).toHaveLength(count)
++          // Each generation clears its marker once its job completes.
++          yield* subagents.settling.pipe(
++            Effect.repeat({ until: (settling) => settling.size === 0 }),
++            Effect.timeout("2 seconds"),
++          )
++        }),
++      ),
++    ),
++  )
++
+   it.live("rejects unrelated children and switches agents on continuation", () =>
+     tmpdirScoped().pipe(
+       Effect.flatMap((dir) =>
+@@ -851,10 +1234,14 @@ describe("SubagentTool", () => {
+           expect(settled.metadata).toMatchObject({
+             status: "running",
+           })
+-          expect(settled.metadata).toEqual({ sessionID: childID, status: "running" })
+           expect(settled.content).toEqual([{ type: "text", text: expect.stringContaining(`sessionID: ${childID}`) }])
+ 
+           const admission = Array.from(yield* Fiber.join(admitted))[0]
++          expect(settled.metadata).toEqual({
++            sessionID: childID,
++            status: "running",
++            notificationID: admission?.data.inboxID,
++          })
+           expect(admission?.data.item.type).toBe("synthetic")
+           if (admission?.data.item.type !== "synthetic") return yield* Effect.die("Expected synthetic inbox item")
+           expect(admission?.data.item.payload.text).toContain(`<subagent sessionID="${childID}" state="completed"`)

@@ -25,7 +25,7 @@ runtime and host composition; this pass does not remap those subsystems.
 
 The native dependency is OpenCode 2.2.7, revision
 `fedc6f208aa2bd54c1019227214568083f6380ad`, with the repository's Capsule
-composition, durable-event and password-file patches. Native source inspection
+composition, durable-event, password-file and subagent-generations patches. Native source inspection
 on 2026-11-13 established the result-association constraints below. Automatic
 cleanup, verdict interpretation, live provider behavior, and proof of global OS
 writer termination remain outside scope.
@@ -114,11 +114,23 @@ absence cutoff is removed. Shutdown preserves a native recovery claim and cannot
 authorize continuation or restart merely because the process appears idle.
 
 Native shell and subagent launches are tracked by tool-result identities and
-matched to their synthetic completion notices. Outstanding notifications prevent
+matched to their synthetic completion notices. The subagent-generations patch
+adds each background subagent job generation's `notificationID`, the parent inbox
+ID of its one notice, to the tool result. Calls joining a running job share that
+notice; a later generation has its own. The patch also orders joins against a
+generation's settlement: a generation completes only once the child has no active
+execution, even after a failed one, and reports the latest execution's outcome
+without starting work again; execution outcomes are recorded only while a
+generation observes its child, and settling markers clear once the job completes.
+A follow-up arriving while it settles starts the next
+generation, so a shared notice covers every joined follow-up. Interruption still
+ends a generation, so a cancelled helper notice makes the turn unavailable. Durable history cannot prove
+that coverage, so joins are trusted only with the ID that patch reports. Outstanding notifications prevent
 success; a delivered notice requires a subsequent settled reviewer step. Completed
 jobs awaiting notification still count as native activity. Unknown tools or
-notices, ambiguous repeated launches, and detached/nested work found in a child
-session (including one named by a failed tool call) yield unavailable. A final
+notices, a notice naming another child than its generation, repeated launches of
+a child without notice IDs (unpatched history), and detached/nested work found in
+a child session (including one named by a failed tool call) yield unavailable. A final
 step must not require local-tool or output-limit continuation. Recovery followed
 by another input before a new step is unavailable rather than a preamble result.
 

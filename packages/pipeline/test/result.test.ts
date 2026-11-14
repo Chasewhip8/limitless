@@ -47,11 +47,11 @@ const notice = (id: string, metadata: Record<string, unknown>): Fact[] => [
 	enqueued(id, { type: 'synthetic', delivery: 'steer', metadata }),
 	delivered(id),
 ]
-const subagentDone = (childID: string) => ({
+const subagentDone = (childID: string, state = 'completed') => ({
 	source: 'subagent',
 	childID,
 	agent: 'helper',
-	state: 'completed',
+	state,
 })
 const shellDone = (shellID: string) => ({
 	source: 'shell',
@@ -76,8 +76,13 @@ const tool = (step: string, name: string, metadata: Record<string, unknown>): Fa
 		},
 	]
 }
-const backgroundSubagent = (step: string, child: string) =>
-	tool(step, 'subagent', { sessionID: child, status: 'running' })
+/** A background subagent call; patched native servers report the job generation's notice inbox ID. */
+const backgroundSubagent = (step: string, child: string, notificationID?: string) =>
+	tool(step, 'subagent', {
+		sessionID: child,
+		status: 'running',
+		...(notificationID === undefined ? {} : { notificationID }),
+	})
 const backgroundShell = (step: string, shellID: string) =>
 	tool(step, 'shell', { status: 'running', truncated: false, shellID })
 const shellJob = (shellID: string, status: string) => ({
@@ -798,7 +803,7 @@ test('a tool or output-limit preamble never answers, even when recovery promotes
 	expect(await f.result()).toEqual(unavailable('No native response settled'))
 })
 
-test('calling an outstanding helper again cannot be matched to its one completion notice', async () => {
+test('history without notice IDs cannot match a helper called again to its one completion notice', async () => {
 	const f = fixture()
 	f.state.children.set('ses_helper', [stepStarted('msg_c1'), stepEnded('msg_c1')])
 	f.state.log = [
@@ -853,4 +858,183 @@ test('a failed subagent call still has its child checked for detached work', asy
 		_tag: 'Completed',
 		message: { id: 'msg_a1r', text: 'The helper failed.' },
 	})
+})
+
+test('a follow-up that joins a running helper settles with the one notice its job shares', async () => {
+	const f = fixture()
+	f.state.children.set('ses_helper', [stepStarted('msg_c1'), stepEnded('msg_c1')])
+	const launch = (id: string) =>
+		toolTurn(
+			f.state,
+			id,
+			backgroundSubagent(id, 'ses_helper', 'msg_job'),
+			`Asked the helper in ${id}.`,
+		)
+	const completion = [
+		...notice('msg_job', subagentDone('ses_helper')),
+		started,
+		...step(f.state, 'msg_a3', [{ type: 'text', text: 'Final review' }]),
+		succeeded,
+	]
+	const completed = { _tag: 'Completed', message: { id: 'msg_a3', text: 'Final review' } }
+	const turn = (...launches: string[]) => [
+		enqueued(target),
+		delivered(target),
+		started,
+		...launches.flatMap(launch),
+		succeeded,
+	]
+	f.state.log = turn('msg_a1', 'msg_a2')
+	expect(await f.result()).toEqual({ _tag: 'Pending' })
+	f.state.log.push(...completion)
+	expect(await f.result()).toEqual(completed)
+
+	// The follow-up joins a job an earlier turn launched; the target is answered by the same notice.
+	f.state.log = [
+		enqueued('msg_earlier'),
+		delivered('msg_earlier'),
+		started,
+		...launch('msg_e1'),
+		succeeded,
+		...turn('msg_a2'),
+	]
+	expect(await f.result()).toEqual({ _tag: 'Pending' })
+	expect(await f.result('msg_earlier')).toEqual(unavailable('Independent input'))
+	f.state.log.push(...completion)
+	expect(await f.result()).toEqual(completed)
+})
+
+test('each helper generation is answered only by the notice its own inbox ID names', async () => {
+	const f = fixture()
+	f.state.children.set('ses_helper', [stepStarted('msg_c1'), stepEnded('msg_c1')])
+	const relaunched = [
+		enqueued(target),
+		delivered(target),
+		started,
+		...toolTurn(f.state, 'msg_a1', backgroundSubagent('msg_a1', 'ses_helper', 'msg_job1'), 'One.'),
+		...toolTurn(f.state, 'msg_a2', backgroundSubagent('msg_a2', 'ses_helper', 'msg_job2'), 'Two.'),
+		succeeded,
+	]
+	const answer = [
+		started,
+		...step(f.state, 'msg_a3', [{ type: 'text', text: 'Final review' }]),
+		succeeded,
+	]
+	f.state.log = [...relaunched, ...notice('msg_job1', subagentDone('ses_helper')), ...answer]
+	expect(await f.result()).toEqual({ _tag: 'Pending' })
+	f.state.log = [
+		...relaunched,
+		...notice('msg_job1', subagentDone('ses_helper')),
+		started,
+		...notice('msg_job2', subagentDone('ses_helper')),
+		...answer.slice(1),
+	]
+	expect(await f.result()).toEqual({
+		_tag: 'Completed',
+		message: { id: 'msg_a3', text: 'Final review' },
+	})
+
+	// An earlier turn's generation may still be reporting: its notice entering this turn is foreign.
+	const foreign = [
+		enqueued('msg_earlier'),
+		delivered('msg_earlier'),
+		started,
+		...toolTurn(f.state, 'msg_e1', backgroundSubagent('msg_e1', 'ses_helper', 'msg_job0'), 'Old.'),
+		succeeded,
+		enqueued(target),
+		delivered(target),
+		started,
+		...toolTurn(f.state, 'msg_a1', backgroundSubagent('msg_a1', 'ses_helper', 'msg_job1'), 'New.'),
+		succeeded,
+	]
+	f.state.log = [...foreign, ...notice('msg_job1', subagentDone('ses_helper')), ...answer]
+	expect(await f.result()).toEqual({
+		_tag: 'Completed',
+		message: { id: 'msg_a3', text: 'Final review' },
+	})
+	f.state.log = [
+		...foreign,
+		...notice('msg_job0', subagentDone('ses_helper')),
+		...notice('msg_job1', subagentDone('ses_helper')),
+		...answer,
+	]
+	expect(await f.result()).toEqual(unavailable('background notices entered'))
+})
+
+test('notices that no launched generation names, or that name another child, are unattributed', async () => {
+	const f = fixture()
+	f.state.children.set('ses_helper', [stepStarted('msg_c1'), stepEnded('msg_c1')])
+	const launched = [
+		enqueued(target),
+		delivered(target),
+		started,
+		...toolTurn(
+			f.state,
+			'msg_a1',
+			backgroundSubagent('msg_a1', 'ses_helper', 'msg_job'),
+			'Started.',
+		),
+		succeeded,
+	]
+	const answer = [
+		started,
+		...step(f.state, 'msg_a2', [{ type: 'text', text: 'Final review' }]),
+		succeeded,
+	]
+	f.state.log = [
+		...launched,
+		...notice('msg_unknown', subagentDone('ses_helper')),
+		...notice('msg_job', subagentDone('ses_helper')),
+		...answer,
+	]
+	expect(await f.result()).toEqual(unavailable('background notices entered'))
+	f.state.log = [...launched, ...notice('msg_job', subagentDone('ses_other')), ...answer]
+	expect(await f.result()).toEqual(unavailable('named another source'))
+})
+
+test('a helper launched with and without notice IDs cannot be matched to its notices', async () => {
+	const f = fixture()
+	f.state.children.set('ses_helper', [stepStarted('msg_c1'), stepEnded('msg_c1')])
+	for (const ids of [
+		[undefined, 'msg_job'],
+		['msg_job', undefined],
+	]) {
+		f.state.log = [
+			enqueued(target),
+			delivered(target),
+			started,
+			...toolTurn(f.state, 'msg_a1', backgroundSubagent('msg_a1', 'ses_helper', ids[0]), 'One.'),
+			...toolTurn(f.state, 'msg_a2', backgroundSubagent('msg_a2', 'ses_helper', ids[1]), 'Two.'),
+			succeeded,
+			...notice('msg_job', subagentDone('ses_helper')),
+			started,
+			...step(f.state, 'msg_a3', [{ type: 'text', text: 'Final review' }]),
+			succeeded,
+		]
+		expect(await f.result()).toEqual(unavailable('relaunched a background helper'))
+	}
+})
+
+test('a joined helper generation that failed settles the turn, but a cancelled helper does not', async () => {
+	const f = fixture()
+	f.state.children.set('ses_helper', [stepStarted('msg_c1'), stepFailed('msg_c1')])
+	const joined = (state: string) => [
+		enqueued(target),
+		delivered(target),
+		started,
+		...toolTurn(f.state, 'msg_a1', backgroundSubagent('msg_a1', 'ses_helper', 'msg_job'), 'Asked.'),
+		...toolTurn(f.state, 'msg_a2', backgroundSubagent('msg_a2', 'ses_helper', 'msg_job'), 'Again.'),
+		succeeded,
+		...notice('msg_job', subagentDone('ses_helper', state)),
+		started,
+		...step(f.state, 'msg_a3', [{ type: 'text', text: 'The helper failed; final review' }]),
+		succeeded,
+	]
+	f.state.log = joined('error')
+	expect(await f.result()).toEqual({
+		_tag: 'Completed',
+		message: { id: 'msg_a3', text: 'The helper failed; final review' },
+	})
+	f.state.log = joined('cancelled')
+	expect(await f.result()).toEqual(unavailable('was cancelled'))
 })

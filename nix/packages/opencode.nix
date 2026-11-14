@@ -83,6 +83,7 @@ pkgs.stdenv.mkDerivation {
     ../patches/opencode-persist-events.patch
     ../patches/opencode-password-file.patch
     ../patches/opencode-capsule.patch
+    ../patches/opencode-subagent-generations.patch
   ];
   postPatch = ''
     cp -r ${capsuleSource}/packages/capsule/src packages/server/src/limitless-capsule
@@ -143,6 +144,15 @@ pkgs.stdenv.mkDerivation {
     export OPENCODE_TARGET=${source.platform}
     bun run packages/cli/script/build.ts --skip-install
     runHook postBuild
+  '';
+
+  # Pipeline trusts the patched subagent generations: one notice, named in tool metadata, per generation
+  # covering every follow-up admitted before it settles, including recovered generations.
+  doCheck = true;
+  checkPhase = ''
+    runHook preCheck
+    (cd packages/core && bun test test/tool-subagent.test.ts test/session-execution.test.ts test/session-run-coordinator.test.ts)
+    runHook postCheck
   '';
 
   installPhase = ''
