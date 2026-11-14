@@ -37,8 +37,8 @@ Move work through three phases, skipping any the task doesn't need, and tell the
 2. **Implementation.** Build the agreed design and validate. Consult Oracle when changes to the approach or unresolved technical uncertainty benefit from independent judgment.
 
 3. **Review.** Follow the delivery path agreed during design:
-   - **Pull request:** Use the `review-pr` workflow for independent review before merge.
-   - **Direct delivery:** Before pushing, applying, or deploying, have `oracle` review the complete change. Skip Oracle review for straightforward changes.
+   - **Pull request:** Use the `review-pr` workflow for independent review before merge unless the user explicitly skips it.
+   - **Direct delivery:** Before pushing, applying, or deploying, have `oracle` review the complete change unless the user explicitly skips it. Skip Oracle review for straightforward changes.
 
 Fix confirmed in-scope findings and return to the same reviewer for rechecks until findings are resolved or deferred by the user. Keep reviews scoped to changed code unless asked otherwise.
 
