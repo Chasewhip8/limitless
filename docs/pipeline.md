@@ -145,7 +145,7 @@ The standalone `homeModules.pipeline` module can run without hosted Limitless.
 | `pollIntervalMs` | `60000`: safety reconciliation |
 | `queueTimeoutMs` | `3600000`: unsent command queue budget |
 | Worker `capacity` | `1`, advisory Pipeline-session budget |
-| Worker `openCodeVersion` | `2.2.7` |
+| Worker `openCodeVersion` | `2.3.0` |
 | Worker `controlDirectory` | Required; the remote Capsule control Location |
 
 Native events and local outbox changes wake reconciliation. Each task has scoped

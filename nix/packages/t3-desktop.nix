@@ -15,8 +15,8 @@ let
   pname = "t3-desktop";
   inherit (t3) version;
   src = fetchurl {
-    url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-${version}-x86_64.AppImage";
-    hash = "sha256-4Rdpi+TMWeXsFBbFHf1EKlPvoxQZd7wgy9DYH9P9WCQ=";
+    url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-x86_64.AppImage";
+    hash = "sha256-fN7RPBB1cVOQHt3ayaJgixVvF0Rd5Qbvn/33PAFSjXk=";
   };
   xdgOpen = runCommand "${pname}-xdg-open" { } ''
     install -Dm755 ${

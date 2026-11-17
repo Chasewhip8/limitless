@@ -18,7 +18,7 @@ const worker: Worker = {
 	controlDirectory: '/control',
 	system: 'x86_64-linux',
 	capacity: 1,
-	openCodeVersion: '2.2.7',
+	openCodeVersion: '2.3.0',
 }
 const target = 'msg_target'
 

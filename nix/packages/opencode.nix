@@ -1,7 +1,7 @@
 { pkgs, self }:
 let
   inherit (pkgs) lib;
-  version = "2.2.7";
+  version = "2.3.0";
   sources = {
     x86_64-linux = {
       platform = "linux-x64";
@@ -22,8 +22,8 @@ let
   # Upstream's packageManager and release workflow pin 1.4.4; the flake's Bun is older.
   bun = import ./opencode-bun.nix { pkgs = pkgs.buildPackages; };
   src = pkgs.fetchurl {
-    url = "https://github.com/anomalyco/opencode/archive/fedc6f208aa2bd54c1019227214568083f6380ad.tar.gz";
-    hash = "sha256-k5GzARi1PYhV6eaXKic3TfnoGT0YmqazU7k0B4uespk=";
+    url = "https://github.com/anomalyco/opencode/archive/a6b15d33daf6ab7d35569f6d711fdb630b9f04e7.tar.gz";
+    hash = "sha256-YbligdNgRZaCl4ip5DO6YYmPpLVtP3C9VwTkjLhPAgk=";
   };
   root = self.outPath or self;
   # Capsule's source compiles against this build's Effect and Core. Its Linux runtime arrives only
@@ -69,7 +69,7 @@ let
       mkdir -p "$out"
       find . -name node_modules -type d -prune -exec cp -r --parents {} "$out" \;
     '';
-    outputHash = "sha256-0pprCJUSWQRO9JjQ3/8d7CVa0ztnrTS4/HWk7JxP4uk=";
+    outputHash = "sha256-3f/ZorforOLmpQz6q4EONsd0D6f69++R4gbHf0lMU6M=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -151,7 +151,7 @@ pkgs.stdenv.mkDerivation {
   doCheck = true;
   checkPhase = ''
     runHook preCheck
-    (cd packages/core && bun test test/tool-subagent.test.ts test/session-execution.test.ts test/session-run-coordinator.test.ts)
+    (cd packages/core && bun test test/tool-subagent.test.ts test/session-execution.test.ts test/session-run-coordinator.test.ts test/subagent-report.test.ts)
     runHook postCheck
   '';
 

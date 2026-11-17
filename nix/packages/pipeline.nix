@@ -52,7 +52,7 @@ let
       # Bun's executable-link race must not affect the fixed-output tree.
       find "$out" -type d -path '*/node_modules/.bin' -prune -exec rm -rf {} +
     '';
-    outputHash = "sha256-IQCfJNQTQN7yMIYHlz1piEDP5Qcss0TBkFKuazueIWE=";
+    outputHash = "sha256-+l0Qft/kEUlr6anYP4KkKPg1HrBCG4/GJsshlOuBMmE=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };

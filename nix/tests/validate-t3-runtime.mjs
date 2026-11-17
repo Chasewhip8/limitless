@@ -124,6 +124,17 @@ async function prompt(id, command, wait = true) {
 	await api('POST', `/api/session/${id}/prompt`, { text: `DIAG:${JSON.stringify(command)}` })
 	if (wait) await api('POST', `/api/experimental/session/${id}/wait`)
 }
+// Subagents always run in the background: wait for the session, its children, then the turn their reports wake.
+async function settle(id, base) {
+	await api('POST', `/api/experimental/session/${id}/wait`, undefined, base)
+	const sessions = (
+		await api('GET', `/api/session?directory=${encodeURIComponent(workspace)}`, undefined, base)
+	).data
+	const children = sessions.filter((session) => session.parentID === id)
+	if (children.length === 0) return
+	for (const child of children) await settle(child.id, base)
+	await api('POST', `/api/experimental/session/${id}/wait`, undefined, base)
+}
 const invoke = (agent, tag, extra = {}) => ({
 	kind: 'invoke',
 	tag: `invoke-${tag}`,
@@ -269,7 +280,7 @@ async function verify() {
 			{ text: `DIAG:${JSON.stringify(command)}` },
 			backend,
 		)
-		await api('POST', `/api/experimental/session/${plain.id}/wait`, undefined, backend)
+		await settle(plain.id, backend)
 	}
 
 	const calls = readFileSync(callsFile, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)

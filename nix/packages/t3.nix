@@ -26,19 +26,19 @@
   vulkan-loader,
 }:
 let
-  version = "0.1.8";
+  version = "0.1.10";
   sources = {
     aarch64-linux = {
       arch = "arm64";
-      hash = "sha256-K/+/YI7vc2xcNeNDGn5SYdDJCeM9io/rg+8mo3R8+PQ=";
+      hash = "sha256-X/vSJPU9D4JyeYJTR6fr9aesmK1cE0fUdAnzCqKh5CU=";
     };
     x86_64-linux = {
       arch = "x64";
-      hash = "sha256-ucSdwAwj+7xZYb2v8tiOVW2WyNvWOMRQHik3xwZQqeU=";
+      hash = "sha256-m+qdNqIXKZoK+IDow0e1Nu1qmi9b8yimldF01jYoxeg=";
     };
   };
   source = sources.${stdenv.hostPlatform.system};
-  # T3 downloads chrome-headless-shell 157.0.8103.38 at runtime. Recheck its
+  # T3 downloads chrome-headless-shell 157.0.8103.78 at runtime. Recheck its
   # ELF dependencies and the browser smoke fixture whenever the T3 pin changes.
   browserLibraries = [
     alsa-lib

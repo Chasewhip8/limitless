@@ -41,7 +41,7 @@ import { pullRequestSource } from '../../packages/pipeline/worker/source.ts'
 // needs Bubblewrap, user namespaces, and the Nix daemon, so it runs on a host, not in a build.
 const [opencodeExecutable, capsuleRuntimeConfig, expectedVersion, system] = process.argv.slice(2)
 assert(opencodeExecutable && capsuleRuntimeConfig && expectedVersion && system)
-assert.equal(expectedVersion, '2.2.7', 'Recheck the native contract when upgrading OpenCode')
+assert.equal(expectedVersion, '2.3.0', 'Recheck the native contract when upgrading OpenCode')
 process.umask(0o077)
 
 const overallDeadline = 15 * 60_000

@@ -22,7 +22,7 @@ const worker: Worker = {
 	controlDirectory: '/control',
 	system: 'x86_64-linux',
 	capacity: 1,
-	openCodeVersion: '2.2.7',
+	openCodeVersion: '2.3.0',
 }
 const host = { version: 1, storageId: identity.storageId, checkoutRoot: '/work' }
 const source = {
@@ -71,7 +71,7 @@ function fixture() {
 		permissions: [] as unknown[],
 		forms: [] as unknown[],
 		jobs: [] as unknown[],
-		version: '2.2.7',
+		version: '2.3.0',
 		review: true,
 		eventCancellations: 0,
 		placed: {

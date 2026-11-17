@@ -23,8 +23,8 @@ snapshot `/nix/store/zzcrls7lfzzxrvld2grfhziyrav7yc1n-source`. Its 359 tests and
 three host runners passed. That evidence remains historical for Capsule source,
 runtime and host composition; this pass does not remap those subsystems.
 
-The native dependency is OpenCode 2.2.7, revision
-`fedc6f208aa2bd54c1019227214568083f6380ad`, with the repository's Capsule
+The native dependency is OpenCode 2.3.0, revision
+`a6b15d33daf6ab7d35569f6d711fdb630b9f04e7`, with the repository's Capsule
 composition, durable-event, password-file and subagent-generations patches. Native source inspection
 on 2026-11-13 established the result-association constraints below. Automatic
 cleanup, verdict interpretation, live provider behavior, and proof of global OS
@@ -91,7 +91,7 @@ keep slow preparation from serializing unrelated controls.
 
 ### Native response association
 
-The accepted queued prompt ID is the lower anchor. Native 2.2.7 has no universal
+The accepted queued prompt ID is the lower anchor. Native 2.3.0 has no universal
 prompt-to-final-response ID: one execution terminal describes a busy period,
 which can contain several queued prompts. Background completion can also wake
 another busy period after a foreground success. Queue versus steer is scheduling,
@@ -114,16 +114,18 @@ absence cutoff is removed. Shutdown preserves a native recovery claim and cannot
 authorize continuation or restart merely because the process appears idle.
 
 Native shell and subagent launches are tracked by tool-result identities and
-matched to their synthetic completion notices. The subagent-generations patch
-adds each background subagent job generation's `notificationID`, the parent inbox
-ID of its one notice, to the tool result. Calls joining a running job share that
-notice; a later generation has its own. The patch also orders joins against a
-generation's settlement: a generation completes only once the child has no active
-execution, even after a failed one, and reports the latest execution's outcome
-without starting work again; execution outcomes are recorded only while a
-generation observes its child, and settling markers clear once the job completes.
-A follow-up arriving while it settles starts the next
-generation, so a shared notice covers every joined follow-up. Interruption still
+matched to their synthetic completion notices. Since 2.3.0, subagents always run
+in the background and a child's execution settlement reports to its parent, under
+the running job generation's `notificationID` or, without one, under a fresh ID.
+The subagent-generations patch adds that generation's `notificationID`, the parent
+inbox ID of its one notice, to the tool result. Calls joining a running generation
+share that notice; a later generation has its own. The patch also orders joins
+against the report decision: a settlement whose recorded wake will start a
+successor execution, even after a failure, continues the generation instead of
+reporting, and the successor reports the latest response without the generation
+starting work again. An interrupt in that window stops the successor, which reports
+the generation as cancelled. A follow-up arriving after the decision starts the
+next generation, so a shared notice covers every joined follow-up. Interruption still
 ends a generation, so a cancelled helper notice makes the turn unavailable. Durable history cannot prove
 that coverage, so joins are trusted only with the ID that patch reports. Outstanding notifications prevent
 success; a delivered notice requires a subsequent settled reviewer step. Completed

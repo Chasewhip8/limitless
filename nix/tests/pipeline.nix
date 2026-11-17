@@ -276,7 +276,7 @@ assert lib.assertMsg
             worker
             // {
               capacity = 1;
-              openCodeVersion = "2.2.7";
+              openCodeVersion = "2.3.0";
             }
           )
         ];
@@ -389,7 +389,7 @@ pkgs.runCommand "pipeline-check"
       workers: [{
         id: "fixture", url: "http://127.0.0.1:1", credentialFile,
         controlDirectory,
-        system: "${pkgs.stdenv.hostPlatform.system}", capacity: 1, openCodeVersion: "2.2.7",
+        system: "${pkgs.stdenv.hostPlatform.system}", capacity: 1, openCodeVersion: "2.3.0",
       }],
     }));
     const child = spawn(process.argv[2], ["serve", "--config", config], {

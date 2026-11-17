@@ -85,6 +85,11 @@
               inherit pkgs;
               opencode = self.packages.${system}.opencode;
             };
+            openai-catalog = import ./nix/tests/openai-catalog.nix {
+              inherit pkgs;
+              opencode = self.packages.${system}.opencode;
+              limitless = self.packages.${system}.limitless;
+            };
             executor-service = import ./nix/tests/executor-service.nix {
               inherit pkgs nixpkgs;
               module = self.nixosModules.executor;

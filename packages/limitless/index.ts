@@ -2,6 +2,7 @@ import { Plugin } from '@opencode/plugin/effect'
 import type { ToolEditor } from '@opencode/plugin/effect/tool'
 import { Tool } from '@opencode/schema/tool'
 import { Effect } from 'effect'
+import { backfillOpenAIModels } from './plugin/openai-catalog'
 import { applyProviderPolicy, normalizeProviderPolicyConfig } from './plugin/provider-policy'
 import {
 	makeToolExecutor,
@@ -85,6 +86,7 @@ export default Plugin.define({
 			registerLimitlessTools(draft, tools)
 		})
 		yield* ctx.provider.transform((providers) => {
+			backfillOpenAIModels(providers)
 			applyProviderPolicy(providers, configs.providerPolicy)
 		})
 	}),

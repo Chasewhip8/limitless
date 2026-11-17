@@ -1,7 +1,7 @@
 ---
 description: Independent adviser and investigator for consequential design decisions, difficult diagnoses, technical uncertainty, and reviews of completed changes.
 mode: subagent
-model: openai/gpt-6-astra#xhigh
+model: openai/gpt-6.2-astra#xhigh
 permissions:
     - action: question
       resource: "*"

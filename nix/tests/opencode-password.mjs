@@ -177,7 +177,7 @@ async function registered(fixture, password) {
 				registration.password === password,
 				'Managed registration did not use the imported credential',
 			)
-			assert(registration.version === '2.2.7', 'Recheck the password contract on upstream upgrades')
+			assert(registration.version === '2.3.0', 'Recheck the password contract on upstream upgrades')
 			assert(
 				((await stat(fixture.registration)).mode & 0o777) === 0o600,
 				'Native service registration must be private',

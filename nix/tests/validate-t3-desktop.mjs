@@ -11,7 +11,7 @@ assert(originalFile && patchedFile && opener, 'Pass <original> <patched> <opener
 const publishStart = 'fn("desktop.shellEnvironment.publish")('
 const hydrationCalls = [
 	// Fresh login-shell discovery, then its publication.
-	'mergePaths(config.platform, [trimNonEmpty(shellEnvironment.PATH).pipe(orElse$2(() => launchctlPath)), readEnvPath(config.env)])',
+	'mergePaths(config.platform, [nonEmptyPath(shellEnvironment.PATH).pipe(orElse$2(() => launchctlPath)), readEnvPath(config.env)])',
 	'yield* publish$1(patch, prepared)',
 	// Cache restoration, then its publication.
 	'mergePaths(environment.platform, [some(cachedPath), readEnvPath(inherited)])',
@@ -40,15 +40,17 @@ function load(file) {
 	const helpers = [
 		section(source, 'function setWindowsPath(env, value) {', '\n}'),
 		section(source, 'function applyShellEnvironment(env, patch, platform) {', '\n}'),
-		section(source, 'const pathDelimiter = ', ';\n'),
-		section(source, 'const pathComparisonKey = ', 'none$1();\n};'),
+		section(source, 'const POSIX_PATH_DELIMITER = ', ';\n'),
+		section(source, 'function stripWrappingQuotes(value) {', 'merged.join(delimiter) : void 0;\n}'),
+		section(source, 'const mergePaths = ', ';\n'),
 	].join('\n')
 	const create = new Function(
 		'env',
 		'environment',
-		`const isNone = (option) => option._tag === "None";
-		const some = (value) => ({ _tag: "Some", value });
+		`const some = (value) => ({ _tag: "Some", value });
 		const none$1 = () => ({ _tag: "None" });
+		const fromNullishOr = (value) => (value == null ? none$1() : some(value));
+		const getOrUndefined$1 = (option) => (option._tag === "Some" ? option.value : undefined);
 		const set$2 = () => [];
 		const publish = () => [];
 		const latest = undefined;
