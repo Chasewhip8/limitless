@@ -1,15 +1,11 @@
 {
   appimageTools,
+  callPackage,
   desktop-file-utils,
   fetchurl,
   lib,
   nodejs,
-  replaceVars,
-  runCommand,
-  runtimeShell,
-  systemd,
   t3,
-  xdg-utils,
 }:
 let
   pname = "t3-desktop";
@@ -18,20 +14,12 @@ let
     url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-x86_64.AppImage";
     hash = "sha256-fN7RPBB1cVOQHt3ayaJgixVvF0Rd5Qbvn/33PAFSjXk=";
   };
-  xdgOpen = runCommand "${pname}-xdg-open" { } ''
-    install -Dm755 ${
-      replaceVars ./t3-xdg-open.sh {
-        inherit runtimeShell;
-        systemdRun = "${lib.getBin systemd}/bin/systemd-run";
-        xdgOpen = lib.getExe' xdg-utils "xdg-open";
-      }
-    } "$out/bin/xdg-open"
-  '';
+  launchers = callPackage ./desktop-host-launchers.nix { name = pname; };
   contents = appimageTools.extract {
     inherit pname version src;
     postExtract = ''
       chmod u+w "$out/resources" "$out/resources/app.asar"
-      ${lib.getExe nodejs} ${./t3-desktop-asar.mjs} "$out/resources/app.asar" ${xdgOpen}/bin
+      ${lib.getExe nodejs} ${./t3-desktop-asar.mjs} "$out/resources/app.asar" ${launchers}/bin
     '';
   };
 in
@@ -42,7 +30,7 @@ appimageTools.wrapAppImage {
   # Electron 44 opens external URLs by searching PATH for `xdg-open`. T3 later
   # prepends its login-shell PATH, so the bundled patch restores this order.
   profile = ''
-    export PATH="${xdgOpen}/bin:$PATH"
+    export PATH="${launchers}/bin:$PATH"
   '';
 
   extraInstallCommands = ''
@@ -53,7 +41,7 @@ appimageTools.wrapAppImage {
     cp -r ${contents}/usr/share/icons "$out/share/"
   '';
 
-  passthru = { inherit contents src xdgOpen; };
+  passthru = { inherit contents src launchers; };
 
   meta = {
     description = "T3 Code desktop client";

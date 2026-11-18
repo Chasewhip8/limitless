@@ -66,6 +66,24 @@
           }
           // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
             opencode-desktop = self.packages.${system}.opencode-desktop;
+            desktop-launchers = import ./nix/tests/desktop-launchers.nix {
+              inherit pkgs;
+              desktops = [
+                {
+                  package = self.packages.${system}.opencode-desktop;
+                  commands = [
+                    "code"
+                    "cursor"
+                    "xdg-open"
+                    "zed"
+                  ];
+                }
+                {
+                  package = self.packages.${system}.t3-desktop;
+                  commands = [ "xdg-open" ];
+                }
+              ];
+            };
             t3-desktop = import ./nix/tests/t3-desktop.nix {
               inherit pkgs;
               package = self.packages.${system}.t3-desktop;

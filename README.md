@@ -869,16 +869,32 @@ package ships with a matching server version; an independently updated client
 needs compatible protocols and feature support. Home Manager restarts T3 on
 changed units when service switching is enabled.
 
-The Linux T3 desktop runs in an AppImage sandbox, so it hands links and **Open in**
-targets such as Zed's remote `zed://ssh/…` links to a private `xdg-open`. This
-starts the pinned `xdg-open` as a transient systemd user service, outside the
-sandbox. The handler therefore uses the user manager's environment, and opened
-editors keep running after T3 closes. T3 replaces its PATH with your login shell's
-at startup, so the package patches T3's bundled environment publication to keep
-this opener first. The desktop therefore requires a running
-systemd user manager; without one, links fail rather than open inside the sandbox.
-Your desktop session must also export its display and `XDG_DATA_DIRS` to the user
-manager, as most sessions do.
+The Linux desktops run in AppImage sandboxes, so each finds private launchers
+first on its PATH. These start handlers as transient systemd user services,
+outside the sandbox, so they use the user manager's environment and opened editors
+keep running after the desktop closes:
+
+| Desktop | Launchers |
+| --- | --- |
+| T3 Code | `xdg-open`, for links and **Open in** targets such as Zed's remote `zed://ssh/…` links |
+| OpenCode | `xdg-open` for links and files, plus the **Open in** editors `code`, `cursor`, and `zed`. Each starts the first executable host command found on PATH; `zed` tries `zeditor` first, the Linux package's name for Zed |
+
+Both desktops replace their PATH with your login shell's at startup. T3 prepends
+the shell's entries, so its package patches T3's bundled environment publication
+to keep the launchers first. OpenCode is unpatched and adopts the shell's PATH as
+printed. NixOS's shell setup keeps the inherited launchers first only when the
+desktop session has already run it (`__NIXOS_SET_ENVIRONMENT_DONE`, which graphical
+NixOS sessions set). Otherwise every command falls back to OpenCode's unwrapped
+behavior: links open inside the sandbox and **Open in → Zed** finds no `zed`
+command. A shell startup file that puts another `xdg-open` or editor command ahead
+causes the same fallback for that command only. An
+OpenCode service that Desktop starts itself also inherits the launchers, so editor
+commands run from it return once the editor starts; a Limitless-managed service
+does not inherit them.
+
+The launchers require a running systemd user manager; without one, links and
+editors fail rather than open inside the sandbox. Your desktop session must also
+export its display and `XDG_DATA_DIRS` to the user manager, as most sessions do.
 
 ## T3 Code
 

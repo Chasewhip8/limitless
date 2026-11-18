@@ -1,5 +1,6 @@
 {
   appimageTools,
+  callPackage,
   desktop-file-utils,
   fetchurl,
   lib,
@@ -15,10 +16,30 @@ let
     hash = "sha256-xm8/I2bCYsh21M8U/K9axkNMtPBCByg8TmLAGblkwN4=";
   };
   contents = appimageTools.extract { inherit pname version src; };
+  # OpenCode's Linux "Open in" menu runs these editors by name.
+  launchers = callPackage ./desktop-host-launchers.nix {
+    name = pname;
+    editors = {
+      code = [ "code" ];
+      cursor = [ "cursor" ];
+      # Linux packages name the editor zeditor because OpenZFS owns zed.
+      zed = [
+        "zeditor"
+        "zed"
+      ];
+    };
+  };
 in
-appimageTools.wrapType2 {
-  inherit pname version src;
+appimageTools.wrapAppImage {
+  inherit pname version contents;
   nativeBuildInputs = [ desktop-file-utils ];
+
+  # Electron opens links and editors by searching PATH. OpenCode replaces PATH with
+  # its login shell's, which keeps this prefix because NixOS's environment setup has
+  # already run in the desktop session.
+  profile = ''
+    export PATH="${launchers}/bin:$PATH"
+  '';
 
   extraInstallCommands = ''
     # Desktop can replace a running shared service when its bundled CLI differs.
@@ -28,6 +49,8 @@ appimageTools.wrapType2 {
       ${contents}/ai.opencode.desktop.desktop
     cp -r ${contents}/usr/share/icons "$out/share/"
   '';
+
+  passthru = { inherit contents src launchers; };
 
   meta = {
     description = "OpenCode V2 desktop client";
