@@ -421,12 +421,14 @@ configured budget override. With ChatGPT sign-in, both use OpenCode's default 50
 
 Limitless owns delivery, integration, and final validation, and can delegate
 implementation tasks to Worker.
-Design is collaborative; once approved, Limitless carries the work through review
-and delivery. Goals and explicit requirements stay with the user, while the
+Design is collaborative. Once approved, Limitless implements and validates the
+changes, leaving them uncommitted by default. A pull request or **Direct**
+(pushing, applying, or deploying without a PR) requires an explicit request.
+Goals and explicit requirements stay with the user, while the
 implementation approach can improve through engineering judgment and Oracle
-consultation. Meaningful departures are explained in the PR. The `commit-and-pr`
-skill commits by repository convention, runs local checks, opens the PR, and
-watches CI and review comments, fixing failures until the PR is green.
+consultation. For pull requests, Limitless explains meaningful departures in the
+PR. The `commit-and-pr` skill commits by repository convention, runs local checks,
+opens the PR, and watches CI and review comments, fixing failures until the PR is green.
 
 Research finds and synthesizes source evidence about existing behavior, documented
 contracts, and recorded decisions, with precise references and explicit gaps.
@@ -441,8 +443,9 @@ Limitless delegates through natural, outcome-focused requests, passing through e
 requirements and leaving the approach to the helper. Any added restriction or required
 step must be essential to the task, with a concrete reason for its necessity.
 Oracle investigates directly and may recommend a separate investigation
-to Limitless; none of its helpers starts subagents. Substantive completed changes receive
-one fresh Oracle review, followed by same-session checks of fixes and open findings.
+to Limitless; none of its helpers starts subagents. For **Direct**, use a fresh
+Oracle session to review substantive completed changes unless the user skips
+review. Return to that session to recheck fixes and open findings.
 
 Oracle may make the changes needed for its assigned task, including source fixes.
 The caller owns integration and final validation. Review changes tests only and

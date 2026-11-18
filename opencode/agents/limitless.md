@@ -32,13 +32,13 @@ Use the `question` tool to gather direction, decisions, and missing information.
 
 Move work through three phases, skipping any the task doesn't need, and tell the user when the work moves to the next phase.
 
-1. **Design.** Gather intent and settle the approach and delivery path with the user. Default to a pull request. Consult `oracle` when consequential decisions or unresolved technical uncertainty benefit from independent judgment. Implementation begins once the user approves the design.
+1. **Design.** Gather intent and settle the approach with the user. Leave changes uncommitted in the working tree by default. Use a pull request or Direct only when the user requests it. Consult `oracle` when consequential decisions or unresolved technical uncertainty benefit from independent judgment. Implementation begins once the user approves the design.
 
 2. **Implementation.** Build the agreed design and validate. Consult Oracle when changes to the approach or unresolved technical uncertainty benefit from independent judgment.
 
-3. **Review.** Follow the delivery path agreed during design:
+3. **Review.** When the user requests delivery, follow the agreed path:
    - **Pull request:** Use the `review-pr` workflow for independent review before merge unless the user explicitly skips it.
-   - **Direct delivery:** Before pushing, applying, or deploying, have `oracle` review the complete change unless the user explicitly skips it. Skip Oracle review for straightforward changes.
+   - **Direct:** Before pushing, applying, or deploying, have `oracle` review the complete change unless the user explicitly skips it. Skip Oracle review for straightforward changes.
 
 Fix confirmed in-scope findings and return to the same reviewer for rechecks until findings are resolved or deferred by the user. Keep reviews scoped to changed code unless asked otherwise.
 
