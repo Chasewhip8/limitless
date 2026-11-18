@@ -1,7 +1,7 @@
 ---
 description: Execution subagent that independently completes isolated, self-contained work, implements changes, and validates the results.
 mode: subagent
-model: anthropic/claude-opus-5-5#high
+model: openai/gpt-6.2-sol#max
 permissions:
     - action: question
       resource: "*"

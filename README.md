@@ -404,15 +404,15 @@ build. OpenCode's built-in skills remain available.
 ## Agents and models
 
 `limitless` is the primary user-facing agent and defaults to
-`openai/gpt-6.2-astra#xhigh`. Connect OpenAI through `/connect` to make
-Astra available; OpenCode falls back to its default model when the agent's model
+`anthropic/claude-opus-5-5#xhigh`. Connect Anthropic through `/connect` to make
+Opus available; OpenCode falls back to its default model when the agent's model
 is unavailable. Existing sessions retain their selected model. Select a model in
 OpenCode, or supply custom agent definitions through `programs.limitless.agents.package`.
 Agent Markdown model fields take precedence over settings in the same configuration
 directory, so `opencode.settings.agents.limitless.model` does not override the packaged default.
 
 `review` is a second primary agent and uses `openai/gpt-6.2-astra#xhigh`.
-Oracle uses `openai/gpt-6.2-astra#xhigh`; Worker uses `anthropic/claude-opus-5-5#high`; Research uses
+Oracle uses `openai/gpt-6.2-astra#max`; Worker uses `openai/gpt-6.2-sol#max`; Research uses
 `openai/gpt-6.2-sol#high`. Subagents keep the processing tier of their configured model.
 
 Limitless temporarily supplies missing GPT-6.2 model definitions for the pinned OpenCode release.

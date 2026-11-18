@@ -20,11 +20,11 @@ for (const file of await readdir(agentsDirectory)) {
 	agents[basename(file, '.md')] = YAML.parse(frontmatter[1])
 }
 Schema.decodeUnknownSync(Config.Info)({ agents }, { onExcessProperty: 'error' })
-assert.equal(agents.limitless?.model, 'openai/gpt-6.2-astra#xhigh')
+assert.equal(agents.limitless?.model, 'anthropic/claude-opus-5-5#xhigh')
 assert.equal(agents.review?.model, 'openai/gpt-6.2-astra#xhigh')
-assert.equal(agents.oracle?.model, 'openai/gpt-6.2-astra#xhigh')
+assert.equal(agents.oracle?.model, 'openai/gpt-6.2-astra#max')
 assert.equal(agents.research?.model, 'openai/gpt-6.2-sol#high')
-assert.equal(agents.worker?.model, 'anthropic/claude-opus-5-5#high')
+assert.equal(agents.worker?.model, 'openai/gpt-6.2-sol#max')
 const enabledAgents = Object.keys(agents).filter((name) => !agents[name].disabled)
 assert.deepEqual(enabledAgents.sort(), ['limitless', 'oracle', 'research', 'review', 'worker'])
 
