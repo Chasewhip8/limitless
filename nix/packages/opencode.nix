@@ -1,7 +1,7 @@
 { pkgs, self }:
 let
   inherit (pkgs) lib;
-  version = "2.3.0";
+  version = "2.3.2";
   sources = {
     x86_64-linux = {
       platform = "linux-x64";
@@ -22,8 +22,8 @@ let
   # Upstream's packageManager and release workflow pin 1.4.4; the flake's Bun is older.
   bun = import ./opencode-bun.nix { pkgs = pkgs.buildPackages; };
   src = pkgs.fetchurl {
-    url = "https://github.com/anomalyco/opencode/archive/a6b15d33daf6ab7d35569f6d711fdb630b9f04e7.tar.gz";
-    hash = "sha256-YbligdNgRZaCl4ip5DO6YYmPpLVtP3C9VwTkjLhPAgk=";
+    url = "https://github.com/anomalyco/opencode/archive/c0ad18b402eb2827fc1ee71c171b1177b3fc02d1.tar.gz";
+    hash = "sha256-y2SGvw6KX7SbU2e+ynaF5F8xG/4qOLKtFcaj473Pi8k=";
   };
   root = self.outPath or self;
   # Capsule's source compiles against this build's Effect and Core. Its Linux runtime arrives only
@@ -69,7 +69,7 @@ let
       mkdir -p "$out"
       find . -name node_modules -type d -prune -exec cp -r --parents {} "$out" \;
     '';
-    outputHash = "sha256-3f/ZorforOLmpQz6q4EONsd0D6f69++R4gbHf0lMU6M=";
+    outputHash = "sha256-2mo1yUfMGN7KZhoe7qYMzlVThIa/W1DGllus0hF/50w=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };

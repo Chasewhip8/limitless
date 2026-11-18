@@ -2,7 +2,7 @@
 
 > A Home Manager module for a ready-to-use OpenCode 2 workspace.
 
-Limitless pins OpenCode `2.3.0`, supplies coding agents, artifact and source-research
+Limitless pins OpenCode `2.3.2`, supplies coding agents, artifact and source-research
 tools, and configures optional first-party MCP connections. OpenCode owns its
 service discovery, OAuth credentials, Code Mode, and native
 notification delivery. Home Manager owns packages and non-secret configuration, with
@@ -328,7 +328,7 @@ Do not synchronize OAuth token files between machines.
 
 For a remote OpenCode host, finish authorization in the browser, then paste the
 failed loopback redirect URL into OpenCode's waiting sign-in prompt, not into chat.
-OpenCode 2.3.0 supports this flow without an SSH tunnel.
+OpenCode 2.3.2 supports this flow without an SSH tunnel.
 
 Alternatively, set `callbackPort = 19876` (and optionally `readCallbackPort = 19877`)
 and forward the **OpenCode host's** loopback listener from the browser computer
@@ -445,7 +445,8 @@ directory, so `opencode.settings.agents.limitless.model` does not override the p
 Oracle uses `openai/gpt-6.2-astra#max`; Worker uses `openai/gpt-6.2-sol#max`; Research uses
 `openai/gpt-6.2-sol#high`. Subagents keep the processing tier of their configured model.
 
-Limitless temporarily supplies missing GPT-6.2 model definitions for the pinned OpenCode release.
+OpenCode 2.3.2 allows GPT-6.2 with ChatGPT sign-in, but its bundled catalog still lacks the models.
+Limitless temporarily supplies their definitions when missing.
 OpenCode still owns authentication, routing, pricing, and context caps; neither 6.2 model has a
 configured budget override. With ChatGPT sign-in, both use OpenCode's default 500,000-token input cap.
 
@@ -773,7 +774,7 @@ with active clients and Pipeline, then verify the listener's authentication.
 Native clients that start the daemon independently use the last imported password.
 Removing `passwordFile` or its source file does not erase the native private copy.
 
-Sharing a password also shares authority: in OpenCode 2.3.0, pairing tokens are
+Sharing a password also shares authority: in OpenCode 2.3.2, pairing tokens are
 signed with that password without a host-specific audience. A token issued by one
 instance can authenticate to another using the same password. Rotation invalidates
 existing pairings. Keep Pipeline's API bearer token separate from this fleet secret.
@@ -1042,7 +1043,7 @@ independent T3 OAuth connections. Underscore-containing thread namespaces, such 
 a fork's `<thread>_fork`, receive stable `t3-code-<32 hex>` aliases so
 prefix-related names cannot grant sibling tools.
 
-This adapter targets OpenCode `2.3.0` and upstream stable T3 `0.1.10` on both
+This adapter targets OpenCode `2.3.2` and upstream stable T3 `0.1.10` on both
 x86_64 and ARM Linux. T3's OpenCode 2 provider still selects `build` for normal
 mode, which the bridge maps to the configured default agent. The per-thread
 agent picker is not available on this V2 path.
@@ -1165,13 +1166,13 @@ The Linux `capsule` flake check validates the package without namespaces. Run
 `nix run .#checks.<system>.capsule` on the host to exercise real Bubblewrap and
 Nix development shells against temporary fixtures.
 
-Runtime, Limitless plugin SDK, and schema are pinned to `2.3.0`. The workspace
+Runtime, Limitless plugin SDK, and schema are pinned to `2.3.2`. The workspace
 uses `effect@4.1.3` and matching platform packages. Hosted plugins still use
 OpenCode's shared Effect and plugin runtime; the standalone T3 bridge and
 Pipeline bundle their own dependencies. Validate hosted compatibility against
 the pinned OpenCode release when updating Effect.
 The cache-status plugin's type-only dev dependencies (`@opencode/theme`,
-`@opentui/*`, `solid-js`) follow the same OpenCode release: `2.3.0`, `0.8.4`,
+`@opentui/*`, `solid-js`) follow the same OpenCode release: `2.3.2`, `0.8.4`,
 and `1.9.17`, respectively. The Effect and platform overrides keep SDK
 dependencies on one `4.1.3` runtime in standalone builds and local tests.
 Re-audit native

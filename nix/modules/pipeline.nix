@@ -54,7 +54,7 @@ let
       };
       openCodeVersion = lib.mkOption {
         type = lib.types.nonEmptyStr;
-        default = "2.3.0";
+        default = "2.3.2";
         description = "Expected native OpenCode version. Enroll and test this version before enabling the coordinator.";
       };
     };

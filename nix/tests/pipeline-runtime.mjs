@@ -41,7 +41,7 @@ import { pullRequestSource } from '../../packages/pipeline/worker/source.ts'
 // needs Bubblewrap, user namespaces, and the Nix daemon, so it runs on a host, not in a build.
 const [opencodeExecutable, capsuleRuntimeConfig, expectedVersion, system] = process.argv.slice(2)
 assert(opencodeExecutable && capsuleRuntimeConfig && expectedVersion && system)
-assert.equal(expectedVersion, '2.3.0', 'Recheck the native contract when upgrading OpenCode')
+assert.equal(expectedVersion, '2.3.2', 'Recheck the native contract when upgrading OpenCode')
 process.umask(0o077)
 
 const overallDeadline = 15 * 60_000
@@ -123,7 +123,7 @@ const sanitize = (text) =>
 	)
 
 const readFileName = 'pipeline-runtime-read.txt'
-const readMarker = 'PIPELINE_RUNTIME_TOOL_RESULT_2_2_7'
+const readMarker = 'PIPELINE_RUNTIME_TOOL_RESULT'
 const readCallId = 'call_pipeline_fixture_read'
 const linkCallId = 'call_pipeline_fixture_host_link'
 const writeCallId = 'call_pipeline_fixture_write'
@@ -362,7 +362,7 @@ async function modelResponse(body, headers, response) {
 		sandboxMarker,
 	)
 	if (toolResults(messages, readCallId).length === 0) {
-		// https://github.com/anomalyco/opencode/blob/fedc6f208aa2bd54c1019227214568083f6380ad/packages/core/src/tool/plugin/read.ts
+		// https://github.com/anomalyco/opencode/blob/v2.3.2/packages/core/src/tool/plugin/read.ts
 		const tool = body.tools?.find((entry) => entry.function?.name === 'read')
 		assert(tool, 'Pinned native read tool must be offered to the review agent')
 		assert(tool.function.parameters.required.includes('path'))

@@ -52,8 +52,8 @@ const backgroundLaunch = (name: string | undefined, metadata: Metadata) => {
 	return 'unsupported'
 }
 
-// https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/session/subagent-completion.ts
-// https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/shell/result.ts
+// https://github.com/anomalyco/opencode/blob/v2.3.2/packages/core/src/session/subagent-completion.ts
+// https://github.com/anomalyco/opencode/blob/v2.3.2/packages/core/src/shell/result.ts
 const completionNotice = (metadata: Metadata) => {
 	const source = metadata?.source
 	if (source === 'subagent' && typeof metadata?.childID === 'string')
@@ -103,8 +103,8 @@ const foldResult = (messageId: string) => {
 
 	const obligations = () => [...outstanding.values()].some(({ owners }) => owners.has('target'))
 
-	// https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/session/runner/step.ts
-	// https://github.com/anomalyco/opencode/blob/v2.3.0/packages/core/src/session/runner/publish-llm-event.ts
+	// https://github.com/anomalyco/opencode/blob/v2.3.2/packages/core/src/session/runner/step.ts
+	// https://github.com/anomalyco/opencode/blob/v2.3.2/packages/core/src/session/runner/publish-llm-event.ts
 	const settle = (): Verdict => {
 		if (blocked !== undefined) return unavailable(blocked)
 		if (ambiguous)

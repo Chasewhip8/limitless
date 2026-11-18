@@ -145,7 +145,7 @@ The standalone `homeModules.pipeline` module can run without hosted Limitless.
 | `pollIntervalMs` | `60000`: safety reconciliation |
 | `queueTimeoutMs` | `3600000`: unsent command queue budget |
 | Worker `capacity` | `1`, advisory Pipeline-session budget |
-| Worker `openCodeVersion` | `2.3.0` |
+| Worker `openCodeVersion` | `2.3.2` |
 | Worker `controlDirectory` | Required; the remote Capsule control Location |
 
 Native events and local outbox changes wake reconciliation. Each task has scoped
@@ -160,9 +160,10 @@ may have been sent.
 
 Origins require HTTPS, except loopback HTTP for isolated tests. Host configuration
 owns ingress, Tailscale and firewall routing. Placement stays pinned; unavailable
-workers do not cause automatic reassignment. RPC activation is asynchronous after
-native server startup, so readiness uses read-only checks and retries on the
-client side.
+workers do not cause automatic reassignment. When upgrading OpenCode, update any
+explicit `openCodeVersion` overrides to match their enrolled workers. RPC
+activation is asynchronous after native server startup, so readiness uses
+read-only checks and retries on the client side.
 
 ### Calling agents
 

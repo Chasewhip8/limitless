@@ -263,7 +263,7 @@ try {
 	const { stdout: version } = await promisify(execFile)(opencode, ['--version'], { cwd: home, env })
 	assert.equal(
 		version.trim(),
-		'opencode v2.3.0',
+		'opencode v2.3.2',
 		'Recheck the GPT-6.2 backfill on OpenCode upgrades',
 	)
 

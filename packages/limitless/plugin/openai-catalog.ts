@@ -3,11 +3,10 @@ import { Model } from '@opencode/schema/model'
 import { Money } from '@opencode/schema/money'
 import { Provider } from '@opencode/schema/provider'
 
-// Temporary backfill for OpenCode 2.3.0 (a6b15d3): its bundled models.dev snapshot predates GPT-6.2,
-// a host's cached catalog can predate it until a refresh lands, and ChatGPT token sharing keeps only
-// a fixed allowlist of catalog models. OpenCode's own provider plugins still route, price, and cap
-// these definitions. Remove it once the pinned OpenCode offers both models through ChatGPT token
-// sharing from its bundled catalog.
+// OpenCode 2.3.2 allows GPT-6.2 for ChatGPT token sharing, but its bundled models.dev snapshot
+// and older cached catalogs can still lack the definitions. OpenCode's provider plugins route,
+// price, and cap them. Remove this backfill once the pinned release can supply both models
+// through ChatGPT token sharing without a catalog refresh.
 const openai = Provider.ID.make('openai')
 
 type Price = { input: number; output: number; cacheRead: number; cacheWrite: number }

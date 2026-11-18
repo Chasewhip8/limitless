@@ -13,7 +13,7 @@ let
     # A versioned name prevents a stale hash from reusing an older release.
     name = "${pname}-${version}-x86_64.AppImage";
     url = "https://opencode.ai/files/bin/${version}/opencode-desktop-linux-x86_64.AppImage";
-    hash = "sha256-xm8/I2bCYsh21M8U/K9axkNMtPBCByg8TmLAGblkwN4=";
+    hash = "sha256-kq8AK/WpnT6qZMc1RvdymOiXqD9qlAkdMje10yWQjhM=";
   };
   contents = appimageTools.extract { inherit pname version src; };
   # OpenCode's Linux "Open in" menu runs these editors by name.

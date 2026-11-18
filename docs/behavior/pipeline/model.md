@@ -23,10 +23,9 @@ snapshot `/nix/store/zzcrls7lfzzxrvld2grfhziyrav7yc1n-source`. Its 359 tests and
 three host runners passed. That evidence remains historical for Capsule source,
 runtime and host composition; this pass does not remap those subsystems.
 
-The native dependency is OpenCode 2.3.0, revision
-`a6b15d33daf6ab7d35569f6d711fdb630b9f04e7`, with the repository's Capsule
-composition, durable-event, password-file and subagent-generations patches. Native source inspection
-on 2026-11-13 established the result-association constraints below. Automatic
+The native dependency is OpenCode 2.3.2, revision
+`c0ad18b402eb2827fc1ee71c171b1177b3fc02d1`, with the repository's Capsule
+composition, durable-event, password-file and subagent-generations patches. Automatic
 cleanup, verdict interpretation, live provider behavior, and proof of global OS
 writer termination remain outside scope.
 
@@ -91,7 +90,7 @@ keep slow preparation from serializing unrelated controls.
 
 ### Native response association
 
-The accepted queued prompt ID is the lower anchor. Native 2.3.0 has no universal
+The accepted queued prompt ID is the lower anchor. Native 2.3.2 has no universal
 prompt-to-final-response ID: one execution terminal describes a busy period,
 which can contain several queued prompts. Background completion can also wake
 another busy period after a foreground success. Queue versus steer is scheduling,
@@ -114,7 +113,9 @@ absence cutoff is removed. Shutdown preserves a native recovery claim and cannot
 authorize continuation or restart merely because the process appears idle.
 
 Native shell and subagent launches are tracked by tool-result identities and
-matched to their synthetic completion notices. Since 2.3.0, subagents always run
+matched to their synthetic completion notices. Foreground shell timeouts now
+background the command under the same shell identity and notice contract as an
+explicit background launch. Since 2.3.0, subagents always run
 in the background and a child's execution settlement reports to its parent, under
 the running job generation's `notificationID` or, without one, under a fresh ID.
 The subagent-generations patch adds that generation's `notificationID`, the parent

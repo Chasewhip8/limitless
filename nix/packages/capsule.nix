@@ -55,7 +55,7 @@ let
       # Bun's executable-link race must not affect the fixed-output tree.
       find "$out" -type d -path '*/node_modules/.bin' -prune -exec rm -rf {} +
     '';
-    outputHash = "sha256-zfcz4saMKKgPq730acuK7KFFuA+WuQl2EDNUF0OZtIM=";
+    outputHash = "sha256-idg73AhBplWfzEBbbRQfEIAVPMtx0Zra3ZSpCHeWJUg=";
     outputHashAlgo = "sha256";
     outputHashMode = "recursive";
   };
@@ -212,8 +212,8 @@ pkgs.stdenvNoCC.mkDerivation {
         "./rpc": "./host/contract.js"
       },
       "peerDependencies": {
-        "@opencode/schema": "2.3.0",
-        "@opencode/sdk": "2.3.0",
+        "@opencode/schema": "2.3.2",
+        "@opencode/sdk": "2.3.2",
         "effect": "4.1.3"
       },
       "peerDependenciesMeta": {

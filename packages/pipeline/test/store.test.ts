@@ -38,7 +38,7 @@ const worker: Worker = {
 	controlDirectory: '/tmp/opencode/pipeline-test-control',
 	system: 'x86_64-linux',
 	capacity: 4,
-	openCodeVersion: '2.3.0',
+	openCodeVersion: '2.3.2',
 }
 const key = '7:1'
 type Stored = { task: Task; command: StoredCommand }

@@ -23,7 +23,7 @@ routed through Capsule; see [Scope](#scope).
 | Core service and `capsule` CLI | Implemented for `x86_64-linux` and `aarch64-linux` |
 | Managed sources (`create`) and source engine (`@limitless/capsule/source`) | Implemented |
 | Host-configured GitHub credentials | Implemented; see [GitHub credentials](#github-credentials) |
-| OpenCode workspace provider (`@limitless/capsule/opencode`) | Implemented against the published `@opencode/sdk` `2.3.0` Effect SDK |
+| OpenCode workspace provider (`@limitless/capsule/opencode`) | Implemented against the published `@opencode/sdk` `2.3.2` Effect SDK |
 | Native OpenCode host registration | Configured with `programs.limitless.capsule.enable` in the shared native server |
 | Pipeline | Uses Capsule RPC to prepare a workspace-bound native session; no checkout helper or ordinary-directory fallback |
 | Preview environments | Deferred |

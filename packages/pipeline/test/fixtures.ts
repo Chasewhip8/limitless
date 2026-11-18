@@ -25,7 +25,7 @@ export const worker: Worker = {
 	controlDirectory: '/tmp/opencode/pipeline-test-control',
 	system: 'x86_64-linux',
 	capacity: 1,
-	openCodeVersion: '2.3.0',
+	openCodeVersion: '2.3.2',
 }
 export const settings: PipelineSettings = {
 	host: '127.0.0.1',
