@@ -44,16 +44,37 @@ function t3Rules(namespace: string): Permission.Rule[] {
 	]
 }
 
-// The managed suffix that sessions persisted before T3's preview browser was disabled.
-function policyBeforeBrowse(namespace: string, support: boolean): Permission.Rule[] {
+const primaryTools = [
+	'link_pull_request',
+	'link_pull_requests',
+	'list_thread_pull_requests',
+	'request_secret',
+	'unlink_pull_request',
+	'unlink_pull_requests',
+	'unwatch_pull_request',
+	'watch_pull_request',
+]
+
+const delegationAndHtmlTools = [
+	'delegate_task',
+	'task_status',
+	'task_cancel',
+	'html_preview',
+	'html_render',
+]
+// The deny lists that earlier releases persisted as each session's managed suffix.
+const retiredDisabledTools = {
+	'before T3 browser tools were disabled': delegationAndHtmlTools,
+	'with T3 browser tools disabled': [...delegationAndHtmlTools, 'preview_*', 't3_preview_*'],
+}
+
+function retiredPolicy(namespace: string, support: boolean, disabled: string[]): Permission.Rule[] {
 	const deny = (action: string): Permission.Rule => ({ action, resource: '*', effect: 'deny' })
 	return [
 		deny('t3-code-*'),
 		{ action: `${namespace}_*`, resource: '*', effect: 'allow' },
 		...(support ? [deny(`${namespace}_*`), deny('t3-code_*')] : []),
-		...['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render'].flatMap(
-			(name) => [deny(`t3-code_${name}`), deny(`${namespace}_${name}`)],
-		),
+		...disabled.flatMap((name) => [deny(`t3-code_${name}`), deny(`${namespace}_${name}`)]),
 	]
 }
 
@@ -76,47 +97,30 @@ function effectFor(rules: Permission.Ruleset, action: string, resource = '*') {
 
 describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 	const namespace = canonicalT3Namespace(sourceNamespace)
-	test('retains 55 primary tools and denies delegation, HTML visual, and browser tools', () => {
-		const rules = [
-			...nativeDefaults,
-			...normalizeT3Permissions(t3Rules(sourceNamespace), 'limitless'),
-		]
+	test.each([
+		'limitless',
+		'review',
+	])('allows %s only pull request linking and watching and secret requests', (agent) => {
+		const rules = [...nativeDefaults, ...normalizeT3Permissions(t3Rules(sourceNamespace), agent)]
 		expect(toolNames).toHaveLength(74)
-		expect(effectFor(rules, `${namespace}_extra_delegate_task`)).toBe('allow')
-		// Preview tools from other T3 releases.
-		expect(effectFor(rules, `${namespace}_preview_click`)).toBe('deny')
-		expect(effectFor(rules, `${namespace}_t3_preview_focus`)).toBe('deny')
-		expect(toolNames.filter((name) => effectFor(rules, `${namespace}_${name}`) === 'deny')).toEqual(
-			[
-				'delegate_task',
-				'html_preview',
-				'html_render',
-				'preview_act',
-				'preview_dialog',
-				'preview_evaluate',
-				'preview_navigate',
-				'preview_open',
-				'preview_recording_start',
-				'preview_recording_stop',
-				'preview_resize',
-				'preview_set_appearance',
-				'preview_snapshot',
-				'preview_status',
-				'preview_wait_for',
-				't3_preview_close',
-				't3_preview_list',
-				'task_cancel',
-				'task_status',
-			],
-		)
+		expect(
+			toolNames.filter((name) => effectFor(rules, `${namespace}_${name}`) === 'allow'),
+		).toEqual(primaryTools)
+		// Tools from other T3 releases.
+		for (const name of ['future_tool', 'preview_click', 'extra_request_secret']) {
+			expect(effectFor(rules, `${namespace}_${name}`)).toBe('deny')
+		}
+		for (const name of [...toolNames, 'future_tool']) {
+			expect(effectFor(rules, `t3-code_${name}`)).toBe('deny')
+		}
 	})
 
 	test.each([
 		'limitless',
 		'review',
 		...isolatedAgents,
-	])('denies HTML visuals and browser tools despite explicit grants for %s', (agent) => {
-		const granted = ['html_preview', 'html_render', 'preview_open', 't3_preview_list']
+	])('denies other T3 tools despite explicit grants for %s', (agent) => {
+		const granted = ['html_preview', 'preview_open', 't3_thread_launch', 'future_tool']
 		const rules = [
 			...nativeDefaults,
 			...normalizeT3Permissions(
@@ -174,27 +178,35 @@ describe.each(namespaces)('T3 session rules for %s', (sourceNamespace) => {
 		}
 		expect(normalizeT3Permissions(repaired, agent)).toEqual(repaired)
 		const primary = normalizeT3Permissions(repaired, 'limitless')
-		expect(effectFor(primary, `${namespace}_t3_thread_read`)).toBe('allow')
+		expect(effectFor(primary, `${namespace}_link_pull_request`)).toBe('allow')
 		expect(effectFor(primary, `${namespace}_preview_open`)).toBe('deny')
 		expect(normalizeT3Permissions(primary, agent)).toEqual(repaired)
 	})
 
-	test.each([
-		['limitless', 'limitless'],
-		['research', 'research'],
-		['research', 'limitless'],
-		['limitless', 'research'],
-	])('migrates a %s policy saved before the preview browser was disabled to a fresh %s policy', (savedAgent, agent) => {
+	test.each(
+		Object.entries(retiredDisabledTools).flatMap(([era, disabled]) =>
+			[
+				['limitless', 'limitless'],
+				['research', 'research'],
+				['research', 'limitless'],
+				['limitless', 'research'],
+			].map(([savedAgent, agent]) => ({ era, disabled, savedAgent, agent })),
+		),
+	)('migrates a $savedAgent policy saved $era to a fresh $agent policy', ({
+		disabled,
+		savedAgent,
+		agent,
+	}) => {
 		const grant: Permission.Rule = {
-			action: 't3-code_t3_thread_read',
-			resource: '*',
+			action: 'read',
+			resource: 'documents/*',
 			effect: 'allow',
 		}
 		const saved = [
 			{ action: 't3-code-*', resource: '*', effect: 'deny' as const },
 			{ action: `${namespace}_*`, resource: '*', effect: 'allow' as const },
 			grant,
-			...policyBeforeBrowse(namespace, isT3SupportAgent(savedAgent)),
+			...retiredPolicy(namespace, isT3SupportAgent(savedAgent), disabled),
 		]
 		expect(normalizeT3Permissions(saved, agent)).toEqual(
 			normalizeT3Permissions([...t3Rules(sourceNamespace), grant], agent),
@@ -242,20 +254,21 @@ test('preserves operator asks, plan restrictions, grants, paths, and unrelated r
 	expect(effectFor(effective, 'notion_write')).toBe('deny')
 })
 
-test('an unbound T3 session cannot see another thread namespace', () => {
+test('an unbound T3 session receives no T3 tools', () => {
 	const rules = [...nativeDefaults, ...normalizeT3Permissions(nativeDefaults, 'limitless')]
 	expect(effectFor(rules, 't3-code-sibling_preview_open')).toBe('deny')
+	for (const name of toolNames) expect(effectFor(rules, `t3-code_${name}`)).toBe('deny')
 	expect(effectFor(rules, 'shell')).toBe('allow')
 	expect(ownT3Namespace(rules)).toBeUndefined()
 })
 
-test('prefix-related thread IDs become isolated namespaces without restricting future primary tools', () => {
+test('prefix-related thread IDs become isolated namespaces', () => {
 	const own = 't3-code-parent'
 	const sibling = canonicalT3Namespace('t3-code-parent_child')
 	const rules = [...nativeDefaults, ...normalizeT3Permissions(t3Rules(own), 'limitless')]
 	expect(sibling.includes('_')).toBe(false)
 	for (const name of toolNames) expect(effectFor(rules, `${sibling}_${name}`)).toBe('deny')
-	expect(effectFor(rules, `${own}_future_tool`)).toBe('allow')
+	expect(effectFor(rules, `${own}_request_secret`)).toBe('allow')
 	expect(canonicalT3Namespace(sibling)).toBe(sibling)
 })
 

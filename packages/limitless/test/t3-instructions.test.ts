@@ -2,13 +2,12 @@ import type { SessionRequest } from '@opencode/plugin/effect/session'
 import { Effect } from 'effect'
 import { expect, test } from 'vitest'
 import { hasT3Context, injectT3Guidance, loadT3Guidance, T3_CONTEXT } from '../t3/instructions'
+import toolNames from './fixtures/t3-tool-names.json'
 
-test('loads the primary T3 guidance', async () => {
+test('loads primary T3 guidance that names only tools primary agents keep', async () => {
 	const guidance = await Effect.runPromise(loadT3Guidance())
 	expect(guidance).toContain('## T3 Code integration')
-	expect(guidance).toContain('t3_thread_launch')
-	expect(guidance).not.toContain('html_preview')
-	expect(guidance).not.toContain('html_render')
+	expect(toolNames.filter((name) => guidance.includes(`\`${name}\``))).toEqual(['request_secret'])
 	expect(guidance).not.toContain("T3's browser tools")
 })
 

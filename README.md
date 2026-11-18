@@ -137,7 +137,7 @@ Tool access follows the agent's role:
 
 | Agents | Access |
 | --- | --- |
-| `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except T3 delegation and the Research-only `executor-read` connection |
+| `limitless` | Automatic approval for reads, writes, shell commands, and MCP tools except the Research-only `executor-read` connection. T3 access is limited to the thread's pull request links and watches and secret requests |
 | `review` | The same local and MCP access as `limitless`, with only Research delegation allowed. Its instructions permit test-only changes and PR-scoped commits, pushes, labels, description, comments, and draft status; production changes are excluded |
 | `oracle` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and task-scoped edits; no T3 tools or subagents; deny artifact creation and session changes |
 | `worker` | Read/write MCP access; external mutations require explicit delegation of user-authorized actions. Shell and edits for task execution; no T3 tools or subagents; deny questions, artifact creation, and session changes |
@@ -967,15 +967,16 @@ no password needs copying into T3 settings. Other CLI use still goes through `op
 
 ### Behavior
 
-All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`, the
-broken HTML visual tools `html_preview` and `html_render`, and the preview browser
-tools (`preview_*` and `t3_preview_*`); use
-[browse](#browse) for browser work. The primary agents
-(`limitless` and `review`) retain T3's other tools, including top-level thread
-creation and management.
-Helpers receive no T3 tools, including browser tools and
-future additions. They are hidden from Code Mode and `search`; there is no
-execution-only deny hook. Subagents return findings and blockers through their
+Every agent other than the helpers, including `limitless` and `review`, keeps
+only its thread's T3 pull request links and watches and secret requests:
+`link_pull_request`, `link_pull_requests`, `unlink_pull_request`,
+`unlink_pull_requests`, `list_thread_pull_requests`, `watch_pull_request`,
+`unwatch_pull_request`, and `request_secret`. Every other T3
+tool is denied, including thread, worktree, project, schedule, environment,
+device, attachment, theme, review guide, delegation, HTML visual, and preview
+browser tools, plus tools added by later T3 releases. Use [browse](#browse) for
+browser work. Helpers receive no T3 tools. Denied tools are hidden from Code Mode
+and `search`; there is no execution-only deny hook. Subagents return findings and blockers through their
 native results. By default, unbound TUI/CLI sessions do not receive thread-bound tools.
 
 The plugin removes the blanket session allow that T3 Full access writes, which would

@@ -13,6 +13,21 @@ export class T3PermissionError extends Schema.TaggedError<T3PermissionError>()(
 const supportAgents = new Set(['research', 'oracle', 'worker', 'review-design', 'review-verifier'])
 export const isT3SupportAgent = (agent: string | undefined) =>
 	agent !== undefined && supportAgents.has(agent)
+// Primary agents keep only these T3 tools. Every other T3 tool, including tools
+// added by later T3 releases, stays denied.
+const primaryTools = [
+	'link_pull_request',
+	'link_pull_requests',
+	'unlink_pull_request',
+	'unlink_pull_requests',
+	'list_thread_pull_requests',
+	'watch_pull_request',
+	'unwatch_pull_request',
+	'request_secret',
+]
+
+// Sessions saved by earlier releases end with deny-list policies, which
+// normalization must recognize to replace.
 const delegationAndHtmlTools = [
 	'delegate_task',
 	'task_status',
@@ -20,11 +35,10 @@ const delegationAndHtmlTools = [
 	'html_preview',
 	'html_render',
 ]
-// Agents browse through the browse MCP server instead of T3's preview browser,
-// whose tool names vary between T3 releases.
-const disabledTools = [...delegationAndHtmlTools, 'preview_*', 't3_preview_*']
-// Sessions saved before the preview browser was disabled end with rules for the shorter list.
-const recognizedDisabledTools = [disabledTools, delegationAndHtmlTools]
+const retiredDisabledToolLists = [
+	[...delegationAndHtmlTools, 'preview_*', 't3_preview_*'],
+	delegationAndHtmlTools,
+]
 
 function rule(action: string, effect: Permission.Effect): Permission.Rule {
 	return { action, resource: '*', effect }
@@ -93,20 +107,28 @@ export function ownT3Namespace(permissions: Permission.Ruleset): string | undefi
 	return namespaceAliases(permissions).values().next().value
 }
 
-function managedRules(
+function managedRules(namespace: string | undefined, support: boolean): Permission.Rule[] {
+	if (namespace === undefined) return [isolationRule, rule('t3-code_*', 'deny')]
+	return [
+		isolationRule,
+		// Preserve the binding anchor; the denials after it override its grant.
+		rule(`${namespace}_*`, 'allow'),
+		rule('t3-code_*', 'deny'),
+		rule(`${namespace}_*`, 'deny'),
+		...(support ? [] : primaryTools.map((name) => rule(`${namespace}_${name}`, 'allow'))),
+	]
+}
+
+function retiredManagedRules(
 	namespace: string | undefined,
 	support: boolean,
-	disabled = disabledTools,
+	disabled: string[],
 ): Permission.Rule[] {
 	return [
 		isolationRule,
 		...(namespace === undefined
 			? []
-			: [
-					// Preserve the binding anchor even when the role denies its tools.
-					rule(`${namespace}_*`, 'allow'),
-					...(support ? [rule(`${namespace}_*`, 'deny')] : []),
-				]),
+			: [rule(`${namespace}_*`, 'allow'), ...(support ? [rule(`${namespace}_*`, 'deny')] : [])]),
 		...(support ? [rule('t3-code_*', 'deny')] : []),
 		...disabled.flatMap((name) => [
 			rule(`t3-code_${name}`, 'deny'),
@@ -120,10 +142,14 @@ function normalizeForRole(permissions: Permission.Ruleset, support: boolean): Pe
 	// inside thread IDs. Its adjacent isolation/allow rules identify the boundary.
 	const namespace = ownT3Namespace(permissions)
 	let base = [...canonicalizeT3Permissions(permissions)]
-	const previousPolicies = recognizedDisabledTools.flatMap((disabled) => [
-		managedRules(namespace, false, disabled),
-		managedRules(namespace, true, disabled),
-	])
+	const previousPolicies = [
+		managedRules(namespace, false),
+		managedRules(namespace, true),
+		...retiredDisabledToolLists.flatMap((disabled) => [
+			retiredManagedRules(namespace, false, disabled),
+			retiredManagedRules(namespace, true, disabled),
+		]),
+	]
 	for (;;) {
 		const previous = previousPolicies.find(
 			(candidate) =>
