@@ -213,6 +213,18 @@ let
       })) true
     )).success;
 
+  browseStub = pkgs.writeShellScriptBin "browse" "";
+  browseHome = evaluate {
+    mcp.browse = {
+      enable = true;
+      package = browseStub;
+    };
+  };
+  browseConfig = rendered browseHome;
+  browseEffect =
+    agent: action:
+    effectFor (browseConfig.permissions ++ browseConfig.agents.${agent}.permissions) action "*";
+
   supervised = evaluate {
     opencode.service = {
       enable = true;
@@ -448,6 +460,34 @@ in
       !(executorHome.config.xdg.configFile ? "limitless/executor-read-tools.json")
     ) "Executor read policy must not be duplicated into a generated per-tool list";
     pkgs.runCommand "executor-client-check" { } ''touch "$out"'';
+  browse-client =
+    assert lib.assertMsg (
+      valid browseHome
+      &&
+        browseConfig.mcp.servers.browse == {
+          type = "local";
+          command = [
+            "${browseStub}/bin/browse"
+            "mcp"
+          ];
+        }
+      && lib.elem browseStub browseHome.config.home.packages
+      && !((rendered defaults).mcp.servers ? browse)
+    ) "browse must launch the configured CLI's MCP server and put that CLI on PATH only when enabled";
+    assert lib.assertMsg (
+      lib.all (agent: browseEffect agent "browse_navigate" == "allow") readWriteAgents
+      && browseEffect "research" "browse_navigate" == "deny"
+    ) "browse must stay available to read/write agents and denied to Research";
+    assert lib.assertMsg (
+      !(valid (evaluate {
+        mcp.browse.enable = true;
+        opencode.settings.mcp.servers.browse = {
+          type = "local";
+          command = [ "browse" ];
+        };
+      }))
+    ) "A native browse server must not silently replace the managed connection";
+    pkgs.runCommand "browse-client-check" { } ''touch "$out"'';
   home-module =
     assert lib.assertMsg (valid defaults && valid connected) "valid configuration failed assertions";
     assert lib.assertMsg (lib.all

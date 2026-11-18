@@ -1,3 +1,4 @@
+{ self }:
 {
   config,
   lib,
@@ -10,6 +11,7 @@ let
   presets = import ../mcp-presets.nix;
   connections = cfg.mcp.servers;
   executor = cfg.mcp.executor;
+  browse = cfg.mcp.browse;
   # OpenCode binds OAuth to this exact URL, and Executor accepts only its canonical
   # resource spelling: connection first, with its default model mode left implicit.
   executorServer =
@@ -38,11 +40,21 @@ let
       executor-read = executorServer executor.readConnection "browser" executor.readCallbackPort;
     }
   );
+  browseServers = lib.optionalAttrs browse.enable {
+    browse = {
+      type = "local";
+      command = [
+        (lib.getExe' browse.package "browse")
+        "mcp"
+      ];
+    };
+  };
+  managedServers = executorServers // browseServers;
   presetServers = lib.mapAttrs (
     _: connection: lib.recursiveUpdate presets.${connection.preset}.settings connection.settings
   ) connections;
   nativeServers = cfg.opencode.settings.mcp.servers or { };
-  servers = presetServers // nativeServers // executorServers;
+  servers = presetServers // nativeServers // managedServers;
   names = builtins.attrNames servers;
   reservedActions = [
     "artifact_create"
@@ -81,60 +93,70 @@ let
 in
 {
   options.programs.limitless = {
-    mcp.executor = {
-      enable = lib.mkEnableOption "Executor MCP connections";
-      fullAccess = lib.mkEnableOption "unscoped access for every agent except Research, including Executor administration and all authorized apps";
-      url = lib.mkOption {
-        type = lib.types.strMatching "https://[A-Za-z0-9.-]+(:[0-9]+)?/mcp";
-        default = "https://mcp.executor.sh/mcp";
-        description = "HTTPS MCP endpoint without query parameters. Credentials remain in OpenCode's runtime store.";
+    mcp = {
+      executor = {
+        enable = lib.mkEnableOption "Executor MCP connections";
+        fullAccess = lib.mkEnableOption "unscoped access for every agent except Research, including Executor administration and all authorized apps";
+        url = lib.mkOption {
+          type = lib.types.strMatching "https://[A-Za-z0-9.-]+(:[0-9]+)?/mcp";
+          default = "https://mcp.executor.sh/mcp";
+          description = "HTTPS MCP endpoint without query parameters. Credentials remain in OpenCode's runtime store.";
+        };
+        connection = lib.mkOption {
+          type = lib.types.strMatching "[A-Za-z0-9_-]{0,64}";
+          default = "";
+          description = "Scoped read/write connection ID shared by every agent except Research. Required unless fullAccess is explicitly enabled; leave empty with fullAccess.";
+        };
+        readConnection = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "[A-Za-z0-9_-]{1,64}");
+          default = null;
+          description = "Optional distinct connection whose read-only policy is enforced by Executor. Research is routed only to this connection when Executor is enabled; null leaves Research without MCP access.";
+        };
+        callbackPort = lib.mkOption {
+          type = lib.types.nullOr (lib.types.ints.between 1 65535);
+          default = null;
+          description = "Optional read/write connection OAuth callback port on the OpenCode host's loopback interface. Forward this port over SSH when the browser runs elsewhere.";
+        };
+        readCallbackPort = lib.mkOption {
+          type = lib.types.nullOr (lib.types.ints.between 1 65535);
+          default = null;
+          description = "Optional loopback OAuth callback port for executor-read. Independent of Executor's upstream account callback.";
+        };
       };
-      connection = lib.mkOption {
-        type = lib.types.strMatching "[A-Za-z0-9_-]{0,64}";
-        default = "";
-        description = "Scoped read/write connection ID shared by every agent except Research. Required unless fullAccess is explicitly enabled; leave empty with fullAccess.";
+      browse = {
+        enable = lib.mkEnableOption "the browse MCP connection to a Chromium-family browser on this computer, for every agent except Research";
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = self.packages.${pkgs.stdenv.hostPlatform.system}.browse;
+          description = "browse CLI, installed on PATH. OpenCode runs its `mcp` command, which starts the relay on demand. Install the browse extension in the browser and pair it once with `browse pair`.";
+        };
       };
-      readConnection = lib.mkOption {
-        type = lib.types.nullOr (lib.types.strMatching "[A-Za-z0-9_-]{1,64}");
-        default = null;
-        description = "Optional distinct connection whose read-only policy is enforced by Executor. Research is routed only to this connection when Executor is enabled; null leaves Research without MCP access.";
-      };
-      callbackPort = lib.mkOption {
-        type = lib.types.nullOr (lib.types.ints.between 1 65535);
-        default = null;
-        description = "Optional read/write connection OAuth callback port on the OpenCode host's loopback interface. Forward this port over SSH when the browser runs elsewhere.";
-      };
-      readCallbackPort = lib.mkOption {
-        type = lib.types.nullOr (lib.types.ints.between 1 65535);
-        default = null;
-        description = "Optional loopback OAuth callback port for executor-read. Independent of Executor's upstream account callback.";
-      };
-    };
-    mcp.servers = lib.mkOption {
-      default = { };
-      description = "Named first-party MCP connections. Each name has separate OpenCode OAuth state.";
-      type = lib.types.attrsOf (
-        lib.types.submodule (
-          { config, ... }: {
-            options = {
-              preset = lib.mkOption {
-                type = lib.types.enum (builtins.attrNames presets);
-                description = "First-party service whose endpoint and read-tool defaults to use.";
+      servers = lib.mkOption {
+        default = { };
+        description = "Named first-party MCP connections. Each name has separate OpenCode OAuth state.";
+        type = lib.types.attrsOf (
+          lib.types.submodule (
+            { config, ... }: {
+              options = {
+                preset = lib.mkOption {
+                  type = lib.types.enum (builtins.attrNames presets);
+                  description = "First-party service whose endpoint and read-tool defaults to use.";
+                };
+                settings = lib.mkOption {
+                  type = lib.types.attrsOf jsonFormat.type;
+                  default = { };
+                  description = "Native MCP server settings merged over the preset. Use environment substitutions for credentials.";
+                };
+                readTools = lib.mkOption {
+                  type = lib.types.listOf (lib.types.strMatching "[A-Za-z0-9_-]+");
+                  default = presets.${config.preset}.readTools;
+                  description = "Exact read-only tools available to Research in direct-MCP mode (Executor disabled). Replaces the preset list; Executor mode delegates read-only policy to its read connection instead.";
+                };
               };
-              settings = lib.mkOption {
-                type = lib.types.attrsOf jsonFormat.type;
-                default = { };
-                description = "Native MCP server settings merged over the preset. Use environment substitutions for credentials.";
-              };
-              readTools = lib.mkOption {
-                type = lib.types.listOf (lib.types.strMatching "[A-Za-z0-9_-]+");
-                default = presets.${config.preset}.readTools;
-                description = "Exact read-only tools available to Research in direct-MCP mode (Executor disabled). Replaces the preset list; Executor mode delegates read-only policy to its read connection instead.";
-              };
-            };
-          }
-        )
-      );
+            }
+          )
+        );
+      };
     };
     _generated = {
       mcpServers = generatedOption (lib.types.attrsOf jsonFormat.type);
@@ -144,6 +166,7 @@ in
   };
 
   config = {
+    home.packages = lib.mkIf (cfg.enable && browse.enable) [ browse.package ];
     programs.limitless._generated = {
       mcpServers = servers;
       readOnlyMcpPermissions = readOnlyPermissions;
@@ -172,10 +195,10 @@ in
         }
         {
           assertion =
-            lib.intersectLists (builtins.attrNames executorServers) (
+            lib.intersectLists (builtins.attrNames managedServers) (
               builtins.attrNames presetServers ++ builtins.attrNames nativeServers
             ) == [ ];
-          message = "Managed Executor connections must not also appear in mcp.servers or opencode.settings.mcp.servers.";
+          message = "Managed Executor and browse connections must not also appear in mcp.servers or opencode.settings.mcp.servers.";
         }
         {
           assertion =

@@ -4,7 +4,7 @@
   imports = [
     (import ./opencode.nix { inherit self; })
     ./service.nix
-    ./mcp.nix
+    (import ./mcp.nix { inherit self; })
     (import ./t3.nix { inherit self; })
     (import ./desktop.nix { inherit self; })
     (import ./pipeline.nix { inherit self; })

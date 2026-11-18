@@ -28,8 +28,8 @@ optional Linux service supervision.
 Run `opencode`, or its `oc` shell alias, from a project. It discovers or starts
 its native background service. Connect model providers through `/connect`.
 
-Limitless disables OpenCode's built-in browser plugin (`opencode.browser`) to
-avoid conflicts with T3 Code's browser tools. Use them for browser access.
+Limitless disables OpenCode's built-in browser plugin (`opencode.browser`) and
+T3 Code's preview browser tools. Enable [browse](#browse) for browser access.
 
 ## Included capabilities
 
@@ -47,6 +47,7 @@ avoid conflicts with T3 Code's browser tools. Use them for browser access.
 - **Source research:** optional guarded GitHub checkouts under `.limitless/repos/`.
 - **Service integrations:** optional Atlassian, Notion, Sentry, Linear, and GitHub
   MCP presets with account-specific connection names and audited reads for Research.
+- **Browser:** an optional [browse](#browse) connection to a paired local browser.
 - **Anthropic subscription authentication:** a pinned Claude Pro/Max plugin.
 - **Git hygiene:** `.limitless/` is globally ignored by default.
 
@@ -183,6 +184,35 @@ an explicitly requested write, mutation denial in Research, and token
 refresh. The repository checks generated configuration and policy behavior;
 account entitlements and live upstream tool catalogs require this authenticated
 verification.
+
+## Browse
+
+[browse](https://opencode.ai/product/browse) lets agents drive tabs in a
+Chromium-family browser, with that profile's sign-ins, through the browse
+extension. Limitless packages the pinned CLI and adds a `browse` MCP connection:
+
+```nix
+programs.limitless.mcp.browse.enable = true;
+```
+
+```text
+OpenCode ── browse mcp ── relay (127.0.0.1:19988) ◀── extension ── browser tabs
+```
+
+OpenCode starts `browse mcp`, which starts the relay on demand. The relay drives
+the browser only through the extension, which connects to it over the loopback
+interface, so use a browser on the OpenCode host. Pair each browser profile once:
+
+1. Install the [browse extension](https://chromewebstore.google.com/detail/mfnicocicmmlkpjnaffgihfjhdgjkdjg).
+2. Run `browse pair`, then enter the printed code under the extension's
+   **Options → advanced → Pairing code** and click **Connect**.
+3. Confirm with `browse status`.
+
+Skip the extension's install script and `browse install`: Nix owns the CLI and its
+MCP entry, and self-updates are off. A running relay keeps its version, so run
+`browse restart` after a Limitless update changes the browse version. The Chrome
+Web Store updates the extension independently, so keep the Limitless pin current.
+Research has no browse MCP tools.
 
 ## Executor
 
@@ -932,14 +962,15 @@ For an independently managed T3 desktop or server:
    and leave **Server URL** blank. If T3 does not inherit your PATH, use the absolute
    path printed by `command -v opencode-t3`. Reconnect the provider.
 
-Leaving Server URL blank lets T3 attach its thread-scoped MCP credentials, including
-browser access. The launcher discovers and authenticates to the existing service;
+Leaving Server URL blank lets T3 attach its thread-scoped MCP credentials. The launcher discovers and authenticates to the existing service;
 no password needs copying into T3 settings. Other CLI use still goes through `opencode`.
 
 ### Behavior
 
-All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`, plus the
-broken HTML visual tools `html_preview` and `html_render`. The primary agents
+All agents lose T3's `delegate_task`, `task_status`, and `task_cancel`, the
+broken HTML visual tools `html_preview` and `html_render`, and the preview browser
+tools (`preview_*` and `t3_preview_*`); use
+[browse](#browse) for browser work. The primary agents
 (`limitless` and `review`) retain T3's other tools, including top-level thread
 creation and management.
 Helpers receive no T3 tools, including browser tools and
@@ -1065,7 +1096,7 @@ This release removes these options and packages:
 | `lead` and `unit` agents, automatic Unit worktree placement | Finish active Lead/Unit runs before upgrading, then select `limitless` to continue existing sessions. Use separate Limitless sessions for independent changes and native subagents for Research, Oracle, and Worker. Existing sessions and worktrees remain available. |
 | `slack.*`, Gary, Slack tools | Remove Slack configuration and retire its bot credentials when no longer used. |
 | `desktop.enable` | Use `programs.limitless.opencode.desktop.enable`. The `opencode-desktop` package is available again as the upstream V2 client; it does not restore the old patched launcher. |
-| `tools.agentBrowser.*`, `agent-browser` package/skill | Use T3 Code's browser tools. OpenCode's native browser catalog is disabled. |
+| `tools.agentBrowser.*`, `agent-browser` package/skill | Enable [browse](#browse). OpenCode's native browser catalog and T3 Code's preview browser tools are disabled. |
 | `tools.acli.*`, Atlassian CLI skill | Add an `atlassian` MCP connection and authorize it. |
 | `tools.notion.*`, `notion-cli` package/skill | Add separately named `notion` MCP connections for each workspace. |
 | `tools.sentry.*`, `sentry` package/skill | Add a `sentry` MCP connection. Install specialized release tooling separately if required. |

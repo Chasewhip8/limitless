@@ -13,7 +13,18 @@ export class T3PermissionError extends Schema.TaggedError<T3PermissionError>()(
 const supportAgents = new Set(['research', 'oracle', 'worker', 'review-design', 'review-verifier'])
 export const isT3SupportAgent = (agent: string | undefined) =>
 	agent !== undefined && supportAgents.has(agent)
-const disabledTools = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
+const delegationAndHtmlTools = [
+	'delegate_task',
+	'task_status',
+	'task_cancel',
+	'html_preview',
+	'html_render',
+]
+// Agents browse through the browse MCP server instead of T3's preview browser,
+// whose tool names vary between T3 releases.
+const disabledTools = [...delegationAndHtmlTools, 'preview_*', 't3_preview_*']
+// Sessions saved before the preview browser was disabled end with rules for the shorter list.
+const recognizedDisabledTools = [disabledTools, delegationAndHtmlTools]
 
 function rule(action: string, effect: Permission.Effect): Permission.Rule {
 	return { action, resource: '*', effect }
@@ -82,7 +93,11 @@ export function ownT3Namespace(permissions: Permission.Ruleset): string | undefi
 	return namespaceAliases(permissions).values().next().value
 }
 
-function managedRules(namespace: string | undefined, support: boolean): Permission.Rule[] {
+function managedRules(
+	namespace: string | undefined,
+	support: boolean,
+	disabled = disabledTools,
+): Permission.Rule[] {
 	return [
 		isolationRule,
 		...(namespace === undefined
@@ -93,7 +108,7 @@ function managedRules(namespace: string | undefined, support: boolean): Permissi
 					...(support ? [rule(`${namespace}_*`, 'deny')] : []),
 				]),
 		...(support ? [rule('t3-code_*', 'deny')] : []),
-		...disabledTools.flatMap((name) => [
+		...disabled.flatMap((name) => [
 			rule(`t3-code_${name}`, 'deny'),
 			...(namespace === undefined ? [] : [rule(`${namespace}_${name}`, 'deny')]),
 		]),
@@ -105,7 +120,10 @@ function normalizeForRole(permissions: Permission.Ruleset, support: boolean): Pe
 	// inside thread IDs. Its adjacent isolation/allow rules identify the boundary.
 	const namespace = ownT3Namespace(permissions)
 	let base = [...canonicalizeT3Permissions(permissions)]
-	const previousPolicies = [managedRules(namespace, false), managedRules(namespace, true)]
+	const previousPolicies = recognizedDisabledTools.flatMap((disabled) => [
+		managedRules(namespace, false, disabled),
+		managedRules(namespace, true, disabled),
+	])
 	for (;;) {
 		const previous = previousPolicies.find(
 			(candidate) =>

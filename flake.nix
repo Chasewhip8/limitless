@@ -38,6 +38,7 @@
           skills = skillsPackage;
           opencode-agents = agentsPackage;
           anthropic-auth = import ./nix/packages/anthropic-auth.nix { inherit pkgs; };
+          browse = pkgs.callPackage ./nix/packages/browse.nix { };
           limitless = import ./nix/packages/limitless.nix { inherit pkgs self; };
           opencode = import ./nix/packages/opencode.nix { inherit pkgs self; };
         }

@@ -11,7 +11,27 @@ export function createRuntimeFixture(bundleDirectory, catalogFile) {
 	assert.equal(names.length, 74, 'Review the runtime expectations when T3 changes its catalog')
 	// The retired role exercises isolation and nested delegation for legacy sessions.
 	const support = ['research', 'oracle', 'worker', 'review-verifier']
-	const prohibited = ['delegate_task', 'task_status', 'task_cancel', 'html_preview', 'html_render']
+	const prohibited = [
+		'delegate_task',
+		'task_status',
+		'task_cancel',
+		'html_preview',
+		'html_render',
+		'preview_act',
+		'preview_dialog',
+		'preview_evaluate',
+		'preview_navigate',
+		'preview_open',
+		'preview_recording_start',
+		'preview_recording_stop',
+		'preview_resize',
+		'preview_set_appearance',
+		'preview_snapshot',
+		'preview_status',
+		'preview_wait_for',
+		't3_preview_close',
+		't3_preview_list',
+	]
 	const sourceOwn = 't3-code-thread_with_underscores'
 	const sourceSibling = 't3-code-thread_with_underscores_child'
 	const own = 't3-code-a2e5ba16d672e66b1ab8ab7b78d2f175'

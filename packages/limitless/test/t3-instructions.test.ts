@@ -9,6 +9,7 @@ test('loads the primary T3 guidance', async () => {
 	expect(guidance).toContain('t3_thread_launch')
 	expect(guidance).not.toContain('html_preview')
 	expect(guidance).not.toContain('html_render')
+	expect(guidance).not.toContain("T3's browser tools")
 })
 
 test('replaces the marker in initial and chronological instructions without editing conversation content', () => {
