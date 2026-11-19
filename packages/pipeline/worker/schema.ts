@@ -74,6 +74,8 @@ export const WorkerFailureReason = Schema.Literals([
 	'not_found',
 	'mismatch',
 	'incomplete',
+	'environment_failed',
+	'bootstrap_failed',
 	'unknown',
 ]).annotate({
 	description:
@@ -109,8 +111,19 @@ export const WorkerStage = Schema.Literals([
 })
 export type WorkerStage = typeof WorkerStage.Type
 
+export const WorkerErrorCode = Schema.Literals([
+	'unavailable',
+	'incompatible',
+	'ownership',
+	'protocol',
+	'preparation_failed',
+]).annotate({
+	description:
+		'unavailable may succeed on retry; preparation_failed means the repository development shell or setup hook failed and is retried only a few times.',
+})
+
 export class WorkerError extends Schema.TaggedError<WorkerError>()('WorkerError', {
-	code: Schema.Literals(['unavailable', 'incompatible', 'ownership', 'protocol']),
+	code: WorkerErrorCode,
 	message: Schema.String,
 	reason: Schema.optional(WorkerFailureReason),
 	stage: Schema.optional(WorkerStage),

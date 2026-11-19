@@ -22,6 +22,7 @@ import { OperationNotFound, Task, TaskConflict } from './schema'
 import { TaskStore } from './store'
 
 type StoredOperation = { task: Task; command: StoredCommand }
+type InspectedOperation = Effect.Success<ReturnType<TaskStore['Service']['inspectOperation']>>
 
 function operationReceipt({ task, command }: StoredOperation): OperationReceipt {
 	return { operation: command.id, pr: task.request.pr, closed: task.submissions._tag === 'Closed' }
@@ -334,11 +335,12 @@ const make = Effect.gen(function* () {
 			),
 	)
 
-	const state = Effect.fn('Tasks.state')(function* (stored: StoredOperation) {
+	const state = Effect.fn('Tasks.state')(function* (stored: InspectedOperation) {
 		switch (stored.command.delivery._tag) {
 			case 'Pending':
 				return {
-					_tag: stored.task.placement._tag === 'Unassigned' ? 'Queued' : 'Preparing',
+					_tag: stored.reserved ? 'Preparing' : 'Queued',
+					...(stored.failure === undefined ? {} : { lastFailure: stored.failure }),
 				} satisfies OperationState
 			case 'Unconfirmed':
 				return { _tag: 'DeliveryUnconfirmed' } satisfies OperationState
@@ -362,7 +364,7 @@ const make = Effect.gen(function* () {
 	})
 
 	const get = Effect.fn('Tasks.get')(function* (operation: string) {
-		const stored = yield* store.getOperation(operation)
+		const stored = yield* store.inspectOperation(operation)
 		if (stored.command.kind === 'interrupt') return yield* OperationNotFound.make({ operation })
 		const { task } = stored
 		return {

@@ -92,7 +92,7 @@ outside runtime and checkout roots. Its operations are:
 | Operation | Responsibility |
 | --- | --- |
 | `info` | Read capabilities and a fingerprint of the configured storage roots. |
-| `prepareSession` | Idempotently reserve the native workspace, create the Capsule, attach its binding, and create the workspace-bound session. |
+| `prepareSession` | Idempotently reserve the native workspace, create the Capsule, attach its binding, and create the workspace-bound session. A failing development shell or `setup` hook returns the `preparation_failed` error type with only its reason. |
 | `getSession` | Prove retained session ownership and report the Capsule phase and native workspace state without preparing or recreating them. |
 
 Task assignment records the worker origin, control Location, storage fingerprint,
@@ -158,6 +158,15 @@ Caller JSON requests allow three minutes and fifteen seconds. These are transpor
 budgets, not agent execution timeouts. Queue expiry applies only before a command
 may have been sent.
 
+Unreachable workers and other retryable failures leave a command pending until
+its queue timeout. A failing development shell or `setup` hook is retried at
+most three consecutive times, at least a minute apart, then rejected with
+`preparation_failed`, which releases its worker slot. Fix the repository and
+explicitly restart the review. A checkout without a flake uses the base tools; see
+the [repository contract](capsule.md#repository-contract). Each new kind of
+dispatch failure and each rejection logs a warning with the operation and its
+safe failure category.
+
 Origins require HTTPS, except loopback HTTP for isolated tests. Host configuration
 owns ingress, Tailscale and firewall routing. Placement stays pinned; unavailable
 workers do not cause automatic reassignment. When upgrading OpenCode, update any
@@ -222,6 +231,13 @@ a lost response. Anchored retries recover the same accepted successor even after
 later progress; review submission deliberately returns **current** work. There
 are no caller receipt files, idempotency headers, arbitrary continuation messages,
 or platform arguments. The old task-shaped routes are removed.
+
+Before sending, an operation is `Queued` while no worker slot is reserved for it,
+including a continuation waiting for capacity, and `Preparing` while it holds
+one. Both can carry `lastFailure`: the latest failed dispatch attempt's code,
+Athena-authored message, stage, reason, status and consecutive attempts. It lives
+in coordinator memory, and wait progress reports it. A rejected review never
+started; its message says why.
 
 Waiting returns the particular operation's final native assistant text, or a
 failure, interruption, cancellation, no-message, needs-input, or unavailable

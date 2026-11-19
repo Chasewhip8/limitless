@@ -4,11 +4,13 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } fr
 import {
 	type ContinueInput,
 	canonicalPullRequest,
+	type DispatchFailure,
 	InterruptReceipt,
 	nativeEvaluationBudgetMs,
 	OperationId,
 	type OperationInput,
 	OperationReceipt,
+	type OperationState,
 	OperationView,
 	operationSettled,
 	type ReviewInput,
@@ -35,6 +37,18 @@ export const WaitUnavailable = Schema.TaggedStruct('Unavailable', {
 })
 export const WaitResult = Schema.Union([OperationView, WaitUnavailable])
 export type WaitResult = typeof WaitResult.Type
+
+type WaitProgress = {
+	readonly operation: string
+	readonly state: OperationState['_tag']
+	readonly lastFailure?: DispatchFailure
+}
+
+const progressUpdate = (operation: string, state: OperationState): WaitProgress => {
+	if ((state._tag === 'Queued' || state._tag === 'Preparing') && state.lastFailure !== undefined)
+		return { operation, state: state._tag, lastFailure: state.lastFailure }
+	return { operation, state: state._tag }
+}
 
 const responseDeadlineMs = nativeEvaluationBudgetMs + 15_000
 const eventHandshakeDeadlineMs = 10_000
@@ -229,15 +243,16 @@ export const makePipelineClient = Effect.fn('Pipeline.makeClient')(function* (co
 		events(operation).pipe(Stream.concat(Stream.fail(unavailable())), Stream.scoped)
 	const wait = Effect.fn('Pipeline.wait')(function* (
 		{ operation }: OperationInput,
-		progress: (update: Record<string, string>) => Effect.Effect<void> = () => Effect.void,
+		progress: (update: WaitProgress) => Effect.Effect<void> = () => Effect.void,
 	) {
 		const latest = yield* Ref.make(Option.none<OperationView>())
 		const reported = yield* Ref.make<string | undefined>(undefined)
 		const observe = Effect.fn('Pipeline.wait.observe')(function* (view: OperationView) {
 			yield* Ref.set(latest, Option.some(view))
-			const state = view.state._tag
-			const previous = yield* Ref.getAndSet(reported, state)
-			if (state !== previous) yield* progress({ operation, state })
+			const update = progressUpdate(operation, view.state)
+			const key = JSON.stringify(update)
+			const previous = yield* Ref.getAndSet(reported, key)
+			if (key !== previous) yield* progress(update)
 		})
 		const unavailableResult = Effect.fn('Pipeline.wait.unavailable')(function* (
 			error: PipelineError,

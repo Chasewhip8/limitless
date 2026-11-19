@@ -3,7 +3,14 @@ import { CapsuleError, type Manifest } from '../schema'
 import type { Capsule } from '../service'
 import { SourceError, SourceRequest } from '../source/schema'
 import { matchesBinding } from '../workspace/binding'
-import { FailureCode, type HostInfo, Owner, PrepareSession, SessionReference } from './contract'
+import {
+	FailureCode,
+	type HostInfo,
+	Owner,
+	PreparationFailure,
+	PrepareSession,
+	SessionReference,
+} from './contract'
 import type { NativePorts, NativeSession, NativeWorkspace } from './native'
 import { resolveSettings, storageIdOf } from './roots'
 import type { HostSettings } from './settings'
@@ -12,6 +19,11 @@ export class HostRejected extends Schema.TaggedError<HostRejected>()('CapsuleHos
 	code: FailureCode,
 	message: Schema.String,
 }) {}
+
+export class HostPreparationFailed extends Schema.TaggedError<HostPreparationFailed>()(
+	'CapsuleHostPreparationFailed',
+	{ ...PreparationFailure.fields, message: Schema.String },
+) {}
 
 const provider = 'capsule'
 // The session metadata key the host owns; it records who prepared the session and for which agent.
@@ -56,6 +68,16 @@ const fromCapsule = (error: unknown) => {
 	if (error instanceof CapsuleError) return reject(capsuleCodes[error.code], error.message)
 	if (error instanceof SourceError) return reject(sourceCodes[error.code], error.message)
 	return reject('unavailable', 'Capsule is busy or unavailable; retry the request.')
+}
+
+const fromCreate = (error: unknown) => {
+	if (
+		error instanceof CapsuleError &&
+		(error.code === 'environment_failed' || error.code === 'bootstrap_failed')
+	) {
+		return HostPreparationFailed.make({ reason: error.code, message: error.message })
+	}
+	return fromCapsule(error)
 }
 
 const tagOf = (error: unknown) =>
@@ -290,7 +312,7 @@ export const make = Effect.fn('CapsuleHost.make')(function* (
 					...(settings.dockerSocket ? { dockerSocket: settings.dockerSocket } : {}),
 				},
 			)
-			.pipe(Effect.mapError(fromCapsule))
+			.pipe(Effect.mapError(fromCreate))
 		yield* provision(request.workspaceId, manifest)
 		const session = yield* createSession(request, manifest)
 		return yield* confirm(session, request)

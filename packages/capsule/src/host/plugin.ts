@@ -15,9 +15,13 @@ export const makePlugin = (host: CapsuleHost, controlDirectory: string): Plugin.
 			.register(CapsuleHostRpc, {
 				info: () => Effect.succeed(host.info),
 				prepareSession: (input, { error }) =>
-					host
-						.prepareSession(input)
-						.pipe(Effect.mapError(({ code, message }) => error('rejected', message, { code }))),
+					host.prepareSession(input).pipe(
+						Effect.mapError((failure) => {
+							if (failure._tag === 'CapsuleHostPreparationFailed')
+								return error('preparation_failed', failure.message, { reason: failure.reason })
+							return error('rejected', failure.message, { code: failure.code })
+						}),
+					),
 				getSession: (input, { error }) =>
 					host
 						.getSession(input)

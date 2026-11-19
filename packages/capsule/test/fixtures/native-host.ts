@@ -38,7 +38,8 @@ export const makeRoots = Effect.gen(function* () {
 	return { fs, at, settings }
 })
 
-type Fault = 'capsule.create' | 'session.create'
+/** Lock contention, except `capsule.environment`, a development shell that fails to load. */
+type Fault = 'capsule.create' | 'capsule.environment' | 'session.create'
 
 /**
  * A Capsule that prepares managed sources instantly, and native workspace and session stores that
@@ -58,10 +59,15 @@ export const makeNativeHost = Effect.fn('makeNativeHost')(function* (input: unkn
 			operations.push(operation)
 		})
 	const fault = (operation: Fault) => {
-		const injected = faults.delete(operation)
-		return injected
-			? Effect.fail(LockBusy.make({ path: operation, mode: 'exclusive' }))
-			: Effect.void
+		if (!faults.delete(operation)) return Effect.void
+		if (operation === 'capsule.environment')
+			return Effect.fail(
+				CapsuleError.make({
+					code: 'environment_failed',
+					message: 'The project development environment failed to load (exit 1).',
+				}),
+			)
+		return Effect.fail(LockBusy.make({ path: operation, mode: 'exclusive' }))
 	}
 
 	const unused = () => Effect.die('Unused by the host.')
@@ -70,6 +76,7 @@ export const makeNativeHost = Effect.fn('makeNativeHost')(function* (input: unkn
 			Effect.gen(function* () {
 				yield* record('capsule.create')
 				yield* fault('capsule.create')
+				yield* fault('capsule.environment')
 				const existing = manifests.get(request.id)
 				if (existing?.phase === 'ready') return existing
 				const manifest: Manifest = {

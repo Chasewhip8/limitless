@@ -1,4 +1,4 @@
-import { FailureCode } from '@limitless/capsule/rpc'
+import { FailureCode, PreparationFailure } from '@limitless/capsule/rpc'
 import { OpenCode } from '@opencode/client/effect'
 import {
 	Cause,
@@ -32,6 +32,12 @@ const hostFailure: Record<FailureCode, WorkerError['code']> = {
 
 const Rejected = Schema.Struct({ code: FailureCode })
 
+const preparationFailures: Record<PreparationFailure['reason'], string> = {
+	environment_failed:
+		"The worker could not load the repository's Nix development shell; fix its flake.nix or the devShell named in capsule.json.",
+	bootstrap_failed: "The repository's capsule.json setup hook failed on the worker; fix the hook.",
+}
+
 /** Typed RPC failures arrive as plain `{ type, message, data }` values rather than tagged errors. */
 const rpcFailure = (error: { readonly type: unknown; readonly data?: unknown }) => {
 	const rejected = Schema.decodeUnknownOption(Rejected)(error.data)
@@ -40,6 +46,11 @@ const rpcFailure = (error: { readonly type: unknown; readonly data?: unknown }) 
 		return failure(hostFailure[code], `The Capsule host refused the request (${code})`, {
 			reason: 'rejected',
 		})
+	}
+	const preparation = Schema.decodeUnknownOption(PreparationFailure)(error.data)
+	if (error.type === 'preparation_failed' && Option.isSome(preparation)) {
+		const { reason } = preparation.value
+		return failure('preparation_failed', preparationFailures[reason], { reason })
 	}
 	switch (error.type) {
 		case 'rpc.method_not_found':

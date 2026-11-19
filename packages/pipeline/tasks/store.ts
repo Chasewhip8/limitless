@@ -1,7 +1,8 @@
 import { SqliteClient, SqliteMigrator } from '@effect/sql-sqlite-node'
-import { Context, Effect, Layer, PubSub, Schema } from 'effect'
+import { Clock, Context, Effect, Layer, PubSub, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 import type { Worker } from '../worker/schema'
+import type { DispatchFailure } from '../workflow'
 import { type CommandEvent, StoredCommand } from './command'
 import { transition } from './machine'
 import {
@@ -147,6 +148,16 @@ const decodeCommand = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredCom
 type OperationRow = { task_record: string; command_record: string }
 type Stored = { task: Task; command: StoredCommand }
 
+type FailureRecord = {
+	readonly version: number
+	readonly at: number
+	readonly failure: DispatchFailure
+}
+export type FailureInput = Omit<DispatchFailure, 'attempts'>
+
+const sameFailure = (a: FailureInput, b: FailureInput) =>
+	a.code === b.code && a.stage === b.stage && a.reason === b.reason && a.status === b.status
+
 /** A restart is stored as the successor's review command anchored on the predecessor operation. */
 export type ActionKind = 'resume' | 'interrupt' | 'restart'
 
@@ -166,6 +177,12 @@ const make = Effect.gen(function* () {
 		yield* PubSub.publish(updates, taskId)
 		if (wake) yield* PubSub.publish(changes, undefined)
 	})
+
+	const failures = new Map<string, FailureRecord>()
+	const recordedFailure = (command: StoredCommand) => {
+		const record = failures.get(command.id)
+		return record?.version === command.version ? record : undefined
+	}
 
 	const decodeOperation = Effect.fn('TaskStore.decodeOperation')(function* (
 		row: OperationRow | undefined,
@@ -232,6 +249,48 @@ const make = Effect.gen(function* () {
 		if (stored === undefined) return yield* OperationNotFound.make({ operation })
 		return stored
 	})
+
+	/** The operation with whether its task holds a worker slot and its latest dispatch failure, for observers. */
+	const inspectOperation = Effect.fn('TaskStore.inspectOperation')(function* (operation: string) {
+		const rows = yield* sql<OperationRow & { reserved: number }>`SELECT
+				task.record AS task_record, command.record AS command_record,
+				EXISTS (SELECT 1 FROM dispatch_leases AS lease WHERE lease.task_id = task.id) AS reserved
+			FROM dispatch_commands AS command JOIN dispatch_tasks AS task ON task.id = command.task_id
+			WHERE command.id = ${operation}`.pipe(storage('inspectOperation'))
+		const row = rows[0]
+		const stored = yield* decodeOperation(row)
+		if (row === undefined || stored === undefined)
+			return yield* OperationNotFound.make({ operation })
+		return {
+			...stored,
+			reserved: row.reserved === 1,
+			failure: recordedFailure(stored.command)?.failure,
+		}
+	})
+
+	/**
+	 * Keeps the latest failed dispatch attempt of a command in memory and notifies observers, unless
+	 * the command has moved past that pending version. Failures with the same code extend the attempt
+	 * count; `changed` reports any different detail.
+	 */
+	const recordFailure = Effect.fn('TaskStore.recordFailure')(function* (
+		command: StoredCommand,
+		input: FailureInput,
+	) {
+		const current = yield* getCommand(command.taskId, command.id)
+		if (current.command.version !== command.version || current.command.delivery._tag !== 'Pending')
+			return undefined
+
+		const at = yield* Clock.currentTimeMillis
+		const previous = recordedFailure(command)
+		const continued = previous !== undefined && previous.failure.code === input.code
+		const failure = { ...input, attempts: continued ? previous.failure.attempts + 1 : 1 }
+		failures.set(command.id, { version: command.version, at, failure })
+		yield* notify(command.taskId, false)
+		return { failure, changed: previous === undefined || !sameFailure(previous.failure, input) }
+	})
+
+	const failureOf = (command: StoredCommand) => Effect.sync(() => recordedFailure(command))
 
 	/** The latest non-interrupt command of the task currently mapped to the review key; closed tasks stay mapped. */
 	const current = Effect.fn('TaskStore.current')(function* (reviewKey: string) {
@@ -325,6 +384,7 @@ const make = Effect.gen(function* () {
 		yield* sql`UPDATE dispatch_commands SET version = ${command.version},delivery = ${command.delivery._tag},record = ${JSON.stringify(command)} WHERE id = ${command.id}`.pipe(
 			storage('writeCommand'),
 		)
+		failures.delete(command.id)
 	})
 
 	const insertCommand = Effect.fn('TaskStore.insertCommand')(function* (command: StoredCommand) {
@@ -579,6 +639,9 @@ const make = Effect.gen(function* () {
 		getTask,
 		getCommand,
 		getOperation,
+		inspectOperation,
+		recordFailure,
+		failureOf,
 		current,
 		findAction,
 		checkAnchor,

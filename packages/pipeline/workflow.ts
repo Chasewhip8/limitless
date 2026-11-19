@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { NativeResult } from './worker/schema'
+import { NativeResult, WorkerErrorCode, WorkerFailureReason, WorkerStage } from './worker/schema'
 
 export const nativeEvaluationBudgetMs = 180_000
 
@@ -44,10 +44,32 @@ export type InterruptReceipt = typeof InterruptReceipt.Type
 
 export const NativeSession = Schema.Struct({ server: Schema.String, id: Schema.String })
 
+export const DispatchFailure = Schema.Struct({
+	code: WorkerErrorCode,
+	message: Schema.String,
+	stage: Schema.optional(WorkerStage),
+	reason: Schema.optional(WorkerFailureReason),
+	status: Schema.optional(Schema.Int),
+	attempts: Schema.Int.annotate({
+		description: 'Consecutive dispatch attempts that failed with this code.',
+	}),
+}).annotate({
+	description:
+		'The latest failed attempt to dispatch a command that has not been sent. Kept in coordinator memory, so a coordinator restart forgets it.',
+})
+export type DispatchFailure = typeof DispatchFailure.Type
+
+const waiting = { lastFailure: Schema.optionalKey(DispatchFailure) }
+
 export const OperationState = Schema.Union([
 	NativeResult,
-	Schema.TaggedStruct('Queued', {}),
-	Schema.TaggedStruct('Preparing', {}),
+	Schema.TaggedStruct('Queued', waiting).annotate({
+		description: 'Not sent, and no worker slot is reserved for it yet.',
+	}),
+	Schema.TaggedStruct('Preparing', waiting).annotate({
+		description:
+			'Not sent; a worker slot is reserved while its session is prepared or the message waits to be sent.',
+	}),
 	Schema.TaggedStruct('DeliveryUnconfirmed', {}),
 	Schema.TaggedStruct('Running', {}),
 	Schema.TaggedStruct('NeedsInput', {

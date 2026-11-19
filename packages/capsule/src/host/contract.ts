@@ -59,13 +59,28 @@ export const FailureCode = Schema.Literals([
 ])
 export type FailureCode = typeof FailureCode.Type
 
+// A separate error type rather than another `rejected` code: OpenCode validates declared error data,
+// so a new code would be a decoding defect for older coordinators, while an unknown type stays
+// retryable. The same applies to a new `reason`; declare another error type instead.
+export const PreparationFailure = Schema.Struct({
+	reason: Schema.Literals(['environment_failed', 'bootstrap_failed']),
+}).annotate({
+	description:
+		"The repository's development shell or capsule.json setup hook failed while preparing the Capsule.",
+})
+export type PreparationFailure = typeof PreparationFailure.Type
+
 const errors = { rejected: Schema.Struct({ code: FailureCode }) }
 
 export const CapsuleHostRpc = Rpc.define({
 	id: 'capsule',
 	methods: {
 		info: { input: Schema.Struct({}), output: HostInfo, errors },
-		prepareSession: { input: PrepareSession, output: PreparedSession, errors },
+		prepareSession: {
+			input: PrepareSession,
+			output: PreparedSession,
+			errors: { ...errors, preparation_failed: PreparationFailure },
+		},
 		getSession: { input: SessionReference, output: SessionPlacement, errors },
 	},
 	events: {},

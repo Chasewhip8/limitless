@@ -291,7 +291,7 @@ test('a command that cannot be placed before the queue timeout is rejected witho
 	}
 })
 
-test('preparation failures reject the command; transient outages leave it pending', async () => {
+test('permanent preparation errors reject the command; transient outages leave it pending', async () => {
 	const { runtime, control } = coordinator()
 	try {
 		await runtime.runPromise(
@@ -312,6 +312,141 @@ test('preparation failures reject the command; transient outages leave it pendin
 					_tag: 'Rejected',
 					reason: { code: 'preparation_failed', message: 'Invalid source' },
 				})
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('a failing development shell is retried a few spaced times, then rejected and its slot freed', async () => {
+	const { runtime, calls, control } = coordinator({ queueTimeoutMs: 3_600_000 })
+	const shellFailed = WorkerError.make({
+		code: 'preparation_failed',
+		message: 'The shell failed to load.',
+		stage: 'prepare_session',
+		reason: 'environment_failed',
+	})
+	const prepares = () => calls.filter((call) => call.operation === 'prepareSession').length
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const store = yield* TaskStore
+				const scheduler = yield* Scheduler
+				const { operation } = yield* tasks.review(review())
+				control.prepareError = shellFailed
+				yield* scheduler.tick()
+				yield* scheduler.tick()
+				expect(prepares()).toBe(1)
+				expect((yield* tasks.get(operation)).state).toEqual({
+					_tag: 'Preparing',
+					lastFailure: {
+						code: 'preparation_failed',
+						message: 'The shell failed to load.',
+						stage: 'prepare_session',
+						reason: 'environment_failed',
+						attempts: 1,
+					},
+				})
+
+				// Another kind of failure in between starts the count again.
+				yield* TestClock.adjust('1 minute')
+				control.prepareError = WorkerError.make({ code: 'unavailable', message: 'Busy' })
+				yield* scheduler.tick()
+				control.prepareError = shellFailed
+				yield* scheduler.tick()
+				yield* TestClock.adjust('1 minute')
+				yield* scheduler.tick()
+				expect(prepares()).toBe(4)
+				expect((yield* store.getOperation(operation)).command.delivery._tag).toBe('Pending')
+
+				yield* TestClock.adjust('1 minute')
+				yield* scheduler.tick()
+				expect(prepares()).toBe(5)
+				const { command, task } = yield* store.getOperation(operation)
+				expect(command.delivery).toMatchObject({
+					_tag: 'Rejected',
+					reason: {
+						code: 'preparation_failed',
+						message: expect.stringContaining('failed 3 consecutive times'),
+					},
+				})
+				expect(yield* store.hasLease(task.id)).toBe(false)
+			}),
+		)
+		expect(calls.some((call) => call.operation === 'admit')).toBe(false)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('consecutive preparation failures of either kind reject the review and pass its slot to a waiting continuation', async () => {
+	const { runtime, calls, control } = coordinator({ queueTimeoutMs: 3_600_000 })
+	const preparationFailed = (reason: 'environment_failed' | 'bootstrap_failed') =>
+		WorkerError.make({ code: 'preparation_failed', message: 'Preparation failed.', reason })
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const store = yield* TaskStore
+				const scheduler = yield* Scheduler
+				const reviewed = yield* tasks.review(review(1))
+				yield* scheduler.tick()
+				settleNative(control)
+				yield* scheduler.tick()
+
+				yield* TestClock.adjust(1)
+				const failing = yield* tasks.review(review(2))
+				control.prepareError = preparationFailed('environment_failed')
+				yield* scheduler.tick()
+				const continued = yield* tasks.continue(reviewed.operation)
+				for (const reason of ['bootstrap_failed', 'environment_failed'] as const) {
+					yield* TestClock.adjust('1 minute')
+					control.prepareError = preparationFailed(reason)
+					yield* scheduler.tick()
+					expect((yield* tasks.get(continued.operation)).state._tag).toBe('Queued')
+				}
+
+				const rejected = yield* store.getOperation(failing.operation)
+				expect(rejected.command.delivery).toMatchObject({
+					_tag: 'Rejected',
+					reason: { code: 'preparation_failed' },
+				})
+				yield* scheduler.tick()
+				expect((yield* store.getOperation(continued.operation)).command.delivery._tag).toBe(
+					'Acknowledged',
+				)
+				const admitted = calls.filter((call) => call.operation === 'admit')
+				expect(admitted.map((call) => call.messageId)).not.toContain(rejected.command.messageId)
+			}),
+		)
+	} finally {
+		await runtime.dispose()
+	}
+})
+
+test('an operation without a reserved slot is queued and shows why its dispatch failed', async () => {
+	const { runtime, control } = coordinator()
+	control.unreachable = true
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const tasks = yield* Tasks
+				const scheduler = yield* Scheduler
+				const initial = yield* tasks.review(review())
+				yield* scheduler.tick()
+				expect((yield* tasks.get(initial.operation)).state).toMatchObject({
+					_tag: 'Queued',
+					lastFailure: { code: 'unavailable', message: 'Synthetic partition', attempts: 1 },
+				})
+
+				control.unreachable = false
+				yield* scheduler.tick()
+				settleNative(control)
+				yield* scheduler.tick()
+				const continued = yield* tasks.continue(initial.operation)
+				expect((yield* tasks.get(continued.operation)).state).toEqual({ _tag: 'Queued' })
 			}),
 		)
 	} finally {

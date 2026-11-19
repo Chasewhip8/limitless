@@ -5,7 +5,11 @@ import { describe, expect, it } from 'vitest'
 import { makePlugin } from '../src/host'
 import type { PrepareSession } from '../src/host/contract'
 import { resolveSettings } from '../src/host/roots'
-import { make as makeHost } from '../src/host/service'
+import {
+	type HostPreparationFailed,
+	type HostRejected,
+	make as makeHost,
+} from '../src/host/service'
 import { makeNativeHost, makeRoots } from './fixtures/native-host'
 
 const run = <A, E>(effect: Effect.Effect<A, E, Scope.Scope | FileSystem.FileSystem | Path.Path>) =>
@@ -52,8 +56,8 @@ const pluginActivations = (plugin: Plugin.Plugin) => {
 	return { registrations, activate }
 }
 
-const rejection = <A>(effect: Effect.Effect<A, { readonly code: string }>) =>
-	Effect.map(Effect.flip(effect), ({ code }) => code)
+const rejection = <A>(effect: Effect.Effect<A, HostRejected | HostPreparationFailed>) =>
+	Effect.map(Effect.flip(effect), (error) => ('code' in error ? error.code : error._tag))
 
 describe('Capsule host settings', () => {
 	it('fingerprints canonical storage roots and keeps the control directory separate', () =>
@@ -296,6 +300,19 @@ describe('Capsule host sessions', () => {
 			}),
 		))
 
+	it('reports a failing development shell as a preparation failure that a retry can recover', () =>
+		run(
+			Effect.gen(function* () {
+				const { host, request, inject } = yield* setup
+				inject('capsule.environment')
+				expect(yield* Effect.flip(host.prepareSession(request))).toMatchObject({
+					_tag: 'CapsuleHostPreparationFailed',
+					reason: 'environment_failed',
+				})
+				expect(yield* host.prepareSession(request)).toMatchObject({ sessionId })
+			}),
+		))
+
 	it('confirms the session OpenCode returns instead of trusting it', () =>
 		run(
 			Effect.gen(function* () {
@@ -321,7 +338,7 @@ describe('Capsule host RPC', () => {
 	it('registers only at the control location and declares rejections', () =>
 		run(
 			Effect.gen(function* () {
-				const { host, reference, settings } = yield* setup
+				const { host, request, reference, settings, inject } = yield* setup
 				const { registrations, activate } = pluginActivations(
 					makePlugin(host, settings.controlDirectory),
 				)
@@ -340,6 +357,15 @@ describe('Capsule host RPC', () => {
 					type: 'rejected',
 					message: 'The session does not exist.',
 					data: { code: 'not_ready' },
+				})
+
+				inject('capsule.environment')
+				const preparation = registration?.handlers.prepareSession?.(request, { error })
+				if (!preparation) throw new Error('Expected a prepareSession handler')
+				expect(yield* Effect.flip(preparation)).toEqual({
+					type: 'preparation_failed',
+					message: 'The project development environment failed to load (exit 1).',
+					data: { reason: 'environment_failed' },
 				})
 			}),
 		))

@@ -7,6 +7,7 @@ import {
 	Layer,
 	Option,
 	Queue,
+	Result,
 	Schema,
 	Semaphore,
 	Stream,
@@ -37,11 +38,32 @@ function acceptsMessages(placement: SessionPlacement): boolean {
 	return placement.capsulePhase === 'ready' && placement.workspaceState === 'bound'
 }
 
-function rejection(error: WorkerError, step: PendingCommand['delivery']['step']): Rejection {
+/** A failing development shell or setup hook gets a few spaced retries for transient fetch failures. */
+const preparationAttempts = 3
+const preparationRetryDelayMs = 60_000
+
+function rejection(
+	error: WorkerError,
+	step: PendingCommand['delivery']['step'],
+	attempts: number,
+): Rejection {
 	if (error.code === 'incompatible') return { code: 'worker_incompatible', message: error.message }
+	if (error.code === 'preparation_failed')
+		return {
+			code: 'preparation_failed',
+			message: `${error.message} Preparation failed ${attempts} consecutive times; restart the review explicitly after the fix.`,
+		}
 	if (step === 'session') return { code: 'preparation_failed', message: error.message }
 	return { code: 'session_unavailable', message: error.message }
 }
+
+const failureInput = ({ code, message, stage, reason, status }: WorkerError) => ({
+	code,
+	message,
+	stage,
+	reason,
+	status,
+})
 
 const make = Effect.gen(function* () {
 	const config = yield* PipelineConfig
@@ -52,8 +74,48 @@ const make = Effect.gen(function* () {
 
 	const apply = (command: StoredCommand, event: CommandEvent) =>
 		store.apply(command.taskId, command.id, command.version, event)
-	const reject = (command: StoredCommand, reason: Rejection) =>
-		apply(command, { _tag: 'Rejected', reason })
+	const reject = Effect.fn('Scheduler.reject')(function* (
+		command: StoredCommand,
+		reason: Rejection,
+	) {
+		const rejected = yield* apply(command, { _tag: 'Rejected', reason })
+		yield* Effect.logWarning('Pipeline command rejected', {
+			operation: command.id,
+			task: command.taskId,
+			code: reason.code,
+		})
+		return rejected
+	})
+
+	/** Records the failure for observers and logs it when its details change, not on every retry. */
+	const noteFailure = Effect.fn('Scheduler.noteFailure')(function* (
+		command: PendingCommand,
+		error: WorkerError,
+	) {
+		const recorded = yield* store.recordFailure(command, failureInput(error))
+		if (recorded === undefined) return undefined
+		if (recorded.changed)
+			yield* Effect.logWarning('Pipeline dispatch failed', {
+				operation: command.id,
+				task: command.taskId,
+				step: command.delivery.step,
+				code: error.code,
+				stage: error.stage,
+				reason: error.reason,
+				status: error.status,
+			})
+		return recorded.failure
+	})
+
+	const awaitingRetry = Effect.fn('Scheduler.awaitingRetry')(function* (
+		command: PendingCommand,
+		now: number,
+	) {
+		const recorded = yield* store.failureOf(command)
+		return (
+			recorded?.failure.code === 'preparation_failed' && now < recorded.at + preparationRetryDelayMs
+		)
+	})
 
 	const requirePinnedWorker = Effect.fn('Scheduler.requirePinnedWorker')(function* (
 		assignment: Assignment,
@@ -67,20 +129,26 @@ const make = Effect.gen(function* () {
 		return worker
 	})
 
+	/** An unready worker is reported, never a rejection: another worker may still take the command. */
 	const claimNewPlacement = Effect.fn('Scheduler.claimNewPlacement')(function* (
 		task: Task,
 		command: PendingCommand,
 	) {
+		let unready: WorkerError | undefined
 		for (const worker of config.workers) {
 			if (!(yield* store.hasCapacity(worker))) continue
-			const host = yield* remote.ready(worker).pipe(Effect.option)
-			if (Option.isNone(host)) continue
-			const assignment = newAssignment(worker, host.value, task.id)
+			const host = yield* remote.ready(worker).pipe(Effect.result)
+			if (Result.isFailure(host)) {
+				unready = host.failure
+				continue
+			}
+			const assignment = newAssignment(worker, host.success, task.id)
 			const claimed = yield* store
 				.claim(task.id, command.id, command.version, worker, assignment)
 				.pipe(Effect.option)
 			if (Option.isSome(claimed)) return { task: claimed.value.task, worker, assignment }
 		}
+		if (unready !== undefined) yield* noteFailure(command, unready)
 		return undefined
 	}, placementLock.withPermit)
 
@@ -152,6 +220,7 @@ const make = Effect.gen(function* () {
 			})
 			return
 		}
+		if (yield* awaitingRetry(command, now)) return
 
 		const placed = yield* place(task, command)
 		if (placed === undefined) return
@@ -163,19 +232,20 @@ const make = Effect.gen(function* () {
 		}
 	})
 
-	const rejectPending = Effect.fn('Scheduler.rejectPending')(function* (
+	/** Outages stay pending until the queue timeout; preparation failures until their retries run out. */
+	const dispatchFailed = Effect.fn('Scheduler.dispatchFailed')(function* (
 		command: PendingCommand,
 		error: WorkerError,
 	) {
-		if (error.code === 'unavailable') return
-		const current = yield* store.getCommand(command.taskId, command.id)
-		if (current.command.delivery._tag !== 'Pending') return
-		yield* reject(current.command, rejection(error, current.command.delivery.step))
+		const failure = yield* noteFailure(command, error)
+		if (failure === undefined || error.code === 'unavailable') return
+		if (error.code === 'preparation_failed' && failure.attempts < preparationAttempts) return
+		yield* reject(command, rejection(error, command.delivery.step, failure.attempts))
 	})
 
 	const dispatch = Effect.fn('Scheduler.dispatch')(function* (task: Task, command: PendingCommand) {
 		yield* advance(task, command).pipe(
-			Effect.catchTag('WorkerError', (error) => rejectPending(command, error)),
+			Effect.catchTag('WorkerError', (error) => dispatchFailed(command, error)),
 		)
 	})
 

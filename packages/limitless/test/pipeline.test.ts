@@ -555,6 +555,48 @@ describe('Pipeline wait', () => {
 		expect(progress).toEqual(['Queued', 'Running', 'Pending', 'Completed'])
 	})
 
+	test('progress reports why an unsent operation is still waiting, once per change', async () => {
+		const remote = await fixture()
+		const { tools } = await caller(remote.url)
+		const operation = remote.create(pr, { _tag: 'Queued' }).operation
+		const transient = (status: number) => ({
+			code: 'unavailable' as const,
+			message: 'OpenCode answered with a transient HTTP status; this does not prove it failed',
+			stage: 'prepare_session' as const,
+			reason: 'http_status' as const,
+			status,
+			attempts: 1,
+		})
+		remote.state.onEvents = (response) => {
+			for (const state of [
+				{ _tag: 'Preparing' as const, lastFailure: transient(503) },
+				{ _tag: 'Preparing' as const, lastFailure: transient(503) },
+				{ _tag: 'Preparing' as const, lastFailure: transient(429) },
+				completed('Done'),
+			]) {
+				remote.update(operation, state)
+				response.write(remote.frame(operation))
+			}
+		}
+		const progress: Array<Record<string, unknown>> = []
+		await Effect.runPromise(
+			tools.pipeline_wait.execute(
+				{ operation },
+				context('call_wait', 'limitless', (update) =>
+					Effect.sync(() => {
+						progress.push(update)
+					}),
+				),
+			),
+		)
+		expect(progress).toEqual([
+			{ operation, state: 'Queued' },
+			{ operation, state: 'Preparing', lastFailure: transient(503) },
+			{ operation, state: 'Preparing', lastFailure: transient(429) },
+			{ operation, state: 'Completed' },
+		])
+	})
+
 	test('NDJSON frames decode across arbitrary chunk boundaries and heartbeats', async () => {
 		const remote = await fixture()
 		const { client } = await caller(remote.url)

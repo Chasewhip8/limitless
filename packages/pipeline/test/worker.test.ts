@@ -563,6 +563,23 @@ test('declared Capsule rejections and cold registration translate without implyi
 	expect(f.calls.every((call) => rpcMethod(call) === 'getSession')).toBe(true)
 })
 
+test('a failed development shell or setup hook is a preparation failure described without upstream text', async () => {
+	const f = fixture()
+	const upstream = 'shellHook printed ghp_secret'
+	for (const reason of ['environment_failed', 'bootstrap_failed'] as const) {
+		f.state.rpcFailures.prepareSession = {
+			type: 'preparation_failed',
+			message: upstream,
+			data: { reason },
+		}
+		const failure = await f
+			.run((service) => service.prepareSession(worker, identity, { source, pr }))
+			.catch((error: unknown) => error)
+		expect(failure).toMatchObject({ code: 'preparation_failed', reason, stage: 'prepare_session' })
+		expect(JSON.stringify(failure)).not.toContain('ghp_secret')
+	}
+})
+
 test('a lost prompt response is recovered by reading OpenCode, never by another prompt', async () => {
 	const f = fixture()
 	f.state.override = (url) => {
