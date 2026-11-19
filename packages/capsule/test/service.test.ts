@@ -49,6 +49,7 @@ const makeFixture = Effect.fn('makeFixture')(function* () {
 	const checkout = path.join(base, 'checkout')
 	const control = path.join(checkout, '.capsule-test')
 	yield* fs.makeDirectory(control, { recursive: true })
+	yield* fs.writeFileString(path.join(checkout, 'flake.nix'), '{ outputs = _: { }; }\n')
 	yield* fs.writeFileString(path.join(control, 'nix'), fakeNix(control))
 	yield* fs.chmod(path.join(control, 'nix'), 0o755)
 
@@ -261,6 +262,43 @@ describe.skipIf(runtimeConfig === undefined)(
 						yield* fs.writeFileString(path.join(control, 'fail-nix'), '')
 						expect(yield* capsule.stop(spec.id)).toMatchObject({ phase: 'stopped' })
 						expect(yield* capsule.purge(spec.id)).toMatchObject({ phase: 'purged' })
+					}),
+				),
+		)
+
+		it(
+			'runs a checkout without a flake with the base tools and evaluates a flake added later',
+			{ timeout: 60_000 },
+			() =>
+				run(
+					Effect.gen(function* () {
+						const { fs, path, checkout, control, capsule, spec, lifecycle } = yield* makeFixture()
+						const flake = path.join(checkout, 'flake.nix')
+						yield* fs.remove(flake)
+						yield* fs.writeFileString(path.join(control, 'fail-nix'), '')
+
+						const setup = ['/bin/sh', '-c', 'echo setup-without-shell >> .capsule-test/lifecycle']
+						const flakeless = { ...spec, project: { setup } }
+						expect(yield* capsule.prepare(flakeless)).toMatchObject({ phase: 'ready' })
+						expect(yield* lifecycle).toEqual(['setup-without-shell'])
+						const spawner = yield* capsule.connect(spec.id)
+						const projectVar = 'printenv PROJECT_VAR || echo unset'
+						expect(yield* output(spawner, projectVar)).toBe('unset\n')
+
+						const named = { ...spec, id: 'beta', project: { devShell: 'default' } }
+						expect(yield* Effect.flip(capsule.prepare(named))).toMatchObject({
+							code: 'environment_failed',
+						})
+						yield* fs.symlink(path.join(checkout, 'missing.nix'), flake)
+						expect(yield* Effect.flip(capsule.prepare({ ...spec, id: 'gamma' }))).toMatchObject({
+							code: 'environment_failed',
+						})
+						yield* fs.remove(flake)
+
+						yield* fs.writeFileString(flake, '{ outputs = _: { }; }\n')
+						yield* fs.remove(path.join(control, 'fail-nix'))
+						yield* capsule.prepare(flakeless, true)
+						expect(yield* output(spawner, projectVar)).toBe('initial-project-secret\n')
 					}),
 				),
 		)

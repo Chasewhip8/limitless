@@ -170,9 +170,12 @@ belonging to another ID, or control paths containing symlinks or hard links.
 ## Repository contract
 
 Capsule evaluates `<checkout>#<devShell>` with `nix develop
---no-update-lock-file`, so the checkout needs a flake with a committed, complete
+--no-update-lock-file`, so a checkout with a flake needs a committed, complete
 `flake.lock`. In a Git checkout, Nix ignores untracked files, including an
-untracked `flake.nix`.
+untracked `flake.nix`. A checkout without a root `flake.nix` has no development
+shell unless `capsule.json` names one: its hooks and commands run with the base
+tools alone, which include Nix for `nix shell` and `nix run`. Adding a flake takes
+effect like any other [change to the shell](#environment).
 
 An optional `capsule.json` at the checkout root selects the shell and lifecycle
 hooks. Hooks are argument vectors, not shell strings, and run in the checkout
@@ -187,7 +190,8 @@ inside the Capsule environment:
 }
 ```
 
-Every field is optional; `devShell` defaults to `default`. Hooks must be
+Every field is optional; `devShell` defaults to `default` when the checkout has a
+flake, and naming one explicitly requires a flake. Hooks must be
 idempotent because an interrupted phase reruns them. For a managed Capsule,
 `capsule.json` is read from the published clone, never from the remote before
 cloning. Follow the [repository-setup skill](../skills/repository-setup/SKILL.md)

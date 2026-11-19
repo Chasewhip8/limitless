@@ -97,9 +97,25 @@ export const makeExecution = Effect.fn('CapsuleExecution.make')(function* (
 			Effect.provideService(Path.Path, path),
 		)
 	})
-	const project = Effect.fn('CapsuleExecution.project')(function* (spec: CapsuleSpec) {
+	// lstat, so a dangling flake.nix symlink still reaches Nix and fails instead of hiding the flake.
+	const hasFlake = (directory: string) =>
+		fs.lstat(path.join(directory, 'flake.nix')).pipe(
+			Effect.as(true),
+			Effect.catchIf(
+				(error) => error.reason._tag === 'NotFound',
+				() => Effect.succeed(false),
+			),
+		)
+
+	const projectEnvironment = Effect.fn('CapsuleExecution.projectEnvironment')(function* (
+		spec: CapsuleSpec,
+	) {
+		if (spec.project.devShell === undefined && !(yield* hasFlake(spec.directory))) return {}
 		const bootstrap = yield* base(spec)
-		const environment = yield* resolveEnvironment(bootstrap, runtime, spec)
+		return yield* resolveEnvironment(bootstrap, runtime, spec)
+	})
+	const project = Effect.fn('CapsuleExecution.project')(function* (spec: CapsuleSpec) {
+		const environment = yield* projectEnvironment(spec)
 		const spawner = yield* base(spec, environment)
 		return credentials.decorate(spawner, environment)
 	})
