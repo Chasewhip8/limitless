@@ -442,7 +442,7 @@ Agent Markdown model fields take precedence over settings in the same configurat
 directory, so `opencode.settings.agents.limitless.model` does not override the packaged default.
 
 `review` is a second primary agent and uses `openai/gpt-6.2-astra#xhigh`.
-Oracle uses `openai/gpt-6.2-astra#max`; Worker uses `openai/gpt-6.2-sol#max`; Research uses
+Oracle uses `openai/gpt-6.2-astra#max`; Worker uses `openai/gpt-6.2-astra#xhigh`; Research uses
 `openai/gpt-6.2-sol#high`. Subagents keep the processing tier of their configured model.
 
 OpenCode 2.3.2 allows GPT-6.2 with ChatGPT sign-in, but its bundled catalog still lacks the models.
@@ -627,8 +627,8 @@ deny subagent calls:
 ```text
 Limitless (Astra 6.2 xhigh)       Review (Astra 6.2 xhigh)
 ├── Research (Sol 6.2 high)       └── Research (Sol 6.2 high)
-├── Oracle (Astra 6.2 xhigh)
-└── Worker (Opus 5.5 high)
+├── Oracle (Astra 6.2 max)
+└── Worker (Astra 6.2 xhigh)
 ```
 
 Other subagent calls from Limitless ask for approval. Review denies delegation

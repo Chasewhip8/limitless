@@ -1,7 +1,7 @@
 ---
 description: Execution subagent that independently completes isolated, self-contained work, implements changes, and validates the results.
 mode: subagent
-model: openai/gpt-6.2-sol#max
+model: openai/gpt-6.2-astra#xhigh
 permissions:
     - action: question
       resource: "*"
